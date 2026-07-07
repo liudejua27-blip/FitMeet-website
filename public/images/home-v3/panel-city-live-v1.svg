@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" role="img" aria-label="city social live panel">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#230804"/><stop offset=".44" stop-color="#f25d1e"/><stop offset="1" stop-color="#080202"/></linearGradient>
+    <radialGradient id="light" cx="68%" cy="30%" r="52%"><stop offset="0" stop-color="#ff9b32" stop-opacity=".8"/><stop offset=".52" stop-color="#c41308" stop-opacity=".38"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".78" numOctaves="2"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .08"/></feComponentTransfer></filter>
+  </defs>
+  <rect width="900" height="620" fill="url(#bg)"/><rect width="900" height="620" fill="url(#light)"/><rect y="390" width="900" height="230" fill="#050202" opacity=".6"/><rect width="900" height="620" filter="url(#grain)"/>
+  <g opacity=".86"><rect x="120" y="145" width="130" height="260" fill="#050202"/><rect x="330" y="82" width="190" height="330" fill="#050202"/><rect x="610" y="175" width="140" height="236" fill="#050202"/></g>
+  <path d="M-20 455 C210 378 430 370 930 280" stroke="#ffe8d4" stroke-width="6" opacity=".45" fill="none"/><path d="M70 545 C330 498 560 484 920 430" stroke="#ff3c1c" stroke-width="9" opacity=".72" fill="none"/>
+  <g fill="#020202" stroke="#020202" stroke-linecap="round" stroke-width="26"><g transform="translate(350 330) scale(.92)"><circle r="24"/><path d="M-20 38 C-4 18 22 20 40 46 L52 132 C30 148 -4 150 -32 136 Z" fill="#020202"/><path d="M-22 136 L-72 252 M30 132 L88 252 M-20 64 L-92 122 M40 64 L122 100" fill="none"/><path d="M-12 48 C14 40 38 46 54 62" stroke="#fff0dc" stroke-width="7" fill="none"/></g><g transform="translate(505 315) scale(.78)"><circle r="24"/><path d="M-20 38 C-4 18 22 20 40 46 L52 132 C30 148 -4 150 -32 136 Z" fill="#020202"/><path d="M-22 136 L-72 252 M30 132 L88 252 M-20 64 L-92 122 M40 64 L122 100" fill="none"/></g></g>
+</svg>

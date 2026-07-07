@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" role="img" aria-label="court live panel">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a0302"/><stop offset=".48" stop-color="#f12c12"/><stop offset="1" stop-color="#050202"/></linearGradient>
+    <radialGradient id="light" cx="62%" cy="34%" r="56%"><stop offset="0" stop-color="#ff7a2a" stop-opacity=".9"/><stop offset=".5" stop-color="#b50c06" stop-opacity=".45"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="2"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .08"/></feComponentTransfer></filter>
+  </defs>
+  <rect width="900" height="620" fill="url(#bg)"/><rect width="900" height="620" fill="url(#light)"/><rect y="378" width="900" height="242" fill="#070202" opacity=".62"/><rect width="900" height="620" filter="url(#grain)"/>
+  <g stroke="#ffe0c4" fill="none" opacity=".55"><path d="M-20 445 C190 382 430 360 940 250" stroke-width="8"/><path d="M80 545 C310 500 540 490 910 438" stroke-width="4"/><path d="M80 210 H830" stroke="#ff8a20" stroke-width="4" opacity=".45"/><path d="M120 300 H790" stroke="#ff8a20" stroke-width="3" opacity=".35"/></g>
+  <g fill="#020202" stroke="#020202" stroke-linecap="round" stroke-width="30"><g transform="translate(330 255) scale(1.08)"><circle r="25"/><path d="M-22 40 C-4 18 24 20 42 46 L56 138 C32 154 -6 156 -36 140 Z" fill="#020202"/><path d="M-25 140 L-82 276 M32 138 L100 274 M-22 66 L-110 126 M42 66 L135 104" fill="none"/><path d="M-12 48 C18 40 42 45 58 62" stroke="#fff0dc" stroke-width="7" fill="none"/></g><g transform="translate(585 300) scale(.92)"><circle r="24"/><path d="M-20 38 C-4 18 22 20 40 46 L52 132 C30 148 -4 150 -32 136 Z" fill="#020202"/><path d="M-22 136 L-72 252 M30 132 L88 252 M-20 64 L-92 122 M40 64 L122 100" fill="none"/><path d="M-12 48 C14 40 38 46 54 62" stroke="#ff3a19" stroke-width="7" fill="none"/></g></g>
+</svg>

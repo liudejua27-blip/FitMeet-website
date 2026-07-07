@@ -1,0 +1,391 @@
+.page {
+  --fitmeet-void: #050608;
+  --fitmeet-cream: #f4f0e6;
+  --fitmeet-muted: #b9b2a4;
+  --fitmeet-route-cyan: #28f6ff;
+  background: #050608;
+  color: var(--fitmeet-cream);
+}
+
+.surface {
+  --scene-color: #a8ff3e;
+  --cursor-x: 62vw;
+  --cursor-y: 25vh;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at var(--cursor-x) var(--cursor-y), color-mix(in srgb, var(--scene-color) 14%, transparent), transparent 31rem),
+    radial-gradient(circle at 16% 20%, rgba(40, 246, 255, 0.1), transparent 30rem),
+    linear-gradient(180deg, #050608 0%, #070c0d 48%, #050608 100%);
+}
+
+.surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -4;
+  background:
+    linear-gradient(90deg, rgba(244, 240, 230, 0.042) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(244, 240, 230, 0.034) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(180deg, black 0 66%, transparent 100%);
+}
+
+.noise,
+.cursorGlow,
+.cityLayer {
+  pointer-events: none;
+  position: absolute;
+}
+
+.noise {
+  inset: 0;
+  z-index: -1;
+  opacity: 0.2;
+  background-image: radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.075) 0 1px, transparent 1px);
+  background-size: 18px 18px;
+  mix-blend-mode: screen;
+}
+
+.cursorGlow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(circle at var(--cursor-x) var(--cursor-y), color-mix(in srgb, var(--scene-color) 13%, transparent), transparent 32rem);
+}
+
+.cityLayer {
+  inset: auto 0 0;
+  z-index: -3;
+  height: 44vh;
+  opacity: 0.32;
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(5, 6, 8, 0.9) 74%),
+    repeating-linear-gradient(90deg, transparent 0 28px, rgba(244, 240, 230, 0.14) 28px 30px, transparent 30px 82px);
+  clip-path: polygon(0 72%, 8% 48%, 18% 65%, 28% 32%, 40% 62%, 55% 22%, 67% 56%, 79% 36%, 92% 60%, 100% 18%, 100% 100%, 0 100%);
+}
+
+.progressBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--scene-color), var(--fitmeet-route-cyan), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.header {
+  position: fixed;
+  left: clamp(1rem, 3vw, 3.5rem);
+  right: clamp(1rem, 3vw, 3.5rem);
+  top: 1.15rem;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.66rem 0.76rem;
+  border: 1px solid rgba(244, 240, 230, 0.12);
+  border-radius: 999px;
+  background: rgba(5, 6, 8, 0.72);
+  box-shadow: 0 28px 86px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(18px);
+}
+
+.brand,
+.nav,
+.headerCta { display: inline-flex; align-items: center; }
+.brand { gap: 0.72rem; color: var(--fitmeet-cream); text-decoration: none; font: 950 1.08rem/1 var(--font-body); letter-spacing: -0.04em; }
+.brand img { width: 2.25rem; height: 2.25rem; border-radius: 0.72rem; object-fit: cover; box-shadow: 0 0 30px rgba(40, 246, 255, 0.18); }
+.nav { justify-content: center; gap: clamp(1rem, 2.4vw, 2.35rem); }
+.nav a { color: rgba(244, 240, 230, 0.66); text-decoration: none; font: 820 0.9rem/1 var(--font-body); }
+.nav a:hover { color: var(--fitmeet-cream); }
+.headerCta { justify-self: end; min-height: 2.6rem; padding: 0 1.08rem; border-radius: 999px; color: #050608; background: var(--scene-color); text-decoration: none; font: 950 0.88rem/1 var(--font-body); }
+
+.hero,
+.sceneIndexSection,
+.activeSceneSection,
+.boundaryBand,
+.protocolSection,
+.receiptSection,
+.businessBridge {
+  position: relative;
+  z-index: 2;
+  width: min(100% - 2rem, 1520px);
+  margin: 0 auto;
+}
+
+.hero { min-height: 100svh; display: grid; align-content: end; padding: 8.8rem 0 4rem; }
+.kicker,
+.sectionHead span,
+.boundaryBand > span,
+.businessBridge > span { color: var(--scene-color); font: 950 clamp(0.76rem, 0.88vw, 0.9rem)/1 var(--font-utility); letter-spacing: 0.1em; }
+.hero h1 { max-width: 11ch; margin: 1.35rem 0 0; color: var(--fitmeet-cream); font-family: var(--font-display); font-size: clamp(4.8rem, 11.5vw, 14rem); font-weight: 1000; line-height: 0.84; letter-spacing: -0.115em; }
+.hero h1 span { display: block; }
+.hero h1 span:last-child { color: color-mix(in srgb, var(--scene-color) 74%, var(--fitmeet-cream)); }
+.heroText { max-width: 1060px; margin: 2rem 0 0; color: rgba(244, 240, 230, 0.72); font: 620 clamp(1.08rem, 1.55vw, 1.48rem)/1.78 var(--font-body); }
+
+.routeStage { position: relative; height: clamp(14rem, 28vw, 25rem); margin-top: 3.2rem; border-top: 1px solid rgba(244, 240, 230, 0.14); border-bottom: 1px solid rgba(244, 240, 230, 0.14); overflow: hidden; }
+.routeStage svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.routeStage path { fill: none; stroke: var(--fitmeet-route-cyan); stroke-width: 8; stroke-linecap: round; filter: drop-shadow(0 0 16px rgba(40, 246, 255, 0.78)); }
+.routeStage .secondaryPath { stroke: rgba(244, 240, 230, 0.18); stroke-width: 2; filter: none; }
+.routeStage circle:not(.boundaryRing) { fill: var(--scene-color); filter: drop-shadow(0 0 16px var(--scene-color)); }
+.boundaryRing { fill: none; stroke: color-mix(in srgb, var(--scene-color) 38%, transparent); stroke-width: 2; }
+.stageLabels { position: absolute; inset: auto 0 1rem; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; color: rgba(244, 240, 230, 0.62); font: 850 clamp(0.8rem, 1vw, 1rem)/1 var(--font-body); }
+
+.sceneIndexSection,
+.activeSceneSection,
+.protocolSection,
+.receiptSection,
+.businessBridge { padding: 8rem 0; }
+.sectionHead h2,
+.activeSceneSection h2,
+.businessBridge h2 { max-width: 12ch; margin: 1.2rem 0 0; color: var(--fitmeet-cream); font-family: var(--font-display); font-size: clamp(3.6rem, 8vw, 10rem); font-weight: 1000; line-height: 0.9; letter-spacing: -0.1em; }
+
+.sceneRows,
+.signalFlow,
+.protocolRows,
+.receiptRows { margin-top: 3.5rem; border-top: 1px solid rgba(244, 240, 230, 0.14); }
+.sceneRows button,
+.signalFlow p,
+.protocolRows div,
+.receiptRows div { width: 100%; display: grid; grid-template-columns: 5.4rem 0.7fr 1.4fr 0.7fr; gap: 1.5rem; align-items: center; min-height: 10rem; padding: 1.5rem 0; border: 0; border-bottom: 1px solid rgba(244, 240, 230, 0.14); color: var(--fitmeet-cream); background: transparent; text-align: left; cursor: pointer; }
+.sceneRows button:hover,
+.activeScene { background: linear-gradient(90deg, color-mix(in srgb, var(--lane-color) 10%, transparent), transparent 70%) !important; }
+.sceneRows span,
+.protocolRows span,
+.receiptRows span { color: var(--scene-color); font: 1000 clamp(2.1rem, 4.4vw, 5rem)/0.9 var(--font-display); letter-spacing: -0.08em; }
+.sceneRows strong,
+.signalFlow strong,
+.protocolRows strong,
+.receiptRows strong { font: 950 clamp(1.55rem, 2.8vw, 3.4rem)/1.05 var(--font-display); letter-spacing: -0.075em; }
+.sceneRows em,
+.sceneRows i,
+.signalFlow span,
+.protocolRows p,
+.receiptRows p { margin: 0; color: rgba(244, 240, 230, 0.66); font: 570 clamp(0.98rem, 1.2vw, 1.16rem)/1.72 var(--font-body); font-style: normal; }
+.sceneRows i,
+.signalFlow span { color: color-mix(in srgb, var(--scene-color) 76%, var(--fitmeet-cream)); }
+
+.activeLead,
+.receiptNote,
+.businessBridge p { max-width: 980px; color: rgba(244, 240, 230, 0.72); }
+.activeLead { margin: 2rem 0 0; font: 850 clamp(1.35rem, 2.8vw, 3.2rem)/1.2 var(--font-display); letter-spacing: -0.06em; }
+.signalFlow p { grid-template-columns: 0.55fr 1.45fr; cursor: default; }
+.signalFlow strong { grid-column: 2; }
+
+.boundaryBand { padding: 4.2rem 0; border-top: 1px solid rgba(244, 240, 230, 0.14); border-bottom: 1px solid rgba(244, 240, 230, 0.14); }
+.boundaryBand div { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 2rem; }
+.boundaryBand strong,
+.finalActions a { padding: 0.9rem 1rem; border: 1px solid rgba(244, 240, 230, 0.14); border-radius: 999px; color: var(--fitmeet-cream); background: rgba(244, 240, 230, 0.045); font: 900 0.94rem/1 var(--font-body); text-decoration: none; }
+
+.receiptNote { margin: 3rem 0 0; font: 850 clamp(1.25rem, 2.2vw, 2.7rem)/1.28 var(--font-display); letter-spacing: -0.055em; }
+.businessBridge p { margin: 2rem 0 0; font: 620 clamp(1.08rem, 1.55vw, 1.48rem)/1.78 var(--font-body); }
+.finalActions { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 2.4rem; }
+.finalActions a:first-child { color: #050608; background: var(--scene-color); border-color: transparent; }
+
+@media (max-width: 1100px) {
+  .header { grid-template-columns: auto auto; }
+  .nav { display: none; }
+  .sceneRows button,
+  .protocolRows div,
+  .receiptRows div { grid-template-columns: 4.5rem 1fr; }
+  .sceneRows em,
+  .sceneRows i,
+  .protocolRows p,
+  .receiptRows p { grid-column: 2; }
+}
+
+@media (max-width: 720px) {
+  .header { left: 0.75rem; right: 0.75rem; top: 0.75rem; padding: 0.58rem; }
+  .brand span { display: none; }
+  .brand img { width: 2.15rem; height: 2.15rem; }
+  .headerCta { min-height: 2.35rem; padding: 0 0.88rem; font-size: 0.82rem; }
+  .hero { min-height: 100svh; padding: 7rem 0 3rem; }
+  .hero h1 { font-size: clamp(3.5rem, 16vw, 6.2rem); }
+  .heroText { font-size: 1rem; }
+  .routeStage { height: 13rem; }
+  .stageLabels { grid-template-columns: 1fr 1fr; gap: 0.65rem; font-size: 0.78rem; }
+  .sceneIndexSection,
+  .activeSceneSection,
+  .protocolSection,
+  .receiptSection,
+  .businessBridge { padding: 5rem 0; }
+  .sectionHead h2,
+  .activeSceneSection h2,
+  .businessBridge h2 { font-size: clamp(3rem, 14vw, 5.4rem); }
+  .sceneRows button,
+  .protocolRows div,
+  .receiptRows div { grid-template-columns: 3.5rem 1fr; gap: 1rem; min-height: 8.5rem; }
+  .sceneRows span,
+  .protocolRows span,
+  .receiptRows span { font-size: 3rem; }
+  .signalFlow p { grid-template-columns: 1fr; min-height: auto; }
+  .signalFlow strong { grid-column: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progressBar,
+  .routeStage path,
+  .sceneRows button { transition: none !important; animation: none !important; }
+}
+
+/* v5.115 Social World continuity pass: scenes page becomes a real-life signal system, not a neon game poster. */
+.surface {
+  --fitmeet-void: #050101;
+  --fitmeet-cream: #fff4ea;
+  --fitmeet-muted: rgba(255, 244, 234, 0.68);
+  --fitmeet-route-cyan: #ff2a1f;
+  overflow-x: clip;
+  background:
+    radial-gradient(circle at var(--cursor-x) var(--cursor-y), color-mix(in srgb, var(--scene-color) 10%, transparent), transparent 30rem),
+    radial-gradient(circle at 74% 14%, rgba(255, 42, 31, 0.18), transparent 28rem),
+    linear-gradient(118deg, transparent 0 23%, rgba(255, 42, 31, 0.12) 23.12% 23.36%, transparent 23.72% 68%, rgba(255, 244, 234, 0.05) 68.1% 68.25%, transparent 68.55%),
+    linear-gradient(180deg, #050101 0%, #100504 48%, #050101 100%);
+}
+
+.cursorGlow {
+  opacity: 0.54;
+  background: radial-gradient(circle at var(--cursor-x) var(--cursor-y), color-mix(in srgb, var(--scene-color) 9%, transparent), transparent 30rem);
+}
+
+.cityLayer {
+  opacity: 0.18;
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(5, 1, 1, 0.92) 74%),
+    repeating-linear-gradient(90deg, transparent 0 38px, rgba(255, 244, 234, 0.12) 38px 40px, transparent 40px 104px);
+}
+
+.progressBar {
+  height: 3px;
+  background: linear-gradient(90deg, #ff2a1f, color-mix(in srgb, var(--scene-color) 64%, #fff4ea), transparent);
+  box-shadow: 0 0 24px rgba(255, 42, 31, 0.72);
+}
+
+.header {
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 1.08rem clamp(2rem, 4.5vw, 5.5rem);
+  border: 0;
+  border-bottom: 1px solid rgba(255, 244, 234, 0.08);
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(5, 1, 1, 0.94), rgba(5, 1, 1, 0.38) 68%, rgba(5, 1, 1, 0)),
+    linear-gradient(100deg, rgba(255, 42, 31, 0.14), transparent 34%);
+  box-shadow: none;
+}
+
+.brand {
+  font: 950 1rem/1 var(--font-body);
+  letter-spacing: -0.04em;
+}
+
+.brand img {
+  width: 2.42rem;
+  height: 2.42rem;
+  border-radius: 0.34rem;
+  box-shadow: 0 0 30px rgba(255, 42, 31, 0.22);
+}
+
+.headerCta,
+.boundaryBand strong,
+.finalActions a {
+  border-radius: 0;
+  clip-path: polygon(0.7rem 0, 100% 0, calc(100% - 0.7rem) 100%, 0 100%);
+}
+
+.headerCta,
+.finalActions a:first-child {
+  color: #050101;
+  background: linear-gradient(92deg, #ff2a1f, #ff8c63);
+}
+
+.hero {
+  align-content: center;
+  min-height: 100svh;
+  padding-top: clamp(7rem, 12vh, 10rem);
+  padding-bottom: clamp(4rem, 8vh, 7rem);
+}
+
+.hero::before {
+  position: absolute;
+  inset: 11vh 0 6vh;
+  z-index: -1;
+  content: "";
+  border: 1px solid rgba(255, 244, 234, 0.08);
+  background:
+    radial-gradient(circle at 70% 34%, rgba(255, 42, 31, 0.15), transparent 22rem),
+    linear-gradient(118deg, rgba(255, 42, 31, 0.08), transparent 28%, rgba(255, 244, 234, 0.025) 64%, transparent);
+  clip-path: polygon(2.2rem 0, 100% 0, calc(100% - 3.2rem) 100%, 0 100%);
+}
+
+.kicker,
+.sectionHead span,
+.boundaryBand > span,
+.businessBridge > span {
+  color: color-mix(in srgb, var(--scene-color) 62%, #ff2a1f);
+  letter-spacing: 0.14em;
+}
+
+.hero h1 {
+  max-width: 10.5ch;
+  font-size: clamp(5.2rem, 10.6vw, 13.2rem);
+  line-height: 0.78;
+  letter-spacing: -0.105em;
+}
+
+.hero h1 span:last-child {
+  color: #fff4ea;
+  text-shadow: 0 0 42px rgba(255, 42, 31, 0.16);
+}
+
+.heroText {
+  max-width: 58rem;
+  color: rgba(255, 244, 234, 0.72);
+}
+
+.routeStage {
+  border-color: rgba(255, 244, 234, 0.12);
+  background:
+    linear-gradient(90deg, rgba(255, 42, 31, 0.1), transparent 42%, rgba(255, 244, 234, 0.03)),
+    rgba(5, 1, 1, 0.36);
+  clip-path: polygon(1.5rem 0, 100% 0, calc(100% - 1.5rem) 100%, 0 100%);
+}
+
+.routeStage path {
+  stroke: #ff2a1f;
+  stroke-width: 6;
+  filter: drop-shadow(0 0 16px rgba(255, 42, 31, 0.72));
+}
+
+.routeStage .secondaryPath {
+  stroke: rgba(255, 244, 234, 0.18);
+}
+
+.sceneRows button,
+.signalFlow p,
+.protocolRows div,
+.receiptRows div {
+  border-color: rgba(255, 244, 234, 0.12);
+}
+
+.sceneRows button:hover,
+.activeScene {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--lane-color) 11%, transparent), transparent 70%),
+    linear-gradient(112deg, rgba(255, 42, 31, 0.08), transparent 42%) !important;
+}
+
+.boundaryBand,
+.businessBridge {
+  border-color: rgba(255, 244, 234, 0.12);
+  background:
+    linear-gradient(112deg, rgba(255, 42, 31, 0.08), transparent 42%),
+    rgba(5, 1, 1, 0.28);
+}

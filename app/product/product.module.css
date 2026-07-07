@@ -1,0 +1,775 @@
+.surface {
+  --bg: #050505;
+  --panel: rgba(18, 18, 18, 0.78);
+  --panel-strong: rgba(26, 18, 18, 0.92);
+  --line: rgba(255, 255, 255, 0.16);
+  --line-hot: rgba(255, 53, 43, 0.74);
+  --text: #f5f0e8;
+  --muted: rgba(245, 240, 232, 0.66);
+  --dim: rgba(245, 240, 232, 0.46);
+  --red: #ff1f16;
+  --red-deep: #8e0d09;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    linear-gradient(115deg, rgba(255, 31, 22, 0.12), transparent 26%),
+    linear-gradient(300deg, rgba(255, 255, 255, 0.08), transparent 18%),
+    radial-gradient(circle at 72% 9%, rgba(255, 31, 22, 0.28), transparent 25%),
+    var(--bg);
+  color: var(--text);
+  font-family: "Satoshi", "Neue Haas Grotesk Display", "DIN Alternate", "Arial Narrow", sans-serif;
+}
+
+.surface::before,
+.surface::after {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+}
+
+.surface::before {
+  opacity: 0.35;
+  background-image:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 86px 86px;
+  mask-image: linear-gradient(to bottom, black, transparent 82%);
+}
+
+.surface::after {
+  opacity: 0.46;
+  background:
+    linear-gradient(98deg, transparent 0 11%, rgba(255, 31, 22, 0.24) 11.2% 11.7%, transparent 12% 100%),
+    linear-gradient(116deg, transparent 0 58%, rgba(255, 255, 255, 0.12) 58.2% 58.55%, transparent 59% 100%);
+}
+
+.header,
+.hero,
+.statement,
+.pipelineSection,
+.boundarySection,
+.receiptSection,
+.principles,
+.finalCta {
+  position: relative;
+  z-index: 1;
+}
+
+.header {
+  position: fixed;
+  top: 22px;
+  left: 32px;
+  right: 32px;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(5, 5, 5, 0.72);
+  backdrop-filter: blur(18px);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+
+.brand,
+.nav a,
+.headerCta,
+.primaryAction,
+.secondaryAction {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 16px rgba(255, 31, 22, 0.45));
+}
+
+.nav {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+}
+
+.nav a {
+  color: rgba(245, 240, 232, 0.62);
+  transition: color 180ms ease;
+}
+
+.nav a:hover,
+.nav a[aria-current="page"] {
+  color: var(--text);
+}
+
+.headerCta {
+  padding: 11px 16px;
+  color: #120302;
+  background: var(--text);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(520px, 1.1fr);
+  gap: 44px;
+  min-height: 100vh;
+  padding: 132px 46px 64px;
+  align-items: end;
+}
+
+.heroCopy {
+  max-width: 780px;
+  padding-bottom: 18px;
+}
+
+.kicker {
+  margin: 0 0 18px;
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.statement h2,
+.sectionHeader h2,
+.boundaryCopy h2,
+.receiptCopy h2,
+.finalCta h2 {
+  margin: 0;
+  font-weight: 950;
+  letter-spacing: -0.045em;
+  line-height: 0.94;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  max-width: 760px;
+  font-size: clamp(5.1rem, 7.2vw, 9rem);
+  letter-spacing: -0.052em;
+}
+
+.hero h1 span {
+  display: block;
+}
+
+.statement h2 span,
+.sectionHeader h2 span,
+.boundaryCopy h2 span,
+.receiptCopy h2 span,
+.finalCta h2 span {
+  display: block;
+}
+
+.heroLead {
+  max-width: 680px;
+  margin: 28px 0 0;
+  color: var(--muted);
+  font-size: clamp(1.08rem, 1.5vw, 1.42rem);
+  line-height: 1.48;
+}
+
+.heroActions,
+.finalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-width: 190px;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 1px solid var(--line-hot);
+  font-size: 0.88rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    color 180ms ease;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+}
+
+.primaryAction {
+  color: #140302;
+  background: var(--red);
+  box-shadow: 0 0 34px rgba(255, 31, 22, 0.36);
+}
+
+.secondaryAction {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  transform: translateY(-3px);
+}
+
+.heroMedia {
+  position: relative;
+  min-height: min(70vh, 720px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #100d0c;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.58);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 56px), calc(100% - 56px) 100%, 0 100%);
+}
+
+.mediaAsset {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  object-fit: cover;
+  filter: saturate(1.08) contrast(1.08) brightness(0.78);
+}
+
+.mediaBlade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(5, 5, 5, 0.1), transparent 44%, rgba(255, 31, 22, 0.16)),
+    linear-gradient(128deg, transparent 0 64%, rgba(255, 31, 22, 0.36) 64.2% 65%, transparent 65.3%);
+}
+
+.mediaCaption {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(5, 5, 5, 0.64);
+  backdrop-filter: blur(14px);
+}
+
+.mediaCaption span,
+.mediaCaption strong {
+  font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mediaCaption span {
+  color: var(--red);
+}
+
+.statement {
+  display: grid;
+  grid-template-columns: 0.72fr 1fr;
+  gap: 54px;
+  padding: 92px 46px 78px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(90deg, rgba(255, 31, 22, 0.1), transparent 38%);
+}
+
+.statement h2 {
+  font-size: clamp(3.8rem, 5.8vw, 7.2rem);
+}
+
+.statement p:last-child {
+  max-width: 650px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 1.28rem;
+  line-height: 1.55;
+}
+
+.pipelineSection,
+.principles {
+  padding: 108px 46px 86px;
+}
+
+.sectionHeader {
+  display: grid;
+  grid-template-columns: 0.58fr 1.42fr;
+  gap: 48px;
+  align-items: end;
+  margin-bottom: 42px;
+}
+
+.sectionHeader h2 {
+  max-width: 1060px;
+  font-size: clamp(3.45rem, 5.2vw, 6.8rem);
+}
+
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(185px, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.stepCard {
+  position: relative;
+  min-height: 360px;
+  padding: 22px 18px;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(255, 31, 22, 0.12), transparent 44%),
+    rgba(8, 8, 8, 0.92);
+}
+
+.stepCard::before {
+  position: absolute;
+  inset: auto -30px 22px auto;
+  width: 108px;
+  height: 12px;
+  background: var(--red);
+  content: "";
+  transform: rotate(-26deg);
+  opacity: 0.7;
+}
+
+.stepIndex {
+  color: rgba(255, 255, 255, 0.18);
+  font-size: 4.8rem;
+  font-weight: 950;
+  letter-spacing: -0.08em;
+  line-height: 0.8;
+}
+
+.stepCard p,
+.stepCard span,
+.stepCard strong {
+  display: block;
+}
+
+.stepCard p {
+  margin: 28px 0 12px;
+  color: var(--red);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.stepCard h3 {
+  margin: 0 0 18px;
+  font-size: 1.95rem;
+  line-height: 0.96;
+}
+
+.stepCard span {
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.48;
+}
+
+.stepCard strong {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 24px;
+  color: var(--text);
+  font-size: 0.96rem;
+  line-height: 1.35;
+}
+
+.boundarySection,
+.receiptSection {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.9fr) minmax(0, 1.1fr);
+  gap: 1px;
+  margin: 0 46px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.boundaryMedia,
+.boundaryCopy,
+.receiptCopy,
+.receiptCard {
+  background: var(--panel);
+}
+
+.boundaryMedia {
+  min-height: 620px;
+  overflow: hidden;
+}
+
+.boundaryMedia .mediaAsset {
+  min-height: 620px;
+}
+
+.boundaryCopy,
+.receiptCopy {
+  padding: 58px;
+}
+
+.boundaryCopy h2,
+.receiptCopy h2,
+.finalCta h2 {
+  font-size: clamp(3.55rem, 5.3vw, 6.8rem);
+}
+
+.boundaryCopy p,
+.receiptCopy p {
+  max-width: 700px;
+  color: var(--muted);
+  font-size: 1.18rem;
+  line-height: 1.55;
+}
+
+.ruleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 34px;
+}
+
+.ruleGrid span {
+  padding: 18px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.receiptSection {
+  grid-template-columns: minmax(0, 0.82fr) minmax(540px, 1.18fr);
+  margin-top: 84px;
+}
+
+.receiptCard {
+  position: relative;
+  padding: 42px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(255, 31, 22, 0.18), transparent 46%),
+    var(--panel-strong);
+}
+
+.receiptCard::before {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent 0 72%, rgba(255, 31, 22, 0.14) 72.2% 73%, transparent 73.2%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 100% 52px;
+  content: "";
+  pointer-events: none;
+}
+
+.receiptTopline,
+.receiptCard h3,
+.receiptCard dl {
+  position: relative;
+  z-index: 1;
+}
+
+.receiptTopline {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.receiptTopline strong {
+  color: var(--red);
+}
+
+.receiptCard h3 {
+  margin: 42px 0 28px;
+  max-width: 720px;
+  font-size: clamp(3.2rem, 5.6vw, 6.8rem);
+  letter-spacing: -0.075em;
+  line-height: 0.9;
+}
+
+.receiptCard dl {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.receiptCard dl div {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 20px;
+  padding: 18px;
+  background: rgba(5, 5, 5, 0.72);
+}
+
+.receiptCard dt,
+.receiptCard dd {
+  margin: 0;
+}
+
+.receiptCard dt {
+  color: var(--red);
+  font-size: 0.84rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.receiptCard dd {
+  color: var(--text);
+  font-size: 1.08rem;
+  line-height: 1.35;
+}
+
+.principleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.principleGrid article {
+  min-height: 270px;
+  padding: 28px;
+  background: rgba(8, 8, 8, 0.9);
+}
+
+.principleGrid h3 {
+  margin: 0;
+  max-width: 360px;
+  font-size: 3rem;
+  line-height: 0.94;
+  letter-spacing: -0.06em;
+}
+
+.principleGrid p {
+  margin: 48px 0 0;
+  color: var(--muted);
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.finalCta {
+  margin: 0 46px 46px;
+  padding: 76px 58px;
+  border: 1px solid rgba(255, 31, 22, 0.52);
+  background:
+    linear-gradient(112deg, rgba(255, 31, 22, 0.24), transparent 46%),
+    rgba(8, 8, 8, 0.88);
+  clip-path: polygon(0 0, calc(100% - 46px) 0, 100% 46px, 100% 100%, 46px 100%, 0 calc(100% - 46px));
+}
+
+.finalCta h2 {
+  max-width: 1180px;
+}
+
+@media (max-width: 1180px) {
+  .nav {
+    gap: 10px;
+  }
+
+  .hero,
+  .statement,
+  .sectionHeader,
+  .boundarySection,
+  .receiptSection {
+    grid-template-columns: 1fr;
+  }
+
+  .pipeline {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primaryAction,
+  .secondaryAction,
+  .nav a {
+    transition: none;
+  }
+
+  .primaryAction:hover,
+  .secondaryAction:hover {
+    transform: none;
+  }
+}
+
+/* v5.115 Social World continuity pass: product page must feel like the same signal system as the homepage. */
+.surface {
+  --signal-red: #ff2a1f;
+  --signal-cream: #fff4ea;
+  --signal-line: rgba(255, 244, 234, 0.13);
+  overflow-x: clip;
+  background:
+    radial-gradient(circle at 76% 12%, rgba(255, 42, 31, 0.24), transparent 27rem),
+    radial-gradient(circle at 16% 34%, rgba(255, 244, 234, 0.045), transparent 26rem),
+    linear-gradient(118deg, transparent 0 22%, rgba(255, 42, 31, 0.11) 22.15% 22.42%, transparent 22.76% 68%, rgba(255, 244, 234, 0.055) 68.1% 68.24%, transparent 68.55%),
+    #050101;
+}
+
+.header {
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 1.08rem clamp(2rem, 4.5vw, 5.5rem);
+  border: 0;
+  border-bottom: 1px solid rgba(255, 244, 234, 0.08);
+  background:
+    linear-gradient(180deg, rgba(5, 1, 1, 0.94), rgba(5, 1, 1, 0.38) 68%, rgba(5, 1, 1, 0)),
+    linear-gradient(100deg, rgba(255, 42, 31, 0.14), transparent 34%);
+  clip-path: none;
+}
+
+.brand {
+  letter-spacing: -0.04em;
+  text-transform: none;
+}
+
+.logo {
+  width: 2.42rem;
+  height: 2.42rem;
+  border-radius: 0.34rem;
+}
+
+.nav,
+.headerCta,
+.primaryAction,
+.secondaryAction,
+.kicker {
+  letter-spacing: 0.12em;
+}
+
+.hero {
+  position: relative;
+  grid-template-columns: minmax(42rem, 1.05fr) minmax(30rem, 0.95fr);
+  gap: clamp(2rem, 4vw, 5rem);
+  padding-top: clamp(7rem, 12vh, 10rem);
+  overflow: hidden;
+  perspective: 1200px;
+}
+
+.hero::before,
+.hero::after {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.hero::before {
+  inset: 11vh clamp(1.2rem, 3vw, 4rem) 7vh;
+  z-index: -1;
+  border: 1px solid rgba(255, 244, 234, 0.08);
+  background:
+    linear-gradient(118deg, rgba(255, 42, 31, 0.09), transparent 28%, rgba(255, 244, 234, 0.025) 64%, transparent),
+    radial-gradient(circle at 72% 34%, rgba(255, 42, 31, 0.16), transparent 20rem);
+  clip-path: polygon(2.2rem 0, 100% 0, calc(100% - 3.2rem) 100%, 0 100%);
+}
+
+.hero::after {
+  left: 43%;
+  top: 18%;
+  width: clamp(18rem, 28vw, 34rem);
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 244, 234, 0.13);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 5rem rgba(255, 42, 31, 0.025),
+    0 0 0 9rem rgba(255, 244, 234, 0.018),
+    0 0 80px rgba(255, 42, 31, 0.16);
+  transform: rotateX(66deg) rotateZ(-16deg);
+}
+
+.hero h1 {
+  max-width: 9.8ch;
+  font-size: clamp(5.8rem, 8.9vw, 11.8rem);
+  line-height: 0.8;
+  letter-spacing: -0.08em;
+}
+
+.heroLead {
+  max-width: 50rem;
+}
+
+.heroMedia {
+  min-height: clamp(34rem, 68vh, 46rem);
+  border-color: rgba(255, 244, 234, 0.17);
+  clip-path: polygon(2.1rem 0, 100% 0, calc(100% - 3.4rem) 100%, 0 100%);
+  transform: rotateZ(-1deg);
+}
+
+.heroMedia::before {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(90deg, rgba(5, 1, 1, 0.48), transparent 42%, rgba(5, 1, 1, 0.28)),
+    linear-gradient(0deg, rgba(255, 244, 234, 0.08) 0 1px, transparent 1px 100%);
+  background-size: auto, 100% 4.5rem;
+  mix-blend-mode: screen;
+}
+
+.mediaCaption {
+  z-index: 4;
+  border-left: 2px solid rgba(255, 42, 31, 0.9);
+  background: linear-gradient(90deg, rgba(5, 1, 1, 0.82), rgba(5, 1, 1, 0.28));
+  clip-path: polygon(0.7rem 0, 100% 0, calc(100% - 0.7rem) 100%, 0 100%);
+}
+
+.pipeline,
+.principleGrid,
+.ruleGrid,
+.receiptCard {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+.stepCard,
+.principleGrid article,
+.receiptCard {
+  border-color: rgba(255, 244, 234, 0.1);
+  background:
+    linear-gradient(135deg, rgba(255, 42, 31, 0.14), transparent 38%),
+    rgba(5, 1, 1, 0.78);
+}
+
+.boundarySection,
+.receiptSection,
+.finalCta {
+  background:
+    linear-gradient(112deg, rgba(255, 42, 31, 0.08), transparent 34%),
+    radial-gradient(circle at 72% 28%, rgba(255, 42, 31, 0.11), transparent 22rem);
+}

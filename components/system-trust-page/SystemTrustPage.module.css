@@ -1,0 +1,543 @@
+.surface {
+  --bg: #050505;
+  --text: #f5efe6;
+  --muted: rgba(245, 239, 230, 0.66);
+  --dim: rgba(245, 239, 230, 0.42);
+  --line: rgba(245, 239, 230, 0.14);
+  --line-hot: rgba(255, 37, 27, 0.72);
+  --red: #ff251b;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    linear-gradient(118deg, rgba(255, 37, 27, 0.14), transparent 28%),
+    radial-gradient(circle at 80% 8%, rgba(255, 37, 27, 0.18), transparent 25%),
+    linear-gradient(180deg, #080403 0%, #050505 48%, #090303 100%);
+  color: var(--text);
+  font-family: "Satoshi", "Neue Haas Grotesk Display", "DIN Alternate", "Arial Narrow", sans-serif;
+}
+
+.surface::before,
+.surface::after {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+}
+
+.surface::before {
+  opacity: 0.24;
+  background-image:
+    linear-gradient(90deg, rgba(245, 239, 230, 0.06) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(245, 239, 230, 0.04) 1px, transparent 1px);
+  background-size: 88px 88px;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.surface::after {
+  opacity: 0.46;
+  background:
+    linear-gradient(108deg, transparent 0 14%, rgba(255, 37, 27, 0.22) 14.15% 14.65%, transparent 14.85% 100%),
+    linear-gradient(131deg, transparent 0 74%, rgba(245, 239, 230, 0.1) 74.1% 74.42%, transparent 74.62% 100%);
+}
+
+.header,
+.hero,
+.panelSection,
+.finalSection {
+  position: relative;
+  z-index: 1;
+}
+
+.header {
+  position: fixed;
+  top: 22px;
+  left: 32px;
+  right: 32px;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: rgba(5, 5, 5, 0.78);
+  backdrop-filter: blur(18px);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+
+.brand,
+.nav a,
+.headerCta,
+.primaryAction,
+.secondaryAction {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 16px rgba(255, 37, 27, 0.42));
+}
+
+.nav {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+}
+
+.nav a {
+  color: rgba(245, 239, 230, 0.6);
+  transition: color 180ms ease;
+}
+
+.nav a:hover {
+  color: var(--text);
+}
+
+.headerCta {
+  padding: 11px 16px;
+  background: var(--text);
+  color: #160302;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.28fr) minmax(380px, 0.72fr);
+  gap: 44px;
+  min-height: 88vh;
+  padding: 134px 46px 76px;
+  align-items: end;
+}
+
+.heroCopy {
+  max-width: 1120px;
+}
+
+.kicker {
+  margin: 0 0 18px;
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.finalSection h2 {
+  margin: 0;
+  font-weight: 950;
+  letter-spacing: -0.052em;
+  line-height: 0.93;
+}
+
+.hero h1 {
+  max-width: 1120px;
+  font-size: clamp(4.8rem, 7.5vw, 9.6rem);
+}
+
+.heroCopy > p:not(.kicker),
+.finalSection > p {
+  max-width: 850px;
+  margin: 28px 0 0;
+  color: var(--muted);
+  font-size: clamp(1.08rem, 1.42vw, 1.34rem);
+  line-height: 1.56;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-width: 190px;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 1px solid var(--line-hot);
+  font-size: 0.88rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+}
+
+.primaryAction {
+  color: #170302;
+  background: var(--red);
+  box-shadow: 0 0 34px rgba(255, 37, 27, 0.36);
+}
+
+.secondaryAction {
+  color: var(--text);
+  background: rgba(245, 239, 230, 0.04);
+}
+
+.markerPanel {
+  min-height: 460px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 24px;
+  border: 1px solid rgba(245, 239, 230, 0.18);
+  background:
+    linear-gradient(140deg, rgba(255, 37, 27, 0.2), transparent 42%),
+    rgba(5, 5, 5, 0.62);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 46px), calc(100% - 46px) 100%, 0 100%);
+}
+
+.markerPanel span {
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+}
+
+.markerPanel strong {
+  display: block;
+  margin-top: 18px;
+  color: var(--text);
+  font-size: clamp(2rem, 3vw, 3.5rem);
+  font-weight: 950;
+  letter-spacing: -0.048em;
+  line-height: 0.96;
+  text-transform: uppercase;
+}
+
+.markerPanel p {
+  margin: 22px 0 0;
+  color: var(--muted);
+  line-height: 1.58;
+}
+
+.panelSection {
+  padding: 46px;
+}
+
+.panel {
+  display: grid;
+  grid-template-columns: 0.22fr minmax(0, 0.9fr) minmax(360px, 1fr);
+  gap: 28px;
+  align-items: start;
+  min-height: 190px;
+  padding: 24px 22px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  background: rgba(5, 5, 5, 0.46);
+}
+
+.panel:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.panelId {
+  color: rgba(255, 37, 27, 0.84);
+  font-size: clamp(3rem, 5.1vw, 5.2rem);
+  font-weight: 950;
+  line-height: 0.8;
+  opacity: 0.58;
+}
+
+.panelCopy h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.8rem, 2.8vw, 3.35rem);
+  line-height: 0.98;
+  letter-spacing: -0.048em;
+}
+
+.panelCopy p {
+  margin: 16px 0 0;
+  color: var(--muted);
+  line-height: 1.58;
+}
+
+.panelList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.panelList li {
+  min-height: 42px;
+  padding: 12px 12px;
+  border: 1px solid rgba(255, 37, 27, 0.28);
+  color: rgba(245, 239, 230, 0.76);
+  font-size: 0.92rem;
+  line-height: 1.35;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+.finalSection {
+  min-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 92px 46px;
+  border-top: 1px solid var(--line);
+}
+
+.finalSection h2 {
+  max-width: 1260px;
+  font-size: clamp(4.8rem, 7.5vw, 10rem);
+}
+
+@media (max-width: 1180px) {
+  .hero,
+  .panel {
+    grid-template-columns: 1fr;
+  }
+
+  .markerPanel {
+    min-height: 340px;
+  }
+
+  .panelList {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav a {
+    transition: none;
+  }
+}
+
+/* V5.119 System trust protocol pass.
+   System pages should feel like FitMeet's operating agreement, not forgotten legal templates. */
+@media (min-width: 1181px) {
+  .surface {
+    background:
+      radial-gradient(circle at 78% 10%, rgba(255, 37, 27, 0.26), transparent 23rem),
+      radial-gradient(circle at 16% 44%, rgba(255, 116, 73, 0.1), transparent 25rem),
+      linear-gradient(118deg, rgba(255, 37, 27, 0.16), transparent 30% 74%, rgba(245, 239, 230, 0.045)),
+      linear-gradient(180deg, #080403 0%, #050505 48%, #090303 100%);
+  }
+
+  .surface::before {
+    opacity: 0.29;
+    background-image:
+      linear-gradient(90deg, rgba(245, 239, 230, 0.06) 1px, transparent 1px),
+      linear-gradient(0deg, rgba(245, 239, 230, 0.04) 1px, transparent 1px),
+      linear-gradient(113deg, transparent 0 31%, rgba(255, 37, 27, 0.16) 31.1% 31.34%, transparent 31.64% 100%);
+    background-size: 76px 76px, 76px 76px, 100% 100%;
+  }
+
+  .header {
+    top: 18px;
+    left: clamp(30px, 3.4vw, 58px);
+    right: clamp(30px, 3.4vw, 58px);
+    padding: 10px 12px;
+    border-color: rgba(245, 239, 230, 0.18);
+    background:
+      linear-gradient(90deg, rgba(255, 37, 27, 0.12), transparent 34%),
+      rgba(5, 5, 5, 0.84);
+  }
+
+  .hero {
+    position: relative;
+    grid-template-columns: minmax(0, 1.08fr) minmax(390px, 0.64fr);
+    min-height: 94vh;
+    padding: 128px clamp(42px, 5vw, 76px) 76px;
+    align-items: center;
+    isolation: isolate;
+  }
+
+  .hero::before,
+  .hero::after {
+    position: absolute;
+    content: "";
+    pointer-events: none;
+  }
+
+  .hero::before {
+    left: clamp(42px, 5vw, 76px);
+    right: 34vw;
+    top: 17vh;
+    bottom: 12vh;
+    z-index: -1;
+    border: 1px solid rgba(245, 239, 230, 0.08);
+    background:
+      linear-gradient(112deg, rgba(255, 37, 27, 0.14), transparent 36%),
+      repeating-linear-gradient(90deg, rgba(245, 239, 230, 0.05) 0 1px, transparent 1px 4.8rem);
+    clip-path: polygon(0 0, 91% 0, 100% 15%, 94% 100%, 0 100%);
+  }
+
+  .hero::after {
+    left: clamp(42px, 5vw, 76px);
+    right: clamp(42px, 5vw, 76px);
+    bottom: 48px;
+    z-index: -1;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(255, 37, 27, 0.72), rgba(245, 239, 230, 0.18), transparent);
+    box-shadow: 0 0 42px rgba(255, 37, 27, 0.24);
+  }
+
+  .hero h1 {
+    max-width: 9.8ch;
+    font-size: clamp(5.2rem, 7.45vw, 10.25rem);
+    line-height: 0.86;
+    letter-spacing: -0.062em;
+  }
+
+  .heroCopy > p:not(.kicker) {
+    max-width: 700px;
+    margin-top: 24px;
+    font-size: clamp(1rem, 1.18vw, 1.22rem);
+  }
+
+  .markerPanel {
+    position: relative;
+    min-height: 520px;
+    padding: 26px;
+    overflow: hidden;
+    border-color: rgba(245, 239, 230, 0.2);
+    background:
+      linear-gradient(142deg, rgba(255, 37, 27, 0.24), transparent 42%),
+      repeating-linear-gradient(0deg, rgba(245, 239, 230, 0.045) 0 1px, transparent 1px 3.2rem),
+      rgba(5, 5, 5, 0.68);
+    box-shadow:
+      0 44px 108px rgba(0, 0, 0, 0.58),
+      0 0 0 1px rgba(255, 37, 27, 0.14) inset;
+  }
+
+  .markerPanel::before,
+  .markerPanel::after {
+    position: absolute;
+    content: "";
+    pointer-events: none;
+  }
+
+  .markerPanel::before {
+    inset: 22px;
+    border: 1px solid rgba(245, 239, 230, 0.08);
+    clip-path: polygon(0 0, 100% 0, 88% 100%, 0 100%);
+  }
+
+  .markerPanel::after {
+    left: 0;
+    right: 0;
+    bottom: 34%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 37, 27, 0.8), transparent);
+    box-shadow: 0 0 34px rgba(255, 37, 27, 0.36);
+  }
+
+  .markerPanel strong {
+    position: relative;
+    z-index: 1;
+    max-width: 9ch;
+    font-size: clamp(2.4rem, 3.35vw, 4.2rem);
+    line-height: 0.88;
+  }
+
+  .markerPanel p,
+  .markerPanel span {
+    position: relative;
+    z-index: 1;
+  }
+
+  .panelSection {
+    padding: 42px clamp(42px, 5vw, 76px) 70px;
+  }
+
+  .panel {
+    position: relative;
+    grid-template-columns: 0.18fr minmax(0, 0.86fr) minmax(380px, 1fr);
+    min-height: 178px;
+    padding: 22px 20px;
+    overflow: hidden;
+    border-color: rgba(245, 239, 230, 0.15);
+    background:
+      linear-gradient(90deg, rgba(255, 37, 27, 0.08), transparent 38%),
+      rgba(5, 5, 5, 0.54);
+  }
+
+  .panel::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    content: "";
+    background: linear-gradient(180deg, transparent, rgba(255, 37, 27, 0.86), transparent);
+  }
+
+  .panel::after {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    content: "";
+    background: linear-gradient(90deg, rgba(255, 37, 27, 0.64), rgba(245, 239, 230, 0.12), transparent);
+  }
+
+  .panelId {
+    color: rgba(255, 37, 27, 0.92);
+    opacity: 0.68;
+  }
+
+  .panelCopy h2 {
+    font-size: clamp(1.75rem, 2.58vw, 3.1rem);
+  }
+
+  .panelList {
+    gap: 8px;
+  }
+
+  .panelList li {
+    min-height: 40px;
+    border-color: rgba(255, 37, 27, 0.34);
+    background: rgba(255, 37, 27, 0.065);
+  }
+
+  .finalSection {
+    position: relative;
+    min-height: 82vh;
+    padding: 92px clamp(42px, 5vw, 76px);
+    border-top-color: rgba(255, 37, 27, 0.34);
+    background:
+      radial-gradient(circle at 74% 36%, rgba(255, 37, 27, 0.18), transparent 24rem),
+      linear-gradient(100deg, rgba(255, 37, 27, 0.1), transparent 42%);
+  }
+
+  .finalSection::before {
+    position: absolute;
+    inset: 12vh clamp(42px, 5vw, 76px);
+    z-index: -1;
+    content: "";
+    border: 1px solid rgba(245, 239, 230, 0.08);
+    clip-path: polygon(0 0, 92% 0, 100% 18%, 94% 100%, 0 100%);
+  }
+
+  .finalSection h2 {
+    max-width: 10ch;
+    font-size: clamp(5rem, 7.35vw, 10.2rem);
+    line-height: 0.86;
+  }
+}

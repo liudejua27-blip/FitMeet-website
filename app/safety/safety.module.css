@@ -1,0 +1,778 @@
+.surface {
+  --bg: #050505;
+  --panel: rgba(15, 15, 15, 0.86);
+  --panel-strong: rgba(25, 16, 16, 0.92);
+  --line: rgba(245, 239, 230, 0.15);
+  --line-hot: rgba(255, 37, 27, 0.7);
+  --text: #f5efe6;
+  --muted: rgba(245, 239, 230, 0.66);
+  --dim: rgba(245, 239, 230, 0.44);
+  --red: #ff251b;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    linear-gradient(115deg, rgba(255, 37, 27, 0.13), transparent 30%),
+    linear-gradient(305deg, rgba(245, 239, 230, 0.08), transparent 19%),
+    radial-gradient(circle at 78% 7%, rgba(255, 37, 27, 0.24), transparent 28%),
+    var(--bg);
+  color: var(--text);
+  font-family: "Satoshi", "Neue Haas Grotesk Display", "DIN Alternate", "Arial Narrow", sans-serif;
+}
+
+.surface::before,
+.surface::after {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+}
+
+.surface::before {
+  opacity: 0.32;
+  background-image:
+    linear-gradient(90deg, rgba(245, 239, 230, 0.07) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(245, 239, 230, 0.055) 1px, transparent 1px);
+  background-size: 90px 90px;
+  mask-image: linear-gradient(to bottom, black, transparent 86%);
+}
+
+.surface::after {
+  opacity: 0.44;
+  background:
+    linear-gradient(106deg, transparent 0 17%, rgba(255, 37, 27, 0.23) 17.2% 17.75%, transparent 18% 100%),
+    linear-gradient(128deg, transparent 0 67%, rgba(245, 239, 230, 0.12) 67.2% 67.55%, transparent 68% 100%);
+}
+
+.progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  width: 100%;
+  height: 3px;
+  background: var(--red);
+  transform: scaleX(0);
+  transform-origin: left center;
+  box-shadow: 0 0 28px rgba(255, 37, 27, 0.8);
+}
+
+.header,
+.hero,
+.protocolSection,
+.gateSection,
+.receiptSection,
+.minorSection,
+.trustSection,
+.finalCta {
+  position: relative;
+  z-index: 1;
+}
+
+.header {
+  position: fixed;
+  top: 22px;
+  left: 32px;
+  right: 32px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: rgba(5, 5, 5, 0.74);
+  backdrop-filter: blur(18px);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+
+.brand,
+.nav a,
+.headerCta,
+.primaryAction,
+.secondaryAction {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 16px rgba(255, 37, 27, 0.42));
+}
+
+.nav {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+}
+
+.nav a {
+  color: rgba(245, 239, 230, 0.6);
+  transition: color 180ms ease;
+}
+
+.nav a:hover,
+.nav a[aria-current="page"] {
+  color: var(--text);
+}
+
+.headerCta {
+  padding: 11px 16px;
+  background: var(--text);
+  color: #160302;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(540px, 1.1fr);
+  gap: 44px;
+  min-height: 100vh;
+  padding: 132px 46px 70px;
+  align-items: end;
+}
+
+.heroCopy {
+  max-width: 830px;
+  padding-bottom: 16px;
+  will-change: transform, opacity;
+}
+
+.kicker {
+  margin: 0 0 18px;
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.sectionHeader h2,
+.gateCopy h2,
+.receiptCopy h2,
+.minorSection h2,
+.finalCta h2 {
+  margin: 0;
+  font-weight: 950;
+  letter-spacing: -0.045em;
+  line-height: 0.94;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  font-size: clamp(5.2rem, 7.4vw, 9.4rem);
+}
+
+.hero h1 span,
+.sectionHeader h2 span,
+.gateCopy h2 span,
+.receiptCopy h2 span,
+.minorSection h2 span,
+.finalCta h2 span {
+  display: block;
+}
+
+.heroCopy p:not(.kicker),
+.gateCopy p,
+.receiptCopy p,
+.minorSection p {
+  max-width: 730px;
+  margin: 28px 0 0;
+  color: var(--muted);
+  font-size: clamp(1.08rem, 1.45vw, 1.36rem);
+  line-height: 1.55;
+}
+
+.heroActions,
+.finalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-width: 188px;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 1px solid var(--line-hot);
+  font-size: 0.88rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  transition: transform 180ms ease, background 180ms ease, color 180ms ease;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+}
+
+.primaryAction {
+  color: #170302;
+  background: var(--red);
+  box-shadow: 0 0 34px rgba(255, 37, 27, 0.36);
+}
+
+.secondaryAction {
+  color: var(--text);
+  background: rgba(245, 239, 230, 0.04);
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  transform: translateY(-3px);
+}
+
+.heroMedia {
+  position: relative;
+  min-height: min(70vh, 720px);
+  overflow: hidden;
+  border: 1px solid rgba(245, 239, 230, 0.18);
+  background: #0b0b0b;
+  box-shadow: 0 36px 92px rgba(0, 0, 0, 0.62);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 56px), calc(100% - 56px) 100%, 0 100%);
+  will-change: transform, opacity;
+}
+
+.mediaAsset {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  object-fit: cover;
+  filter: saturate(1.04) contrast(1.08) brightness(0.78);
+}
+
+.mediaBlade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(5, 5, 5, 0.12), transparent 44%, rgba(255, 37, 27, 0.16)),
+    linear-gradient(128deg, transparent 0 64%, rgba(255, 37, 27, 0.35) 64.2% 65%, transparent 65.3%);
+}
+
+.mediaCaption {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border: 1px solid rgba(245, 239, 230, 0.16);
+  background: rgba(5, 5, 5, 0.68);
+  backdrop-filter: blur(14px);
+}
+
+.mediaCaption span,
+.mediaCaption strong {
+  font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mediaCaption span {
+  color: var(--red);
+}
+
+.protocolSection,
+.trustSection {
+  padding: 108px 46px 86px;
+}
+
+.sectionHeader {
+  display: grid;
+  grid-template-columns: 0.58fr 1.42fr;
+  gap: 48px;
+  align-items: end;
+  margin-bottom: 42px;
+}
+
+.sectionHeader h2,
+.gateCopy h2,
+.receiptCopy h2,
+.minorSection h2,
+.finalCta h2 {
+  max-width: 1120px;
+  font-size: clamp(3.55rem, 5.25vw, 6.9rem);
+}
+
+.protocolGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(175px, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.protocolCard {
+  position: relative;
+  min-height: 380px;
+  padding: 22px 18px;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(255, 37, 27, 0.12), transparent 46%),
+    rgba(8, 8, 8, 0.92);
+  will-change: transform, opacity;
+}
+
+.protocolCard i {
+  position: absolute;
+  right: -30px;
+  bottom: 28px;
+  width: 124px;
+  height: 12px;
+  background: var(--red);
+  transform: rotate(-27deg) scaleX(var(--line-scale, 0));
+  transform-origin: left center;
+  box-shadow: 0 0 22px rgba(255, 37, 27, 0.6);
+}
+
+.protocolCard > span {
+  color: rgba(245, 239, 230, 0.18);
+  font-size: 4.9rem;
+  font-weight: 950;
+  letter-spacing: -0.08em;
+  line-height: 0.78;
+}
+
+.protocolCard h3 {
+  margin: 44px 0 18px;
+  font-size: 2.35rem;
+  line-height: 0.94;
+  letter-spacing: -0.06em;
+}
+
+.protocolCard p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.48;
+}
+
+.protocolCard strong {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 30px;
+  color: var(--text);
+  font-size: 0.96rem;
+  line-height: 1.34;
+}
+
+.gateSection,
+.receiptSection {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.88fr) minmax(0, 1.12fr);
+  gap: 1px;
+  margin: 0 46px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.gateMedia,
+.gateCopy,
+.receiptCopy,
+.receiptCard {
+  background: var(--panel);
+}
+
+.gateMedia {
+  min-height: 640px;
+  overflow: hidden;
+}
+
+.gateMedia .mediaAsset {
+  min-height: 640px;
+}
+
+.gateCopy,
+.receiptCopy {
+  padding: 58px;
+}
+
+.gateSteps {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.gateSteps article {
+  min-height: 220px;
+  padding: 24px 18px;
+  background: rgba(8, 8, 8, 0.9);
+  will-change: transform, opacity;
+}
+
+.gateSteps span {
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.gateSteps h3 {
+  margin: 36px 0 16px;
+  font-size: 2.2rem;
+  line-height: 0.94;
+  letter-spacing: -0.06em;
+}
+
+.gateSteps p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.96rem;
+  line-height: 1.48;
+}
+
+.receiptSection {
+  grid-template-columns: minmax(0, 0.82fr) minmax(560px, 1.18fr);
+  margin-top: 84px;
+}
+
+.receiptCard {
+  position: relative;
+  padding: 42px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(255, 37, 27, 0.18), transparent 46%),
+    var(--panel-strong);
+  will-change: transform, opacity;
+}
+
+.receiptCard::before {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent 0 72%, rgba(255, 37, 27, 0.14) 72.2% 73%, transparent 73.2%),
+    linear-gradient(0deg, rgba(245, 239, 230, 0.06) 1px, transparent 1px);
+  background-size: 100% 52px;
+  content: "";
+  pointer-events: none;
+}
+
+.receiptTopline,
+.receiptCard h3,
+.receiptCard dl {
+  position: relative;
+  z-index: 1;
+}
+
+.receiptTopline {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.receiptTopline strong {
+  color: var(--red);
+}
+
+.receiptCard h3 {
+  margin: 42px 0 28px;
+  max-width: 720px;
+  font-size: clamp(3.2rem, 5.5vw, 6.7rem);
+  letter-spacing: -0.07em;
+  line-height: 0.9;
+}
+
+.receiptCard dl {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.receiptCard dl div {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 20px;
+  padding: 16px 18px;
+  background: rgba(5, 5, 5, 0.74);
+}
+
+.receiptCard dt,
+.receiptCard dd {
+  margin: 0;
+}
+
+.receiptCard dt {
+  color: var(--red);
+  font-size: 0.84rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+}
+
+.receiptCard dd {
+  color: var(--text);
+  font-size: 1.02rem;
+  line-height: 1.35;
+}
+
+.minorSection {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+  gap: 50px;
+  margin: 84px 46px 0;
+  padding: 76px 58px;
+  border: 1px solid rgba(255, 37, 27, 0.48);
+  background:
+    linear-gradient(112deg, rgba(255, 37, 27, 0.18), transparent 48%),
+    rgba(8, 8, 8, 0.88);
+  clip-path: polygon(0 0, calc(100% - 44px) 0, 100% 44px, 100% 100%, 44px 100%, 0 calc(100% - 44px));
+}
+
+.minorSection p {
+  margin: 0;
+}
+
+.trustGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.trustGrid article {
+  min-height: 300px;
+  padding: 28px;
+  background: rgba(8, 8, 8, 0.9);
+  will-change: transform, opacity;
+}
+
+.trustGrid h3 {
+  margin: 0;
+  font-size: 3.4rem;
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+}
+
+.trustGrid p {
+  margin: 52px 0 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.52;
+}
+
+.finalCta {
+  margin: 0 46px 46px;
+  padding: 76px 58px;
+  border: 1px solid rgba(255, 37, 27, 0.52);
+  background:
+    linear-gradient(112deg, rgba(255, 37, 27, 0.24), transparent 46%),
+    rgba(8, 8, 8, 0.9);
+  clip-path: polygon(0 0, calc(100% - 46px) 0, 100% 46px, 100% 100%, 46px 100%, 0 calc(100% - 46px));
+}
+
+.finalCta h2 {
+  max-width: 1180px;
+}
+
+@media (max-width: 1180px) {
+  .nav {
+    gap: 10px;
+  }
+
+  .hero,
+  .sectionHeader,
+  .gateSection,
+  .receiptSection,
+  .minorSection {
+    grid-template-columns: 1fr;
+  }
+
+  .protocolGrid,
+  .gateSteps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .trustGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primaryAction,
+  .secondaryAction,
+  .nav a {
+    transition: none;
+  }
+
+  .primaryAction:hover,
+  .secondaryAction:hover {
+    transform: none;
+  }
+}
+
+/* v5.116 Trust page continuity pass: safety must feel like the same Social World infrastructure, not a legal appendix. */
+.surface {
+  --signal-red: #ff2a1f;
+  --signal-cream: #fff4ea;
+  overflow-x: clip;
+  background:
+    radial-gradient(circle at 78% 10%, rgba(255, 42, 31, 0.22), transparent 28rem),
+    radial-gradient(circle at 18% 34%, rgba(255, 244, 234, 0.044), transparent 25rem),
+    linear-gradient(118deg, transparent 0 22%, rgba(255, 42, 31, 0.11) 22.1% 22.35%, transparent 22.72% 68%, rgba(255, 244, 234, 0.052) 68.1% 68.24%, transparent 68.55%),
+    #050101;
+}
+
+.header {
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 1.08rem clamp(2rem, 4.5vw, 5.5rem);
+  border: 0;
+  border-bottom: 1px solid rgba(255, 244, 234, 0.08);
+  background:
+    linear-gradient(180deg, rgba(5, 1, 1, 0.94), rgba(5, 1, 1, 0.38) 68%, rgba(5, 1, 1, 0)),
+    linear-gradient(100deg, rgba(255, 42, 31, 0.14), transparent 34%);
+  clip-path: none;
+}
+
+.brand {
+  letter-spacing: -0.04em;
+  text-transform: none;
+}
+
+.logo {
+  width: 2.42rem;
+  height: 2.42rem;
+  border-radius: 0.34rem;
+}
+
+.hero {
+  position: relative;
+  grid-template-columns: minmax(42rem, 1.05fr) minmax(30rem, 0.95fr);
+  gap: clamp(2rem, 4vw, 5rem);
+  padding-top: clamp(7rem, 12vh, 10rem);
+  overflow: hidden;
+  perspective: 1200px;
+}
+
+.hero::before,
+.hero::after {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.hero::before {
+  inset: 11vh clamp(1.2rem, 3vw, 4rem) 7vh;
+  z-index: -1;
+  border: 1px solid rgba(255, 244, 234, 0.08);
+  background:
+    linear-gradient(118deg, rgba(255, 42, 31, 0.08), transparent 28%, rgba(255, 244, 234, 0.025) 64%, transparent),
+    radial-gradient(circle at 72% 34%, rgba(255, 42, 31, 0.15), transparent 20rem);
+  clip-path: polygon(2.2rem 0, 100% 0, calc(100% - 3.2rem) 100%, 0 100%);
+}
+
+.hero::after {
+  left: 43%;
+  top: 18%;
+  width: clamp(18rem, 28vw, 34rem);
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 244, 234, 0.13);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 5rem rgba(255, 42, 31, 0.024),
+    0 0 0 9rem rgba(255, 244, 234, 0.017),
+    0 0 80px rgba(255, 42, 31, 0.15);
+  transform: rotateX(66deg) rotateZ(-16deg);
+}
+
+.hero h1 {
+  max-width: 9.2ch;
+  font-size: clamp(5.9rem, 8.9vw, 11.6rem);
+  line-height: 0.8;
+  letter-spacing: -0.08em;
+}
+
+.heroCopy p:not(.kicker) {
+  max-width: 50rem;
+}
+
+.heroMedia,
+.gateMedia,
+.receiptCard {
+  border-color: rgba(255, 244, 234, 0.17);
+  box-shadow: 0 34px 96px rgba(0, 0, 0, 0.52);
+}
+
+.heroMedia {
+  min-height: clamp(33rem, 67vh, 45rem);
+  clip-path: polygon(2.1rem 0, 100% 0, calc(100% - 3.4rem) 100%, 0 100%);
+  transform: rotateZ(-1deg);
+}
+
+.heroMedia::before,
+.gateMedia::before {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(90deg, rgba(5, 1, 1, 0.5), transparent 42%, rgba(5, 1, 1, 0.28)),
+    linear-gradient(0deg, rgba(255, 244, 234, 0.08) 0 1px, transparent 1px 100%);
+  background-size: auto, 100% 4.5rem;
+  mix-blend-mode: screen;
+}
+
+.mediaCaption,
+.receiptTopline {
+  border-left: 2px solid rgba(255, 42, 31, 0.9);
+}
+
+.protocolCard,
+.gateSteps article,
+.trustGrid article,
+.receiptCard {
+  background:
+    linear-gradient(135deg, rgba(255, 42, 31, 0.13), transparent 38%),
+    rgba(5, 1, 1, 0.78);
+}
+
+.protocolGrid,
+.gateSection,
+.receiptSection,
+.trustGrid {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+}
+
+.minorSection,
+.finalCta {
+  background:
+    linear-gradient(112deg, rgba(255, 42, 31, 0.16), transparent 46%),
+    radial-gradient(circle at 74% 28%, rgba(255, 42, 31, 0.1), transparent 22rem),
+    rgba(5, 1, 1, 0.72);
+}

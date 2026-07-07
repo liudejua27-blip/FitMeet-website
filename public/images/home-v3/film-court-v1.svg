@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1100" role="img" aria-label="court social cinematic frame">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#040202"/><stop offset=".32" stop-color="#210403"/><stop offset=".68" stop-color="#c51609"/><stop offset="1" stop-color="#050202"/></linearGradient>
+    <radialGradient id="light" cx="72%" cy="38%" r="45%"><stop offset="0" stop-color="#ff5d22" stop-opacity=".86"/><stop offset=".44" stop-color="#aa0b06" stop-opacity=".42"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#070303"/><stop offset=".52" stop-color="#8d0a05"/><stop offset="1" stop-color="#030303"/></linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".98"/><stop offset=".42" stop-color="#000" stop-opacity=".72"/><stop offset=".72" stop-color="#000" stop-opacity=".1"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .09"/></feComponentTransfer></filter>
+    <clipPath id="cut"><polygon points="120,0 1800,0 1800,1100 0,1100 0,220"/></clipPath>
+  </defs>
+  <g clip-path="url(#cut)">
+    <rect width="1800" height="1100" fill="url(#bg)"/><rect width="1800" height="1100" fill="url(#light)"/><rect y="580" width="1800" height="520" fill="url(#floor)"/><rect width="1800" height="1100" filter="url(#grain)"/>
+    <g stroke="#ffe0c4" opacity=".48" fill="none"><path d="M520 780 C780 720 1160 690 1780 600" stroke-width="6"/><path d="M620 900 C920 840 1280 812 1820 760" stroke-width="4"/><path d="M880 520 H1680" stroke="#ff5d22" stroke-width="4" opacity=".42"/><path d="M950 430 H1600" stroke="#ff5d22" stroke-width="3" opacity=".3"/></g>
+    <g fill="#020202" stroke="#020202" stroke-linecap="round" stroke-width="26"><g transform="translate(1050 470) scale(1.05)"><circle r="24"/><path d="M-22 38 C-4 18 24 20 40 44 L52 130 C30 146 -4 148 -32 132 Z" fill="#020202"/><path d="M-24 132 L-72 248 M30 130 L86 246 M-20 62 L-92 114 M38 62 L120 92" fill="none"/><path d="M-12 48 C14 40 36 44 50 58" stroke="#ffead8" stroke-width="6" fill="none"/></g><g transform="translate(1340 530) scale(.92)"><circle r="23"/><path d="M-20 36 C-4 18 22 20 38 44 L50 126 C28 142 -2 144 -30 130 Z" fill="#020202"/><path d="M-22 130 L-66 236 M28 126 L78 236 M-20 60 L-80 112 M36 60 L105 92" fill="none"/><path d="M-12 46 C12 40 34 44 48 58" stroke="#ff3a19" stroke-width="6" fill="none"/></g></g>
+    <rect width="1800" height="1100" fill="url(#shade)"/>
+  </g>
+</svg>

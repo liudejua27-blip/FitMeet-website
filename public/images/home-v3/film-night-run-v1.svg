@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1100" role="img" aria-label="night run cinematic frame">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#020202"/><stop offset="0.38" stop-color="#150302"/><stop offset="0.68" stop-color="#8c0905"/><stop offset="1" stop-color="#030101"/></linearGradient>
+    <radialGradient id="lamp" cx="70%" cy="42%" r="45%"><stop offset="0" stop-color="#ff391c" stop-opacity=".95"/><stop offset=".34" stop-color="#d70d06" stop-opacity=".54"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#050505"/><stop offset=".52" stop-color="#1c0403"/><stop offset="1" stop-color="#030303"/></linearGradient>
+    <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2315" stop-opacity="0"/><stop offset=".3" stop-color="#ff2d16" stop-opacity=".92"/><stop offset=".68" stop-color="#ff8b20"/><stop offset="1" stop-color="#ff2315" stop-opacity="0"/></linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".98"/><stop offset=".38" stop-color="#000" stop-opacity=".7"/><stop offset=".66" stop-color="#000" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .10"/></feComponentTransfer></filter>
+    <clipPath id="cut"><polygon points="110,0 1800,0 1800,1100 0,1100 0,220"/></clipPath>
+  </defs>
+  <g clip-path="url(#cut)">
+    <rect width="1800" height="1100" fill="url(#bg)"/><rect width="1800" height="1100" fill="url(#lamp)"/><rect y="590" width="1800" height="510" fill="url(#road)"/><rect width="1800" height="1100" filter="url(#grain)"/>
+    <g opacity=".86"><polygon points="920,132 1190,105 1190,760 920,802" fill="#020202"/><polygon points="1245,214 1570,178 1570,810 1245,858" fill="#020202"/><polygon points="1610,300 1830,268 1830,840 1610,888" fill="#030303"/></g>
+    <path d="M-90 780 C280 690 620 646 960 612 C1280 580 1528 536 1905 405" fill="none" stroke="url(#rail)" stroke-width="18"/>
+    <path d="M-120 920 C330 820 760 794 1130 786 C1430 780 1612 742 1900 650" fill="none" stroke="url(#rail)" stroke-width="8" opacity=".72"/>
+    <g fill="#020202" stroke="#020202" stroke-linecap="round" stroke-width="24" opacity=".98">
+      <g transform="translate(1120 542) scale(1.1)"><circle cx="0" cy="0" r="24"/><path d="M-20 36 C-4 18 22 20 36 42 L48 120 C28 136 -2 138 -28 124 Z" fill="#020202"/><path d="M-18 122 L-58 238 M28 120 L74 236 M-18 56 L-82 110 M34 56 L104 86" fill="none"/><path d="M-10 42 C16 34 34 40 46 54" stroke="#ffead8" stroke-width="6" fill="none" opacity=".78"/></g>
+      <g transform="translate(1335 500) scale(.92)"><circle cx="0" cy="0" r="22"/><path d="M-18 34 C-2 18 20 20 34 42 L45 118 C26 132 -2 134 -26 122 Z" fill="#020202"/><path d="M-16 120 L-54 220 M28 118 L70 220 M-18 54 L-74 96 M34 54 L96 82" fill="none"/><path d="M-8 40 C12 34 30 38 42 52" stroke="#ff3a19" stroke-width="5" fill="none" opacity=".78"/></g>
+      <g transform="translate(1510 612) scale(.62)" opacity=".84"><circle cx="0" cy="0" r="22"/><path d="M-18 34 C-2 18 20 20 34 42 L45 118 C26 132 -2 134 -26 122 Z" fill="#020202"/><path d="M-16 120 L-54 220 M28 118 L70 220 M-18 54 L-74 96 M34 54 L96 82" fill="none"/></g>
+    </g>
+    <rect width="1800" height="1100" fill="url(#shade)"/>
+  </g>
+</svg>

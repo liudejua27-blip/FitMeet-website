@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1100" role="img" aria-label="青年球馆真实镜头">
+  <defs>
+    <linearGradient id="hall" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050202"/>
+      <stop offset="0.48" stop-color="#1b0705"/>
+      <stop offset="1" stop-color="#020101"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#070302"/>
+      <stop offset="0.5" stop-color="#291006"/>
+      <stop offset="1" stop-color="#060202"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2a2f" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#ff2a2f" stop-opacity="0.9"/>
+      <stop offset="0.68" stop-color="#ffb000" stop-opacity="0.66"/>
+      <stop offset="1" stop-color="#ff2a2f" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="ceiling" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff0c8" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ff2a2f" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1800" height="1100" fill="url(#hall)"/>
+  <path d="M80 250 L1720 170 L1800 1100 L0 1100 Z" fill="url(#floor)"/>
+  <ellipse cx="520" cy="200" rx="300" ry="120" fill="url(#ceiling)"/>
+  <ellipse cx="1240" cy="170" rx="360" ry="130" fill="url(#ceiling)" opacity="0.74"/>
+  <path d="M190 392 L1610 304" stroke="#f7f3e9" stroke-width="12" opacity="0.16"/>
+  <path d="M220 720 L1530 586" stroke="#f7f3e9" stroke-width="10" opacity="0.12"/>
+  <path d="M880 278 L940 1100" stroke="#ffb000" stroke-width="14" opacity="0.3"/>
+  <path d="M-80 570 C250 514 546 538 850 482 C1160 424 1410 416 1880 310" fill="none" stroke="url(#line)" stroke-width="30" stroke-linecap="square">
+    <animate attributeName="stroke-dasharray" values="220 1200;720 720;220 1200" dur="8s" repeatCount="indefinite"/>
+  </path>
+  <path d="M250 236 L820 198 L760 438 L180 486 Z" fill="#ff2a2f" opacity="0.14"/>
+  <path d="M1060 186 L1600 156 L1680 394 L1110 442 Z" fill="#ffb000" opacity="0.1"/>
+  <g fill="#050202">
+    <circle cx="620" cy="680" r="50"/>
+    <rect x="584" y="730" width="72" height="210" rx="36"/>
+    <path d="M586 840 C520 890 490 966 454 1080" stroke="#050202" stroke-width="48" stroke-linecap="round" fill="none"/>
+    <path d="M656 838 C734 890 786 972 836 1090" stroke="#050202" stroke-width="48" stroke-linecap="round" fill="none"/>
+    <circle cx="1120" cy="610" r="54"/>
+    <rect x="1082" y="664" width="78" height="222" rx="39"/>
+    <path d="M1084 780 C1010 830 960 926 900 1090" stroke="#050202" stroke-width="52" stroke-linecap="round" fill="none"/>
+    <path d="M1162 776 C1244 830 1306 920 1380 1088" stroke="#050202" stroke-width="52" stroke-linecap="round" fill="none"/>
+  </g>
+  <path d="M430 956 C610 842 760 880 930 778 S1250 596 1500 648" fill="none" stroke="#ff2a2f" stroke-width="12" opacity="0.58"/>
+</svg>

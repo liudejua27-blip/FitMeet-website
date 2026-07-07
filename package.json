@@ -1,0 +1,32 @@
+{
+  "name": "fitmeet-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "media:ingest": "bash scripts/fitmeet-video-ingest.sh",
+    "typecheck": "tsc --noEmit",
+    "media:ingest:batch": "bash scripts/fitmeet-video-batch-ingest.sh",
+    "qa:award-preflight": "node scripts/fitmeet-award-preflight.mjs",
+    "qa:chrome-fullsite": "node scripts/fitmeet-chrome-fullsite-award-qa.mjs",
+    "media:audit": "node scripts/fitmeet-video-asset-audit.mjs",
+    "qa:goal-audit": "node scripts/fitmeet-goal-completion-audit.mjs",
+    "qa:goal-audit:report": "node scripts/fitmeet-goal-completion-audit.mjs --report-only"
+  },
+  "dependencies": {
+    "@gsap/react": "2.1.2",
+    "gsap": "3.15.0",
+    "next": "16.2.9",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.9.0"
+  }
+}

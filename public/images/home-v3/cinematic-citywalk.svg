@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="城市漫游社交现场">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#050202"/><stop offset="0.42" stop-color="#1f0606"/><stop offset="1" stop-color="#050202"/></linearGradient>
+    <linearGradient id="street" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#070202"/><stop offset="0.48" stop-color="#261107"/><stop offset="1" stop-color="#070202"/></linearGradient>
+    <linearGradient id="slash" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2a2f"/><stop offset="0.5" stop-color="#ffb000"/><stop offset="1" stop-color="#ff2a2f" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#night)"/>
+  <g fill="#080303">
+    <path d="M0 258 L280 210 L280 690 L0 740 Z"/>
+    <path d="M334 170 L610 126 L610 668 L334 716 Z"/>
+    <path d="M1030 156 L1328 214 L1328 720 L1030 666 Z"/>
+    <path d="M1350 98 L1600 160 L1600 742 L1350 690 Z"/>
+  </g>
+  <path d="M0 658 C360 600 640 636 940 560 C1180 500 1360 510 1600 438 L1600 1000 L0 1000 Z" fill="url(#street)"/>
+  <path d="M-80 610 C280 548 586 600 884 520 C1120 458 1370 462 1680 356" fill="none" stroke="url(#slash)" stroke-width="18" opacity="0.95">
+    <animate attributeName="stroke-dashoffset" values="0;-900" dur="9s" repeatCount="indefinite"/>
+  </path>
+  <path d="M100 414 L1520 250 L1520 364 L100 548 Z" fill="#ff2a2f" opacity="0.14"/>
+  <path d="M500 268 L1660 130 L1660 210 L500 386 Z" fill="#ffb000" opacity="0.1"/>
+  <g fill="#050202">
+    <circle cx="618" cy="734" r="32"/><rect x="596" y="768" width="46" height="126" rx="23"/>
+    <circle cx="756" cy="704" r="34"/><rect x="732" y="740" width="50" height="142" rx="25"/>
+    <circle cx="912" cy="744" r="30"/><rect x="892" y="776" width="42" height="120" rx="21"/>
+  </g>
+  <path d="M514 878 C650 784 760 816 900 748 C1030 684 1168 682 1308 618" fill="none" stroke="#ff2a2f" stroke-width="8" opacity="0.82"/>
+</svg>

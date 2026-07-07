@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1100" role="img" aria-label="青年夜跑真实镜头">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050202"/>
+      <stop offset="0.42" stop-color="#160505"/>
+      <stop offset="1" stop-color="#020101"/>
+    </linearGradient>
+    <linearGradient id="river" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#050202"/>
+      <stop offset="0.46" stop-color="#1a0a07"/>
+      <stop offset="1" stop-color="#050202"/>
+    </linearGradient>
+    <linearGradient id="redLight" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2a2f" stop-opacity="0"/>
+      <stop offset="0.36" stop-color="#ff2a2f" stop-opacity="0.8"/>
+      <stop offset="0.7" stop-color="#ff9b00" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff2a2f" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="lamp" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffe4b0" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#ff2a2f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#080303"/>
+      <stop offset="1" stop-color="#020101"/>
+    </linearGradient>
+  </defs>
+  <rect width="1800" height="1100" fill="url(#night)"/>
+  <path d="M0 560 C320 500 580 528 910 468 C1240 408 1480 420 1800 350 L1800 1100 L0 1100 Z" fill="url(#river)"/>
+  <path d="M0 700 C310 632 560 664 920 590 C1250 522 1490 540 1800 454 L1800 1100 L0 1100 Z" fill="#070302" opacity="0.98"/>
+  <path d="M-120 658 C250 604 540 622 874 552 C1190 486 1450 492 1940 378" fill="none" stroke="url(#redLight)" stroke-width="28" stroke-linecap="square">
+    <animate attributeName="stroke-dasharray" values="260 1100;640 760;260 1100" dur="9s" repeatCount="indefinite"/>
+  </path>
+  <path d="M-80 540 L1880 318 L1880 404 L-80 640 Z" fill="#ff2a2f" opacity="0.12"/>
+  <path d="M780 390 L1720 244 L1720 320 L790 486 Z" fill="#ffb000" opacity="0.09"/>
+  <ellipse cx="1270" cy="248" rx="260" ry="160" fill="url(#lamp)"/>
+  <ellipse cx="1510" cy="340" rx="320" ry="190" fill="url(#lamp)" opacity="0.42"/>
+  <g fill="#070302" opacity="0.82">
+    <path d="M0 300 L210 260 L210 612 L0 670 Z"/>
+    <path d="M1420 230 L1800 176 L1800 620 L1420 670 Z"/>
+  </g>
+  <g fill="url(#sil)">
+    <ellipse cx="692" cy="842" rx="46" ry="92"/>
+    <rect x="660" y="684" width="64" height="194" rx="32"/>
+    <circle cx="692" cy="626" r="44"/>
+    <path d="M662 778 C604 826 574 886 548 984" stroke="#050202" stroke-width="44" stroke-linecap="round" fill="none"/>
+    <path d="M724 780 C780 834 820 894 870 992" stroke="#050202" stroke-width="42" stroke-linecap="round" fill="none"/>
+    <ellipse cx="920" cy="802" rx="50" ry="98"/>
+    <rect x="884" y="630" width="72" height="214" rx="36"/>
+    <circle cx="920" cy="568" r="48"/>
+    <path d="M888 736 C824 786 778 858 724 980" stroke="#050202" stroke-width="48" stroke-linecap="round" fill="none"/>
+    <path d="M954 744 C1024 800 1064 878 1112 1000" stroke="#050202" stroke-width="46" stroke-linecap="round" fill="none"/>
+    <ellipse cx="1144" cy="846" rx="42" ry="86"/>
+    <rect x="1114" y="704" width="60" height="180" rx="30"/>
+    <circle cx="1144" cy="650" r="40"/>
+  </g>
+  <path d="M500 920 C650 842 780 862 930 780 S1220 622 1470 660" fill="none" stroke="#ff2a2f" stroke-width="12" opacity="0.62"/>
+  <path d="M0 0 H1800 V1100 H0 Z" fill="none" stroke="#f7f3e9" stroke-opacity="0.04" stroke-width="2"/>
+</svg>

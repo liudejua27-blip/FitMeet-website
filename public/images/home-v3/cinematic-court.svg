@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="球馆社交现场">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#070202"/><stop offset="0.55" stop-color="#170505"/><stop offset="1" stop-color="#020101"/></linearGradient>
+    <linearGradient id="court" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241006"/><stop offset="1" stop-color="#070202"/></linearGradient>
+    <linearGradient id="light" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2a2f"/><stop offset="0.5" stop-color="#ffb000"/><stop offset="1" stop-color="#ff2a2f"/></linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <path d="M120 300 L1480 236 L1600 1000 L0 1000 Z" fill="url(#court)"/>
+  <path d="M176 402 L1440 356" stroke="#f7f3e9" stroke-width="10" opacity="0.22"/>
+  <path d="M246 758 L1340 628" stroke="#f7f3e9" stroke-width="8" opacity="0.16"/>
+  <path d="M770 286 L820 1000" stroke="#ffb000" stroke-width="12" opacity="0.34"/>
+  <path d="M0 548 C282 494 530 526 760 474 C1018 414 1260 418 1600 342" fill="none" stroke="url(#light)" stroke-width="20" opacity="0.92">
+    <animate attributeName="stroke-dasharray" values="240 900;620 520;240 900" dur="7s" repeatCount="indefinite"/>
+  </path>
+  <path d="M146 166 L1460 104 L1540 210 L226 274 Z" fill="#f7f3e9" opacity="0.08"/>
+  <path d="M240 182 L664 160 L610 354 L182 386 Z" fill="#ff2a2f" opacity="0.16"/>
+  <path d="M934 144 L1378 122 L1450 320 L1000 350 Z" fill="#ffb000" opacity="0.12"/>
+  <g fill="#040202">
+    <circle cx="500" cy="654" r="36"/><rect x="474" y="688" width="54" height="150" rx="27"/>
+    <circle cx="1068" cy="584" r="38"/><rect x="1040" y="620" width="58" height="156" rx="29"/>
+    <circle cx="858" cy="724" r="34"/><rect x="834" y="756" width="50" height="132" rx="25"/>
+  </g>
+  <path d="M360 860 C540 760 676 810 820 706 S1090 562 1270 624" fill="none" stroke="#ff2a2f" stroke-width="9" opacity="0.78"/>
+</svg>
