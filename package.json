@@ -7,26 +7,36 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "media:ingest": "bash scripts/fitmeet-video-ingest.sh",
     "typecheck": "tsc --noEmit",
-    "media:ingest:batch": "bash scripts/fitmeet-video-batch-ingest.sh",
-    "qa:award-preflight": "node scripts/fitmeet-award-preflight.mjs",
-    "qa:chrome-fullsite": "node scripts/fitmeet-chrome-fullsite-award-qa.mjs",
-    "media:audit": "node scripts/fitmeet-video-asset-audit.mjs",
-    "qa:goal-audit": "node scripts/fitmeet-goal-completion-audit.mjs",
-    "qa:goal-audit:report": "node scripts/fitmeet-goal-completion-audit.mjs --report-only"
+    "video:preview": "remotion studio video/social-world/index.ts",
+    "video:still": "remotion still video/social-world/index.ts SocialWorldLoop design-references/social-world-video-poster.png --frame=0",
+    "video:render": "remotion render video/social-world/index.ts SocialWorldLoop public/videos/social-world/social-world-loop.mp4"
   },
   "dependencies": {
     "@gsap/react": "2.1.2",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "gsap": "3.15.0",
+    "lenis": "^1.3.25",
+    "motion": "^12.42.2",
     "next": "16.2.9",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-icons": "^5.7.0",
+    "socket.io-client": "^4.8.3",
+    "three": "^0.185.1"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.486",
+    "@remotion/transitions": "^4.0.486",
+    "@tailwindcss/postcss": "^4.3.2",
     "@types/node": "^26.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.185.0",
+    "postcss": "^8.5.16",
+    "remotion": "^4.0.486",
+    "tailwindcss": "^4.3.2",
     "typescript": "^5.9.0"
   }
 }

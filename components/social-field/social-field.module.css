@@ -1,0 +1,7 @@
+.layer { position:absolute; inset:0; z-index:1; overflow:hidden; pointer-events:none; opacity:.48; }
+.layer canvas { width:100%!important; height:100%!important; }
+.fallback { position:absolute; inset:0; opacity:.5; }
+.fallback::before { position:absolute; top:50%; left:-8%; width:116%; height:1px; background:linear-gradient(90deg,transparent,#08e4f2 22%,#28f0c0 60%,#f14db2 86%,transparent); content:""; transform:rotate(-7deg); }
+.fallback i { position:absolute; width:7px; height:7px; border:1px solid rgba(40,240,192,.82); border-radius:50%; box-shadow:0 0 16px rgba(40,240,192,.48); }
+.fallback i:nth-child(1){top:23%;left:18%}.fallback i:nth-child(2){top:61%;left:32%}.fallback i:nth-child(3){top:31%;left:51%}.fallback i:nth-child(4){top:67%;left:72%}.fallback i:nth-child(5){top:38%;left:87%}
+@media (prefers-reduced-motion:reduce){.layer canvas{display:none}.layer{opacity:.38}}

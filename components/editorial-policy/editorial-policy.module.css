@@ -1,0 +1,225 @@
+.page {
+  --paper: #f3f0e9;
+  --ink: #08090b;
+  --cyan: #19e9e2;
+  min-width: 1080px;
+  overflow: clip;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.hero {
+  position: relative;
+  display: grid;
+  height: 88svh;
+  min-height: 720px;
+  place-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(8, 9, 11, 0.13);
+  background:
+    radial-gradient(circle at 70% 50%, rgba(255, 255, 255, 0.92), transparent 30%),
+    linear-gradient(135deg, #ebe7df, #f7f4ee);
+}
+
+.heroOrbit {
+  position: absolute;
+  top: 56%;
+  left: 70%;
+  width: 62vw;
+  aspect-ratio: 1;
+  border: 1px solid rgba(8, 9, 11, 0.13);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.heroOrbit i {
+  position: absolute;
+  border: 1px solid rgba(8, 9, 11, 0.11);
+  border-radius: 50%;
+}
+.heroOrbit i:nth-child(1) { inset: 15%; }
+.heroOrbit i:nth-child(2) { inset: 30%; }
+.heroOrbit i:nth-child(3) { inset: 43%; }
+.heroOrbit span {
+  position: absolute;
+  top: 20%;
+  left: 8%;
+  width: 15px;
+  height: 15px;
+  border: 1px solid rgba(25, 233, 226, 0.62);
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 0 18px rgba(25, 233, 226, 0.72);
+}
+
+.heroCopy {
+  position: relative;
+  z-index: 2;
+  width: 78vw;
+  max-width: 1260px;
+}
+
+.heroCopy > span,
+.footer > span,
+.document aside > span {
+  color: #706c65;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.heroCopy h1 {
+  margin: 28px 0 32px;
+  font-size: clamp(6.4rem, 10vw, 11.6rem);
+  font-weight: 850;
+  letter-spacing: -0.09em;
+  line-height: 0.72;
+}
+
+.heroCopy p {
+  width: 520px;
+  margin: 0;
+  color: #55524d;
+  font-size: clamp(1.15rem, 1.5vw, 1.5rem);
+  font-weight: 520;
+  letter-spacing: -0.035em;
+  line-height: 1.5;
+}
+
+.reviewState {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  margin-top: 26px;
+  padding: 0 13px;
+  border: 1px solid rgba(8, 9, 11, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 0.58rem;
+  font-weight: 780;
+  letter-spacing: 0.1em;
+}
+.reviewState i { width: 6px; height: 6px; border-radius: 50%; background: #f45ebd; box-shadow: 0 0 10px #f45ebd; }
+
+.documentMeta {
+  display: flex;
+  gap: 32px;
+  margin: 28px 0 0;
+}
+.documentMeta div { display: grid; gap: 5px; }
+.documentMeta dt { color: #817d76; font-size: 0.52rem; font-weight: 780; letter-spacing: 0.12em; }
+.documentMeta dd { margin: 0; font-size: 0.66rem; font-weight: 700; }
+
+.readCue {
+  position: absolute;
+  right: 5vw;
+  bottom: 33px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.68rem;
+  font-weight: 730;
+}
+.readCue i { width: 42px; height: 1px; background: var(--ink); }
+
+.document {
+  display: grid;
+  width: min(86vw, 1320px);
+  grid-template-columns: 250px minmax(0, 820px);
+  justify-content: space-between;
+  gap: 8vw;
+  margin: 0 auto;
+  padding: 16svh 0 19svh;
+}
+
+.document aside {
+  position: sticky;
+  top: 120px;
+  align-self: start;
+}
+.document aside nav { display: grid; gap: 13px; margin: 27px 0 43px; }
+.document aside nav a { color: #77736d; font-size: 0.67rem; font-weight: 720; letter-spacing: 0.055em; }
+.document aside nav a:hover { color: var(--ink); }
+.document aside > a { display: flex; width: max-content; align-items: center; gap: 9px; margin-top: 12px; border-bottom: 1px solid rgba(8, 9, 11, 0.35); padding-bottom: 5px; font-size: 0.7rem; font-weight: 720; }
+
+.document article > section {
+  padding: 0 0 12svh;
+  scroll-margin-top: 110px;
+}
+.document article > section + section { padding-top: 10svh; border-top: 1px solid rgba(8, 9, 11, 0.14); }
+.document article > section > div { display: flex; align-items: center; gap: 15px; margin-bottom: 39px; }
+.document article > section > div span,
+.document article > section > div strong { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em; }
+.document article > section > div i { width: 56px; height: 1px; background: linear-gradient(90deg, #19e9e2, #38efb8); }
+.document article p {
+  margin: 0 0 24px;
+  font-size: clamp(1.75rem, 2.35vw, 2.55rem);
+  font-weight: 560;
+  letter-spacing: -0.05em;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.footer {
+  position: relative;
+  min-height: 74svh;
+  padding: 16svh 7vw 36px;
+  overflow: hidden;
+  background: #08090b;
+  color: #fff;
+}
+.footer::after {
+  position: absolute;
+  top: 11%;
+  right: -8vw;
+  width: 48vw;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  box-shadow: 0 0 0 7vw rgba(255, 255, 255, 0.035), 0 0 0 14vw rgba(255, 255, 255, 0.025);
+  content: "";
+}
+.footer > span { color: rgba(255, 255, 255, 0.5); }
+.footer > a {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 18px;
+  margin-top: 30px;
+  font-size: clamp(5.2rem, 8.7vw, 10rem);
+  font-weight: 800;
+  letter-spacing: -0.085em;
+  line-height: 0.9;
+}
+.footer > div {
+  position: absolute;
+  right: 3vw;
+  bottom: 25px;
+  left: 3vw;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 17px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.6rem;
+  font-weight: 720;
+  letter-spacing: 0.1em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.page) { scroll-behavior: auto; }
+}
+
+/* Simplified Chinese desktop typography */
+.heroCopy h1 { font-size: clamp(4.7rem, 6.8vw, 8rem); letter-spacing: -0.045em; line-height: .96; }
+.heroCopy > span, .footer > span, .document aside > span,
+.document article > section > div span, .document article > section > div strong { font-size: .72rem; letter-spacing: .035em; }
+.reviewState, .documentMeta dt { font-size: .66rem; letter-spacing: .03em; }
+.documentMeta dd, .document aside nav a, .document aside > a, .readCue { font-size: .74rem; }
+.document article p { font-size: clamp(1.25rem, 1.65vw, 1.7rem); letter-spacing: -0.02em; line-height: 1.72; }
+.footer > a { font-size: clamp(4rem, 6.5vw, 7.5rem); letter-spacing: -0.045em; line-height: 1; }
+.footer > div { font-size: .68rem; letter-spacing: .03em; }

@@ -1,0 +1,17 @@
+.page { min-height: 100vh; overflow: clip; background: #f4f2ed; color: #08090b; }
+.hero { position: relative; display: flex; min-height: 100svh; flex-direction: column; justify-content: center; overflow: hidden; padding: 15svh clamp(58px, 6.6vw, 126px) 9svh; }
+.hero > span { position: relative; z-index: 2; color: rgba(8, 9, 11, 0.46); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.15em; }
+.hero h1 { position: relative; z-index: 2; width: 75vw; margin: 25px 0 30px; font-size: clamp(5rem, 8.4vw, 10rem); font-weight: 900; letter-spacing: -0.085em; line-height: 0.86; }
+.hero p { position: relative; z-index: 2; width: 42vw; margin: 0; color: rgba(8, 9, 11, 0.6); font-size: 1rem; line-height: 1.7; }
+.hero > div:not(.route) { position: relative; z-index: 2; display: flex; gap: 12px; margin-top: 6svh; }
+.hero a { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; gap: 11px; padding: 0 22px; border: 1px solid rgba(8, 9, 11, 0.2); border-radius: 999px; font-size: 0.72rem; font-weight: 760; }
+.hero a:first-child { background: #08090b; color: #fff; }
+.route { position: absolute; top: 50%; right: -5vw; width: 56vw; height: 1px; background: linear-gradient(90deg, transparent, #08e4f2 26%, #28f0c0 58%, #f14db2 86%, transparent); transform: rotate(-18deg); }
+.route i { position: absolute; top: 50%; width: 9px; height: 9px; border: 2px solid #f4f2ed; border-radius: 50%; background: #28f0c0; box-shadow: 0 0 22px #28f0c0; transform: translateY(-50%); }
+.route i:nth-child(1) { left: 22%; } .route i:nth-child(2) { left: 58%; background: #08e4f2; } .route i:nth-child(3) { left: 84%; background: #f14db2; }
+@media (max-width: 1180px) { .hero { padding-right: 48px; padding-left: 48px; } }
+
+/* Simplified Chinese desktop typography */
+.hero > span { font-size: .7rem; letter-spacing: .035em; }
+.hero h1 { font-size: clamp(4.5rem, 7vw, 8.2rem); letter-spacing: -.045em; line-height: .98; }
+.hero a { font-size: .78rem; }

@@ -1,0 +1,16 @@
+.transition{position:fixed;inset:0;z-index:500;visibility:hidden;pointer-events:none;background:#050607;color:#fff;clip-path:inset(100% 0 0 0)}
+.transitionField{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden}
+.transitionField span{position:relative;z-index:2;font-size:clamp(5rem,10vw,11rem);font-weight:800;letter-spacing:-.08em;opacity:.08}
+.transitionField svg{position:absolute;inset:0;width:100%;height:100%}
+.transitionField path{fill:none;stroke:url(#none);stroke:#28f0c0;stroke-width:1.5;stroke-linecap:round;stroke-dasharray:1800;stroke-dashoffset:1800}
+.transitionField i{position:absolute;width:8px;height:8px;border-radius:50%;background:#28f0c0;box-shadow:0 0 18px #28f0c0;opacity:0}
+.transitionField i:nth-of-type(1){top:35%;left:29%}.transitionField i:nth-of-type(2){top:17%;left:59%}.transitionField i:nth-of-type(3){top:63%;left:82%}
+.cover,.reveal{visibility:visible}
+.cover{animation:cover-in 360ms cubic-bezier(.76,0,.24,1) forwards}
+.cover .transitionField path{animation:route-draw 520ms ease-out 80ms forwards}.cover .transitionField i{animation:node-in 240ms ease-out 260ms forwards}
+.reveal{clip-path:inset(0);animation:cover-out 720ms cubic-bezier(.76,0,.24,1) forwards}
+.reveal .transitionField path{stroke-dashoffset:0}.reveal .transitionField i{opacity:1}
+.sound{position:fixed;left:28px;bottom:26px;z-index:210;display:flex;min-height:38px;align-items:center;gap:9px;padding:0 13px;border:1px solid rgba(255,255,255,.24);border-radius:999px;background:rgba(5,7,8,.64);color:rgba(255,255,255,.74);cursor:pointer;font-size:.61rem;font-weight:700;backdrop-filter:blur(14px)}
+.sound i{width:6px;height:6px;border:1px solid #28f0c0;border-radius:50%}.sound[aria-pressed="true"] i{background:#28f0c0;box-shadow:0 0 12px #28f0c0}
+@keyframes cover-in{to{clip-path:inset(0)}}@keyframes cover-out{to{clip-path:inset(0 0 100% 0)}}@keyframes route-draw{to{stroke-dashoffset:0}}@keyframes node-in{to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.transition{display:none}.sound{display:none}}
