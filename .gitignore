@@ -1,14 +1,20 @@
 # Local QA / evidence screenshots
 .codex-*.png
 .codex/
+.codex-audit/
 .playwright-cli/
 output/
+playwright-report/
+test-results/
+coverage/
 
 # Node / build artifacts
 node_modules/
 .next/
 dist/
 .vite/
+.turbo/
+out/
 
 # Temp and media workflow dirs
 .tmp/
@@ -16,6 +22,10 @@ dist/
 
 # Build cache / ts artifacts
 tsconfig.tsbuildinfo
+*.tsbuildinfo
+*.xcresult
+*.xcresult/
+*.trace
 
 # macOS
 .DS_Store
