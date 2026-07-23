@@ -315,7 +315,13 @@ export class FitMeetApiClient {
     return Array.isArray(payload) ? { items: payload, data: payload } : payload;
   }
   createAgentThread(title?: string) {
-    return this.request<{ thread: AgentThread; entries: AgentThreadEntry[] }>({ method: "POST", path: fitMeetPaths.agentThreads.root, body: title ? { title } : {}, idempotencyKey: `web-agent-thread-${crypto.randomUUID()}` });
+    const clientThreadId = crypto.randomUUID();
+    return this.request<{ thread: AgentThread; entries: AgentThreadEntry[] }>({
+      method: "POST",
+      path: fitMeetPaths.agentThreads.root,
+      body: { clientThreadId, ...(title ? { title } : {}) },
+      idempotencyKey: `web-agent-thread-${clientThreadId}`,
+    });
   }
   getAgentThread(id: string) { return this.request<AgentThreadDetail>({ method: "GET", path: fitMeetPaths.agentThreads.detail(id) }); }
   sendAgentThreadTurn(id: string, content: string, clientTurnId = crypto.randomUUID()) {

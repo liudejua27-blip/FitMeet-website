@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "test:agent": "node --experimental-strip-types --test test/fitmeet-agent-thread-state.test.mjs",
     "video:preview": "remotion studio video/social-world/index.ts",
     "video:still": "remotion still video/social-world/index.ts SocialWorldLoop design-references/social-world-video-poster.png --frame=0",
     "video:render": "remotion render video/social-world/index.ts SocialWorldLoop public/videos/social-world/social-world-loop.mp4"

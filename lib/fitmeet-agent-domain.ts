@@ -1,5 +1,6 @@
 import type { DemandDraftSession, FitMeetDemand, FitMeetDemandCandidate } from "./fitmeet-api-contract";
 import type { CandidateViewModel, DemandViewModel } from "./fitmeet-experience-models";
+import { agentDraftActivity, orderedAgentDraftFields } from "./fitmeet-agent-thread-state";
 
 export type LiveCandidate = CandidateViewModel & {
   candidateRecordId: number;
@@ -107,23 +108,23 @@ export function displayCandidate(value: FitMeetDemandCandidate): LiveCandidate {
 
 export function displayDraftSession(session: DemandDraftSession): DemandViewModel {
   const fields = session.knownFields || {};
-  const activity = fields["运动项目"] || fields["活动"] || fields["服务类型"] || fields.activity || session.category || "一起活动";
-  const cardFields = ["运动项目", "活动", "服务类型", "求助事项", "目的地", "地点", "时间", "水平或偏好", "搭子要求", "偏好", "预算", "数量或人数"]
-    .filter((key) => fields[key])
-    .map((key) => ({ title: key, value: fields[key] }))
-    .slice(0, 6);
+  const activity = agentDraftActivity(session);
+  const cardFields = orderedAgentDraftFields(session);
+  const timeField = cardFields.find((field) => /时间|日期|期限/.test(field.title) && field.value)?.value;
+  const locationField = cardFields.find((field) => /地点|位置|区域|目的地/.test(field.title) && field.value)?.value;
+  const preferenceField = cardFields.find((field) => /方式|节奏|要求|偏好|水平|边界/.test(field.title) && field.value)?.value;
   return {
     id: session.generatedCardId || session.id,
-    title: activity === "一起活动" ? "一起做点喜欢的事" : `轻松${activity}局`,
+    title: activity,
     summary: session.rawUserIntent?.trim() || Object.values(fields).filter(Boolean).join(" · ") || "需求内容待补充",
     activityType: activity,
-    timeWindow: fields["时间"] || fields.time || "时间待确认",
-    locationText: fields["地点"] || fields["目的地"] || fields.location || "大致地点待确认",
+    timeWindow: timeField || fields["时间"] || fields.time || "时间待确认",
+    locationText: locationField || fields["地点"] || fields["目的地"] || fields.location || "大致地点待确认",
     capacityMax: 2,
-    durationText: fields["水平或偏好"] || fields["搭子要求"] || fields["偏好"] || fields.boundary || "节奏待确认，可继续补充",
-    privacyBoundary: fields.boundary || fields["搭子要求"] || fields["偏好"] || "公共场所集合，先聊天再决定",
+    durationText: preferenceField || fields["水平或偏好"] || fields["搭子要求"] || fields["偏好"] || fields.boundary || "节奏待确认，可继续补充",
+    privacyBoundary: fields["边界"] || fields.boundary || fields["搭子要求"] || fields["偏好"] || "公共场所集合，先聊天再决定",
     status: "draft",
-    fields: cardFields.length >= 3 ? cardFields : undefined,
+    fields: cardFields,
   };
 }
 

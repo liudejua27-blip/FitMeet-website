@@ -95,6 +95,12 @@
 .quickStart button { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 11px; border: 1px solid #e8ebf1; border-radius: 13px; background: #f8f9fc; color: #536078; font-size: 11px; font-weight: 720; text-align: left; }
 .quickStart button:disabled { opacity: .55; }
 .quickStart button svg { flex: 0 0 auto; color: #6c82db; }
+.agentReplySuggestions { display: grid; gap: 7px; margin: 10px 0 2px; }
+.agentReplySuggestions>small { color: #7c879a; font-size: 11px; font-weight: 750; }
+.agentReplySuggestions>div { display: flex; gap: 8px; overflow-x: auto; padding: 1px 1px 5px; scrollbar-width: none; }
+.agentReplySuggestions>div::-webkit-scrollbar { display: none; }
+.agentReplySuggestions button { min-height: 44px; flex: 0 0 auto; max-width: 280px; padding: 9px 13px; border: 1px solid #dfe6f2; border-radius: 999px; background: #fff; color: #53647e; font-size: 12px; font-weight: 750; text-align: left; box-shadow: 0 5px 14px rgba(45,61,100,.055); }
+.agentReplySuggestions button:disabled { opacity: .5; }
 .homeDemandSlot { margin-top: 14px; }
 .homeDemandSlot .demandCard { margin-left: 0; }
 .homeConversation { margin-top: 18px; }

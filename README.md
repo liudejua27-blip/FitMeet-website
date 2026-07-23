@@ -109,9 +109,9 @@ NEXT_PUBLIC_SITE_URL=https://fitmeet.app
 
 当前已实现的 Agent 页面：`http://localhost:3000/agent`
 
-当前已实现的移动端体验账号入口：`http://localhost:3000/agent/try`。该路由不要求登录，并提供 iOS 同步的五 Tab、Agent、发现、消息、关系、邀请、资料和设置体验；页面刷新后会重置为受控的路演状态。完整九步建档可从个人页进入，或直接打开 `http://localhost:3000/agent/try/onboarding`。
+当前已实现的移动端内测入口：`http://localhost:3000/agent/try`。该路由使用项目组发放的 4 位邀请码登录，主导航与当前产品约束一致，仅保留首页、发现、消息和我的四个 Tab；小福 Agent 位于首页。线程、需求草稿、需求卡、候选、邀请和消息均读取 MobileAPI 的账号级真实状态，刷新后恢复，不使用浏览器演示数据冒充业务事实。资料完善可从个人页进入，或直接打开 `http://localhost:3000/agent/try/onboarding`。
 
-三端接口路径以 iOS `FitMeetCoreEndpoint.swift` 为唯一基线。Web 的路径、认证头和幂等写入规则见 `docs/THREE_CLIENT_API_PARITY.md`；体验账号保留相同字段与状态机，但不会写入真实用户数据。设置 `NEXT_PUBLIC_FITMEET_API_MODE=live` 后，Web 会启用同一 API 客户端的正式请求分支。
+三端接口路径以 iOS `FitMeetCoreEndpoint.swift` 为唯一基线。Web 的路径、认证头和幂等写入规则见 `docs/THREE_CLIENT_API_PARITY.md`。内测账号会写入正式 MobileAPI 的测试账号数据；发布、邀请、关系、安全和资料修改等真实动作必须经过用户确认，不能把前端提示当作服务端成功。
 
 当前已实现的 Safety 页面：`http://localhost:3000/safety`
 

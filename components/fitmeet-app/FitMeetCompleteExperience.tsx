@@ -17,18 +17,25 @@ import {
   invitationMessage,
 } from "@/lib/fitmeet-experience-models";
 import {
-  demandFieldImportance,
-  demandMatchingPolicy,
   demandStatusCopy,
-  demandTypeFor,
   displayCandidate,
   displayDemand,
   displayDraftSession,
   effectiveDemandStatus,
-  humanDemandActivity,
-  missingFieldsForDemandType,
   type LiveCandidate,
 } from "@/lib/fitmeet-agent-domain";
+import {
+  agentDraftCanRenderCard,
+  agentReplySuggestions,
+  agentTurnNotice,
+  canonicalAgentDraftCardPatch,
+  demandLifecyclePrompt,
+  latestAgentToolProposal,
+  mergeAgentDraftEdits,
+  reconcileAgentReplyWithDraft,
+  reconcileExplicitDraftAnswer,
+  type DemandLifecycleAction,
+} from "@/lib/fitmeet-agent-thread-state";
 import { FitMeetApiError } from "@/lib/fitmeet-api-client";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { InternalTesterLogin } from "./InternalTesterLogin";
@@ -56,13 +63,13 @@ const tabs: Array<{ id: TabId; label: string; icon: typeof FiHome }> = [
 ];
 
 const initialChat: ChatLine[] = [
-  { id: 1, role: "assistant", text: "嗨，你好呀！😊 我是小福。今天怎么样？你想和谁一起做点什么，可以慢慢说。" },
+  { id: 1, role: "assistant", text: "嗨，我是小福。你可以从一个模糊的想法开始，我会先帮你理解和整理，不会替你联系或安排任何人。" },
 ];
 
 const quickAgentPrompts = [
-  "想找一个下班后一起运动的搭子",
-  "周末想找人一起看展或喝咖啡",
-  "想认识节奏合适的新朋友",
+  "周末想找人 Citywalk 后喝杯咖啡",
+  "有件事想先和你聊聊，不创建卡片",
+  "我有一个还没想清楚的现实需求",
 ];
 
 const emptyProfile: SocialProfile = {
@@ -133,7 +140,15 @@ function conversationPeerId(conversation: FitMeetConversation | null | undefined
 
 function agentEntriesForDetail(detail: AgentThreadDetail) {
   const draft = detail.activeDraft;
+  const latestAssistantSequence = detail.entries.reduce((latest, entry) => (
+    entry.kind === "message" && entry.role === "assistant"
+      ? Math.max(latest, entry.sequence)
+      : latest
+  ), -1);
   const normalizedEntries = detail.entries.map((entry) => {
+    if (draft && entry.kind === "message" && entry.role === "assistant" && entry.sequence === latestAssistantSequence) {
+      return { ...entry, content: reconcileAgentReplyWithDraft(entry.content, draft) };
+    }
     if (entry.toolName !== "classify_demand" || !draft?.demandType) return entry;
     const label = draft.demandType === "buddy" ? "搭子 / 交友" : draft.demandType === "workout" ? "运动约练" : draft.demandType;
     return { ...entry, content: `已按当前远端草稿归类为「${label}」需求。` };
@@ -249,7 +264,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     setActiveDraftSession(detail.activeDraft);
     if (detail.activeDraft && presentDraft) {
       setDemand(displayDraftSession(detail.activeDraft));
-      setHasDemand(Boolean(detail.activeDraft.canGenerateCard && detail.activeDraft.userConfirmedGenerate));
+      setHasDemand(agentDraftCanRenderCard(detail.activeDraft));
       setLiveDemand(null);
       setCandidates([]);
       setSelectedCandidateId(null);
@@ -257,7 +272,15 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   }, []);
 
   const loadAgentThread = useCallback(async (threadId: string, presentDraft = false) => {
-    const detail = await api.getAgentThread(threadId);
+    let detail = await api.getAgentThread(threadId);
+    if (detail.activeDraft?.status === "cardGenerated") {
+      const canonical = canonicalAgentDraftCardPatch(detail.activeDraft);
+      const fieldsChanged = JSON.stringify(canonical.knownFields) !== JSON.stringify(detail.activeDraft.knownFields);
+      if (fieldsChanged || canonical.category !== detail.activeDraft.category) {
+        await api.updateDemandDraftSession(detail.activeDraft.id, canonical);
+        detail = await api.getAgentThread(threadId);
+      }
+    }
     applyAgentDetail(detail, presentDraft);
     return detail;
   }, [api, applyAgentDetail]);
@@ -485,9 +508,15 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     setChatInput("");
     try {
       const thread = await ensureAgentThread();
-      await api.sendAgentThreadTurn(thread.id, text);
-      const detail = await loadAgentThread(thread.id, true);
-      if (detail.activeDraft) notice(detail.activeDraft.canGenerateCard ? "需求卡草稿已同步，先核对后再发布。" : `草稿已保存，还差：${detail.activeDraft.missingFields.join("、")}。`);
+      const turn = await api.sendAgentThreadTurn(thread.id, text);
+      let detail = await api.getAgentThread(thread.id);
+      const answerPatch = reconcileExplicitDraftAnswer(text, activeDraftSession, detail.activeDraft);
+      if (answerPatch && detail.activeDraft) {
+        await api.updateDemandDraftSession(detail.activeDraft.id, answerPatch);
+      }
+      detail = await loadAgentThread(thread.id, true);
+      const feedback = agentTurnNotice({ executionMode: turn.executionMode, activeDraft: detail.activeDraft });
+      if (feedback) notice(feedback);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "小福暂时无法回复，请稍后再试。";
       notice(message);
@@ -516,49 +545,68 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
 
   const saveDemandDraft = async (next: DemandViewModel) => {
     if (!activeDraftSession) return notice("这张草稿还没有同步到小福；请先发送一条需求描述。 ");
-    const demandType = demandTypeFor(next.activityType);
-    const knownFields: Record<string, string> = {
-      ...activeDraftSession.knownFields,
-      ...(demandType === "workout" ? { "运动项目": next.activityType } : {}),
-      ...(["buddy", "activity"].includes(demandType) ? { "活动": next.activityType } : {}),
-      ...(demandType === "service" ? { "服务类型": next.activityType } : {}),
-      ...(demandType === "travel" ? { "目的地": next.locationText === "大致地点待确认" ? "" : next.locationText } : { "地点": next.locationText === "大致地点待确认" ? "" : next.locationText }),
-      "时间": next.timeWindow === "时间待确认" ? "" : next.timeWindow,
-      boundary: next.privacyBoundary,
-    };
-    const missingFields = missingFieldsForDemandType(demandType, knownFields);
+    const patch = mergeAgentDraftEdits(activeDraftSession, next);
     try {
-      const saved = await api.updateDemandDraftSession(activeDraftSession.id, {
-        category: next.activityType,
-        demandType,
-        knownFields,
-        missingFields,
-        canGenerateCard: missingFields.length === 0,
-        status: missingFields.length === 0 ? "readyToConfirm" : "collecting",
-        lastQuestion: missingFields.length ? `还差：${missingFields.join("、")}。` : "信息基本完整了。请先核对，再决定是否发布。",
-      });
+      const saved = await api.updateDemandDraftSession(activeDraftSession.id, patch);
       setActiveDraftSession(saved);
       setDemand(displayDraftSession(saved));
-      setHasDemand(Boolean(saved.canGenerateCard && saved.userConfirmedGenerate));
+      setHasDemand(agentDraftCanRenderCard(saved));
       setOverlay(null);
-      notice(missingFields.length ? `草稿已同步，还差：${missingFields.join("、")}。` : saved.userConfirmedGenerate ? "需求卡已更新；发布前仍可继续修改。" : "信息已整理好；请由你确认是否生成需求卡。");
+      notice(saved.missingFields.length ? `草稿已同步；小福接下来只会确认：${saved.missingFields[0]}。` : saved.status === "cardGenerated" ? "需求卡已更新；发布前仍可继续修改。" : "信息已整理好；请由你确认是否生成需求卡。");
     } catch (reason) { notice(reason instanceof Error ? reason.message : "需求草稿未能保存。 "); }
   };
 
   const confirmDemandCardDraft = async () => {
     if (!activeDraftSession) return notice("这段需求还没有同步到小福；请先发送一条需求描述。 ");
     if (!activeDraftSession.canGenerateCard) return notice(`还差：${activeDraftSession.missingFields.join("、")}。补完后再由你决定是否生成需求卡。`);
+    if (agentSending) return;
+    setAgentSending(true);
     try {
-      const saved = await api.updateDemandDraftSession(activeDraftSession.id, {
-        userConfirmedGenerate: true,
-        status: "cardGenerated",
-      });
-      setActiveDraftSession(saved);
-      setDemand(displayDraftSession(saved));
+      const thread = await ensureAgentThread();
+      const proposal = latestAgentToolProposal(agentEntries, "generate_demand_card", ["ready_for_review"]);
+      if (proposal) {
+        await api.resolveAgentToolProposal(thread.id, proposal.id, "approve");
+      } else {
+        await api.sendAgentThreadTurn(thread.id, "我确认生成这张需求卡。");
+      }
+      const detail = await loadAgentThread(thread.id, true);
+      if (!detail.activeDraft || !agentDraftCanRenderCard(detail.activeDraft)) {
+        throw new Error("服务端尚未确认需求卡已生成，请继续补充小福提出的关键问题。");
+      }
+      setDemand(displayDraftSession(detail.activeDraft));
       setHasDemand(true);
       setOverlay("demand");
       notice("需求卡已生成，仍未发布。请核对后再决定是否开始匹配。");
     } catch (reason) { notice(reason instanceof Error ? reason.message : "需求卡暂时无法生成。 "); }
+    finally { setAgentSending(false); }
+  };
+
+  const requestAgentDemandLifecycle = async (action: DemandLifecycleAction) => {
+    if (agentSending) return;
+    setAgentSending(true);
+    try {
+      const thread = await ensureAgentThread();
+      if (action === "publish" && activeDraftSession?.status === "cardGenerated") {
+        const canonical = canonicalAgentDraftCardPatch(activeDraftSession);
+        await api.updateDemandDraftSession(activeDraftSession.id, canonical);
+      }
+      await api.sendAgentThreadTurn(thread.id, demandLifecyclePrompt(action));
+      const detail = await loadAgentThread(thread.id, true);
+      const proposal = latestAgentToolProposal(detail.entries, "press_demand_card_button", ["awaiting_confirmation", "failed"]);
+      if (!proposal) {
+        const lastAssistant = [...detail.entries]
+          .sort((left, right) => right.sequence - left.sequence)
+          .find((entry) => entry.kind === "message" && entry.role === "assistant" && entry.content);
+        throw new Error(lastAssistant?.content || "小福还没有生成可确认的需求卡操作。");
+      }
+      setSelectedToolProposal(proposal);
+      setOverlay("toolApproval");
+      notice("小福已准备好这一步；只有你在确认页同意后才会执行。");
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : "小福暂时无法准备这项操作。");
+    } finally {
+      setAgentSending(false);
+    }
   };
 
   const publishDemand = async () => {
@@ -567,38 +615,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       setSurface("onboarding");
       return notice("完成资料和照片审核后，才能发布并匹配真实用户。你可以先继续和小福聊聊。 ");
     }
+    if (!liveDemand) {
+      await requestAgentDemandLifecycle("publish");
+      return;
+    }
     try {
-      const { demandType, activity, matchingPolicy } = demandMatchingPolicy(demand, profile.city, profile.distanceKm);
-      // MobileAPI treats a non-broad category as a required activity facet.
-      // Keep the human activity on the card fields, but route non-workout
-      // demands through their broad type so “Citywalk 与咖啡” does not become
-      // one impossible exact category match.
-      const matchingCategory = demandType === "workout" ? activity : demandType;
-      const dynamicFields = (demand.fields?.length ? demand.fields.map((field) => (
-        ["活动", "运动项目"].includes(field.title) && ["buddy", "workout", "activity", "friends"].includes(field.value.toLowerCase())
-          ? { ...field, value: activity }
-          : field
-      )) : [
-        { title: demandType === "workout" ? "运动项目" : "活动", value: activity },
-        { title: "时间", value: demand.timeWindow },
-        { title: "地点", value: demand.locationText },
-        { title: "方式", value: demand.durationText },
-        { title: "边界", value: demand.privacyBoundary },
-      ]).filter((field) => field.value && !/待确认/.test(field.value)).slice(0, 6);
-      const created = liveDemand
-        ? await api.getDemand(liveDemand.id)
-        : await api.createDemand({
-          type: demandType,
-          title: demand.title,
-          summary: demand.summary,
-          category: matchingCategory,
-          fields: dynamicFields.map((field) => ({ ...field, importance: demandFieldImportance(field.title, demandType) })),
-          matchingPolicy,
-          visibility: "hidden",
-          capacityMax: demand.capacityMax,
-          sourceConversationId: activeAgentThread?.id,
-        });
-      const published = await api.publishDemand(created.id, matchingCategory);
+      const created = await api.getDemand(liveDemand.id);
+      const published = await api.publishDemand(created.id, created.category);
       const page = await api.listDemandCandidates(created.id);
       const nextCandidates = page.candidates.map(displayCandidate);
       setLiveDemand({ id: created.id });
@@ -607,10 +630,6 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       setDemand({ ...displayDemand(resolvedDemand), status: page.candidates.length ? "matched" : "matching" });
       setCandidates(nextCandidates);
       setSelectedCandidateId(nextCandidates[0]?.id ?? null);
-      if (activeDraftSession) {
-        await api.updateDemandDraftSession(activeDraftSession.id, { generatedCardId: created.id, userConfirmedGenerate: true, status: "cardGenerated" });
-        setActiveDraftSession(null);
-      }
       notice(page.candidates.length ? `已同步 ${page.candidates.length} 位真实候选人。` : "需求已发布，正在等待合适的候选人。");
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : "需求尚未发布，请稍后再试。");
@@ -618,7 +637,23 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   };
 
   const changeDemandStatus = async (status: DemandViewModel["status"]) => {
-    if (!liveDemand) return notice("这是一张还没有发布的草稿。你可以继续编辑，或确认后再开始匹配。");
+    if (!liveDemand) {
+      if (status === "cancelled" && activeDraftSession) {
+        try {
+          await api.cancelDemandDraftSession(activeDraftSession.id);
+          setActiveDraftSession(null);
+          setHasDemand(false);
+          setDemand(emptyDemandView);
+          setOverlay(null);
+          if (activeAgentThread) await loadAgentThread(activeAgentThread.id);
+          notice("这张未发布需求卡已取消；没有发布、匹配或联系任何人。");
+        } catch (reason) {
+          notice(reason instanceof Error ? reason.message : "取消需求草稿失败，请稍后再试。");
+        }
+        return;
+      }
+      return notice("这是一张还没有发布的草稿。你可以继续编辑，或确认后再开始匹配。");
+    }
     if (status === "hidden") {
       try {
         const result = await api.hideDemand(liveDemand.id);
@@ -1196,7 +1231,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
 
   return <main className={styles.appPage}><section className={styles.mobileSurface} aria-label="FitMeet 完整体验账号">
     <div className={styles.appScroll}>
-      {activeTab === "home" ? <HomeScreen nickname={profile.nickname} chat={chat} entries={agentEntries} input={chatInput} onInput={setChatInput} onSend={() => void sendAgentMessage()} onQuickPrompt={(prompt) => void sendAgentMessage(prompt)} sending={agentSending} onVoice={startVoiceInput} voiceActive={voiceInput.isListening} demand={hasDemand ? demand : null} draftMissingFields={activeDraftSession?.missingFields ?? []} candidateCount={activeCandidates.length} onDemand={() => hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onDemandList={() => demands.length ? setOverlay("demandList") : hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onEditDemand={() => hasDemand ? setOverlay("demandEdit") : void prepareDemandDraft()} onCandidates={() => setOverlay("candidate")} onConversation={openDemandConversation} onCreateDemand={() => activeDraftSession ? void prepareDemandDraft() : void startNewDemand()} onReviewDemandCard={() => void confirmDemandCardDraft()} onToolProposal={openToolProposal} onMemory={() => setOverlay("memory")} onHistory={() => setOverlay("history")} realtimeStatus={realtimeStatus} /> : null}
+      {activeTab === "home" ? <HomeScreen nickname={profile.nickname} chat={chat} entries={agentEntries} input={chatInput} onInput={setChatInput} onSend={() => void sendAgentMessage()} onQuickPrompt={(prompt) => void sendAgentMessage(prompt)} replySuggestions={agentReplySuggestions(activeDraftSession)} sending={agentSending} onVoice={startVoiceInput} voiceActive={voiceInput.isListening} demand={hasDemand ? demand : null} draftMissingFields={activeDraftSession?.missingFields ?? []} candidateCount={activeCandidates.length} onDemand={() => hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onDemandList={() => demands.length ? setOverlay("demandList") : hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onEditDemand={() => hasDemand ? setOverlay("demandEdit") : void prepareDemandDraft()} onCandidates={() => setOverlay("candidate")} onConversation={openDemandConversation} onCreateDemand={() => activeDraftSession ? void prepareDemandDraft() : void startNewDemand()} onReviewDemandCard={() => void confirmDemandCardDraft()} onToolProposal={openToolProposal} onMemory={() => setOverlay("memory")} onHistory={() => setOverlay("history")} realtimeStatus={realtimeStatus} /> : null}
       {activeTab === "moments" ? <MomentsExperience api={api} userId={session.state.session?.user.id ?? 0} posts={posts} onPostsChange={setPosts} likedPostIds={likedPostIds} onLike={(id) => void toggleLike(id)} channel={discoverChannel} onChannel={setDiscoverChannel} onCompose={() => setOverlay("composer")} onDelete={deletePost} socialIntents={socialIntents} taskIntents={taskIntents} socialApplications={socialApplications} taskApplications={taskApplications} onApplication={(kind, intent, status) => void changeApplication(kind, intent, status)} onNotice={notice} initialLastPage={feedLastPage} /> : null}
       {activeTab === "messages" ? <MessagesExperience invitations={invitations} conversations={visibleConversations} incomingConnections={incomingConnections} outgoingConnections={outgoingConnections} agentEvents={agentInboxEvents} ownerSocialApplications={ownerSocialApplications} ownerTaskApplications={ownerTaskApplications} currentUserId={session.state.session?.user.id ?? 0} unreadCount={unreadCount} onConversation={(id) => void openConversation(id)} onInvitation={(invitation, action) => void resolveInvitation(invitation, action)} onIntentApplication={(kind, application, decision) => void resolveIntentApplication(kind, application, decision)} onSystemEvent={(event) => void openInboxEvent(event)} onMeet={() => meet.id ? setOverlay("meet") : notice("还没有已确认的真实活动。 ")} onRelationship={() => setOverlay("relationships")} onRefresh={reconcileRealtimeState} /> : null}
       {activeTab === "profile" ? <ProfileExperience api={api} userId={session.state.session?.user.id ?? 0} profile={profile} photos={profilePhotos} notificationEnabled={notificationEnabled} postCount={posts.filter((post) => Number(post.userId) === Number(session.state.session?.user.id)).length} relationshipCount={incomingConnections.length + outgoingConnections.length} blockedUsers={blockedUsers} onPhotosChange={setProfilePhotos} onNotice={notice} onEdit={() => setOverlay("editProfile")} onPrivacy={() => setOverlay("privacy")} onNotification={(value) => void updateNotificationPreference(value)} onRelationships={() => setOverlay("relationships")} onReboard={() => { setAgentOnlyMode(false); setSurface("onboarding"); }} onSafety={() => setOverlay("accountSafety")} onMoments={() => setActiveTab("moments")} onLogout={session.logout} onBlockUser={async (user: PublicUserProfile) => { try { await blockAndRemember({ id: user.id, name: user.name, avatar: user.avatar }); } catch (reason) { notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。"); } }} onUnblockUser={unblockKnownUser} /> : null}
@@ -1225,7 +1260,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   </main>;
 }
 
-function HomeScreen({ nickname, chat, entries, input, onInput, onSend, onQuickPrompt, sending, onVoice, voiceActive, demand, draftMissingFields, candidateCount, onDemand, onDemandList, onEditDemand, onCandidates, onConversation, onCreateDemand, onReviewDemandCard, onToolProposal, onMemory, onHistory, realtimeStatus }: { nickname: string; chat: ChatLine[]; entries: AgentThreadEntry[]; input: string; onInput: (value: string) => void; onSend: () => void; onQuickPrompt: (prompt: string) => void; sending: boolean; onVoice: () => void; voiceActive: boolean; demand: DemandViewModel | null; draftMissingFields: string[]; candidateCount: number; onDemand: () => void; onDemandList: () => void; onEditDemand: () => void; onCandidates: () => void; onConversation: () => void; onCreateDemand: () => void; onReviewDemandCard: () => void; onToolProposal: (proposal: AgentThreadEntry) => void; onMemory: () => void; onHistory: () => void; realtimeStatus: "offline" | "connecting" | "connected" | "reconnecting" }) {
+function HomeScreen({ nickname, chat, entries, input, onInput, onSend, onQuickPrompt, replySuggestions, sending, onVoice, voiceActive, demand, draftMissingFields, candidateCount, onDemand, onDemandList, onEditDemand, onCandidates, onConversation, onCreateDemand, onReviewDemandCard, onToolProposal, onMemory, onHistory, realtimeStatus }: { nickname: string; chat: ChatLine[]; entries: AgentThreadEntry[]; input: string; onInput: (value: string) => void; onSend: () => void; onQuickPrompt: (prompt: string) => void; replySuggestions: string[]; sending: boolean; onVoice: () => void; voiceActive: boolean; demand: DemandViewModel | null; draftMissingFields: string[]; candidateCount: number; onDemand: () => void; onDemandList: () => void; onEditDemand: () => void; onCandidates: () => void; onConversation: () => void; onCreateDemand: () => void; onReviewDemandCard: () => void; onToolProposal: (proposal: AgentThreadEntry) => void; onMemory: () => void; onHistory: () => void; realtimeStatus: "offline" | "connecting" | "connected" | "reconnecting" }) {
   const [showFullTimeline, setShowFullTimeline] = useState(false);
   const syncLabel = realtimeStatus === "connected" ? "实时在线" : realtimeStatus === "reconnecting" ? "正在重连" : realtimeStatus === "offline" ? "离线，待恢复" : "正在连接";
   const timeline = entries.length ? entries : chat.map((item) => ({ id: String(item.id), kind: "message", role: item.role, content: item.text } as AgentThreadEntry));
@@ -1260,10 +1295,12 @@ function HomeScreen({ nickname, chat, entries, input, onInput, onSend, onQuickPr
       <div className={styles.chatStack}>{visibleTimeline.map((item) => item.kind === "message" ? <AgentMessage key={item.id} role={item.role === "user" ? "user" : "assistant"} text={item.content || ""} /> : <AgentToolTimelineCard key={item.id} entry={item} onReviewDemandCard={onReviewDemandCard} onOpenProposal={() => onToolProposal(item)} />)}{!demand ? <button type="button" className={styles.draftDemandAction} onClick={onCreateDemand}><FiFileText /><span><strong>查看需求草稿</strong><small>先和小福聊几句，再由你核对并发布</small></span><FiChevronRight /></button> : null}</div>
     </section>
 
+    {replySuggestions.length ? <section className={styles.agentReplySuggestions} aria-label="快捷回答"><small>点一下即可回答当前问题</small><div>{replySuggestions.map((suggestion) => <button type="button" key={suggestion} disabled={sending} onClick={() => onQuickPrompt(suggestion)}>{suggestion}</button>)}</div></section> : null}
+
     <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); onSend(); }} aria-busy={sending}>
       <button type="button" aria-label="图片理解暂未开放" title="图片理解暂未开放" disabled><FiImage /></button>
       <button type="button" aria-label={voiceActive ? "停止语音输入" : "语音输入"} onClick={onVoice} className={voiceActive ? styles.composerVoiceActive : ""}><FiMic /></button>
-      <input value={input} onChange={(event) => onInput(event.target.value)} placeholder={sending ? "小福正在整理…" : "告诉小福你想找谁"} aria-label="告诉小福你想找谁" disabled={sending} />
+      <input value={input} onChange={(event) => onInput(event.target.value)} placeholder={sending ? "小福正在理解和整理…" : "告诉小福你现在想解决什么"} aria-label="告诉小福你现在想解决什么" disabled={sending} />
       <button type="submit" aria-label="发送给小福" disabled={!input.trim() || sending}><FiArrowUp /></button>
     </form>
   </div>;
@@ -1306,10 +1343,10 @@ function DemandCard({ demand, candidateCount, onEdit, onOpen, onCandidates, onCo
   const effectiveStatus = effectiveDemandStatus(demand, candidateCount);
   const primary = effectiveStatus === "draft" ? "确认并开始匹配" : effectiveStatus === "matching" || effectiveStatus === "published" ? "正在匹配 · 查看详情" : effectiveStatus === "matched" ? `查看 ${candidateCount} 位候选人` : effectiveStatus === "invited" ? "邀请已发送 · 等待回应" : effectiveStatus === "communicating" ? "已匹配 · 进入聊天" : effectiveStatus === "hidden" ? "匹配已暂停" : "这条需求已取消";
   const click = effectiveStatus === "matched" ? onCandidates : effectiveStatus === "communicating" ? onConversation : onOpen;
-  const dynamicRows = demand.fields?.length ? demand.fields : [
+  const dynamicRows = (demand.fields?.length ? demand.fields : [
     { title: "时间", value: demand.timeWindow }, { title: "地点", value: demand.locationText },
     { title: "同行", value: `${demand.capacityMax} 位伙伴` }, { title: "方式", value: demand.durationText },
-  ];
+  ]).filter((field) => field.value.trim());
   const iconFor = (label: string) => label.includes("时间") ? FiCalendar : /地点|目的地|区域/.test(label) ? FiMapPin : /人数|同行|偏好|要求/.test(label) ? FiUsers : FiClock;
   return <section className={styles.demandCard} aria-label={`${demand.title}需求卡`}><header><span><FiStar /></span><strong>{demand.title}</strong>{effectiveStatus === "draft" ? <button type="button" aria-label="编辑需求" onClick={onEdit}><FiEdit3 /></button> : <FiChevronRight />}</header>{dynamicRows.slice(0, 6).map(({ title, value }) => { const RowIcon = iconFor(title); return <button type="button" className={styles.demandRow} key={`${title}-${value}`} onClick={onOpen}><RowIcon /><span>{title}</span><strong>{value}</strong>{effectiveStatus === "draft" ? <FiEdit3 /> : <FiChevronRight />}</button> })}<button type="button" className={styles.primaryButton} onClick={click} disabled={effectiveStatus === "cancelled"}>{primary} {effectiveStatus === "matched" ? <FiChevronRight /> : <FiCheck />}</button></section>;
 }
@@ -1364,7 +1401,8 @@ function DemandSheet({ demand, candidateCount, onClose, onEdit, onPublish, onHid
 
 function DemandEditSheet({ demand, onClose, onSave }: { demand: DemandViewModel; onClose: () => void; onSave: (demand: DemandViewModel) => void }) {
   const [draft, setDraft] = useState(demand);
-  return <Sheet title="编辑需求草稿" onClose={onClose}><div className={styles.draftForm}><Field label="活动名称"><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></Field><Field label="时间"><input value={draft.timeWindow} onChange={(event) => setDraft({ ...draft, timeWindow: event.target.value })} /></Field><Field label="大致地点"><input value={draft.locationText} onChange={(event) => setDraft({ ...draft, locationText: event.target.value })} /></Field><Field label="活动方式"><input value={draft.durationText} onChange={(event) => setDraft({ ...draft, durationText: event.target.value })} /></Field><Field label="舒服的边界"><textarea value={draft.privacyBoundary} onChange={(event) => setDraft({ ...draft, privacyBoundary: event.target.value })} /></Field></div><button type="button" className={styles.primaryButton} onClick={() => onSave({ ...draft, status: "draft" })}>保存草稿</button></Sheet>;
+  const fields = draft.fields || [];
+  return <Sheet title="编辑需求草稿" onClose={onClose}><p className={styles.sheetLead}>字段由小福根据这一次真实需求动态整理，不会把 Citywalk、咖啡、服务或求助强行套进运动模板。</p><article className={styles.detailCard}><span>小福理解的需求</span><strong>{draft.title}</strong><p>{draft.summary}</p></article><div className={styles.draftForm}>{fields.map((field, index) => <Field label={field.title} key={`${field.title}-${index}`}><input value={field.value} placeholder={`补充${field.title}`} onChange={(event) => setDraft((current) => ({ ...current, fields: (current.fields || []).map((item, fieldIndex) => fieldIndex === index ? { ...item, value: event.target.value } : item) }))} /></Field>)}</div><button type="button" className={styles.primaryButton} onClick={() => onSave({ ...draft, status: "draft" })}>保存并让小福继续理解</button></Sheet>;
 }
 
 function InviteSheet({ candidate, demand, onClose, onSend }: { candidate: CandidateViewModel; demand: DemandViewModel; onClose: () => void; onSend: (message: string) => void }) {
