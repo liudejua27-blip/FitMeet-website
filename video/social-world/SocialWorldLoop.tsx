@@ -177,7 +177,7 @@ export const SocialWorldLoop = () => {
           opacity: brandOpacity,
         }}
       >
-        <Img src={staticFile("brand/fitmeet-logo.png")} style={{ width: 64, height: 64, borderRadius: 16 }} />
+        <Img src={staticFile("brand/fitmeet-logo-v2.png")} style={{ width: 64, height: 64, borderRadius: 16 }} />
         <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em" }}>FITMEET</div>
       </div>
 

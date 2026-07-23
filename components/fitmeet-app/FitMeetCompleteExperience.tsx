@@ -1217,7 +1217,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (notificationEnabled && copy) {
       notice(copy);
       if (typeof document !== "undefined" && document.visibilityState !== "visible" && typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification("FitMeet", { body: copy, icon: "/fitmeet-icon.png", tag: event.eventType });
+        new Notification("FitMeet", { body: copy, icon: "/fitmeet-icon-v2.png", tag: event.eventType });
       }
     }
   }, [notificationEnabled, notice, reconcileRealtimeState, restoreConversationAccess]);

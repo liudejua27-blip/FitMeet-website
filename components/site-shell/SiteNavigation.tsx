@@ -92,7 +92,7 @@ export function SiteNavigation({
   return (
     <header className={styles.navigation} data-site-navigation data-tone={tone} ref={headerRef}>
       <Link className={styles.brand} href="/" aria-label="返回 FitMeet 首页">
-        <Image src="/brand/fitmeet-logo.png" width={40} height={40} alt="FitMeet 标志" priority />
+        <Image src="/brand/fitmeet-logo-v2.png" width={40} height={40} alt="FitMeet 标志" priority />
         <span>FitMeet</span>
         {context ? <><i className={styles.brandDivider} aria-hidden="true" /><strong>{context}</strong></> : null}
       </Link>

@@ -125,14 +125,14 @@ function AssistantScreen({
   return (
     <div className={styles.assistantScreen} data-app-screen="assistant" data-interface-size={size}>
       <header className={styles.appHeader}>
-        <div><Image src="/brand/fitmeet-logo.png" width={36} height={36} alt="" /><span><strong>FitMeet</strong><small>社交助手</small></span></div>
+        <div><Image src="/brand/fitmeet-logo-v2.png" width={36} height={36} alt="" /><span><strong>FitMeet</strong><small>社交助手</small></span></div>
         <button type="button" aria-label="通知演示"><FiBell /></button>
       </header>
 
       <div className={styles.assistantLayout}>
         <div className={styles.assistantCompose}>
           <section className={styles.assistantIntro}>
-            <span><Image src="/brand/fitmeet-logo.png" width={26} height={26} alt="" /></span>
+            <span><Image src="/brand/fitmeet-logo-v2.png" width={26} height={26} alt="" /></span>
             <div><strong>今天想和谁一起做什么？</strong><p>从一件想做的事开始时间、地点和边界都可以再修改</p></div>
           </section>
           <label className={styles.intentComposer} htmlFor={`${idPrefix}-intent`}>

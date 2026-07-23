@@ -6,7 +6,7 @@ export function FitMeetBrandIcon({ size = 30, priority = false }: { size?: numbe
   return (
     <Image
       className={styles.brandIcon}
-      src="/brand/fitmeet-logo.png"
+      src="/brand/fitmeet-logo-v2.png"
       alt="FitMeet"
       width={size}
       height={size}

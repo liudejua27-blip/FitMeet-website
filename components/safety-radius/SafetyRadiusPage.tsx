@@ -152,7 +152,7 @@ function DataPurpose() {
     <section className={styles.dataPurpose} id="data-purpose" data-data-purpose>
       <div className={styles.dataRadii} aria-hidden="true">
         {trustLayers.map((layer, index) => <i data-data-ring key={layer.id} style={{ "--data-ring": index } as CSSProperties} />)}
-        <span data-data-core><Image src="/brand/fitmeet-logo.png" width={50} height={50} alt="" /></span>
+        <span data-data-core><Image src="/brand/fitmeet-logo-v2.png" width={50} height={50} alt="" /></span>
       </div>
       <div className={styles.dataCopy} data-data-copy>
         <span>每一份数据都有明确用途</span>

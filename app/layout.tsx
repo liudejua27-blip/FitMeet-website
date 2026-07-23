@@ -9,8 +9,8 @@ export const metadata: Metadata = {
   description: "告诉 FitMeet 社交助手你的运动、旅行或兴趣需求找到一起行动的人",
   keywords: ["FitMeet", "社交助手", "运动搭子", "旅行搭子", "青年社交"],
   icons: {
-    icon: "/brand/fitmeet-logo.png",
-    apple: "/brand/fitmeet-logo.png",
+    icon: "/brand/fitmeet-logo-v2.png",
+    apple: "/brand/fitmeet-logo-v2.png",
   },
   openGraph: {
     title: "FitMeet — Social World",

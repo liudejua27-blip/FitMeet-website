@@ -71,7 +71,7 @@ function AgentDemo() {
   return (
     <div className={styles.demo} data-plan-status={status}>
       <div className={styles.demoTop}>
-        <div><Image src="/brand/fitmeet-logo.png" width={32} height={32} alt="" /><strong>FitMeet 社交助手</strong></div>
+        <div><Image src="/brand/fitmeet-logo-v2.png" width={32} height={32} alt="" /><strong>FitMeet 社交助手</strong></div>
         <span><i />{status === "confirmed" ? "计划已确认" : status === "cancelled" ? "计划已取消" : status === "extracting" ? "正在整理" : "等待你的决定"}</span>
       </div>
       <div className={styles.steps} aria-label="社交助手工作步骤">

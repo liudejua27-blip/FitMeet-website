@@ -100,7 +100,7 @@ function SmallBrand({ size = 30 }: { size?: number }) {
   return (
     <Image
       className={styles.brandIcon}
-      src="/brand/fitmeet-logo.png"
+      src="/brand/fitmeet-logo-v2.png"
       width={size}
       height={size}
       alt="FitMeet"
