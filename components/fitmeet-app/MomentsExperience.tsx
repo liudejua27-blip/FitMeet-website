@@ -42,7 +42,7 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
   channel: DiscoveryChannel;
   onChannel: (value: DiscoveryChannel) => void;
   onCompose: () => void;
-  onDelete: (post: FeedPost) => Promise<void>;
+  onDelete: (post: FeedPost) => Promise<boolean>;
   socialIntents: FitMeetPublicIntent[];
   taskIntents: FitMeetPublicIntent[];
   socialApplications: FitMeetIntentApplication[];
@@ -103,7 +103,8 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
     if (deletingId) return;
     setDeletingId(post.id);
     try {
-      await onDelete(post);
+      const deleted = await onDelete(post);
+      if (!deleted) return;
       setMenuPostId(null);
       setPendingDeleteId(null);
     } finally { setDeletingId(null); }

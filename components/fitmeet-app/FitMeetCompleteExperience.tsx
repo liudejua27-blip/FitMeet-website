@@ -789,9 +789,10 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       await api.deleteFeedPost(post.id);
       setPosts((items) => items.filter((item) => item.id !== post.id));
       notice("动态已从 FitMeet 服务端删除。");
+      return true;
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : "动态暂时无法删除。");
-      throw reason;
+      return false;
     }
   };
 
