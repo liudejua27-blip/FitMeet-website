@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FiChevronRight, FiEyeOff, FiFlag, FiHeart, FiImage, FiMessageCircle, FiMoreHorizontal, FiPlus, FiSend, FiShield, FiTrash2, FiUsers } from "react-icons/fi";
 import type { FeedComment, FeedCommentPage, FeedPage, FeedPost, FitMeetIntentApplication, FitMeetPublicIntent } from "@/lib/fitmeet-api-contract";
-import type { DemoApplicationStatus } from "@/lib/fitmeet-experience-runtime";
+import type { ApplicationViewStatus } from "@/lib/fitmeet-experience-models";
 import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
 import styles from "./fitmeet-complete.module.css";
 
@@ -22,11 +22,11 @@ function MomentAvatar({ post }: { post: FeedPost }) {
   return <span className={styles.momentAvatar} style={{ "--moment-color": post.color || "#4f7cff" } as React.CSSProperties}>{post.username.slice(0, 1)}</span>;
 }
 
-function DiscoveryHall({ task, intents, applications, onAction }: { task: boolean; intents: FitMeetPublicIntent[]; applications: FitMeetIntentApplication[]; onAction: (intent: FitMeetPublicIntent, status: DemoApplicationStatus) => void }) {
+function DiscoveryHall({ task, intents, applications, onAction }: { task: boolean; intents: FitMeetPublicIntent[]; applications: FitMeetIntentApplication[]; onAction: (intent: FitMeetPublicIntent, status: ApplicationViewStatus) => void }) {
   if (!intents.length) return <section className={styles.discoveryHall}><p className={styles.emptyState}>暂时没有可申请的真实需求。你可以稍后再看，或发布自己的需求卡。</p></section>;
   return <section className={styles.discoveryHall}><p className={styles.hallNotice}><FiShield /> 精确位置不会展示；申请被接受前不开放连续私信。</p>{intents.map((intent) => {
     const application = applications.find((item) => (task ? item.taskIntentId : item.publicIntentId) === intent.id);
-    const status = (application?.status ?? "idle") as DemoApplicationStatus;
+    const status = (application?.status ?? "idle") as ApplicationViewStatus;
     const action = status === "idle" ? task ? "申请接单" : "申请加入" : status === "pending" ? "等待对方确认" : status === "accepted" ? "已接受 · 可进入会话" : status === "rejected" ? "对方暂未接受" : "重新申请";
     return <article key={intent.id}><span>{task ? "任务大厅" : "社交大厅"}</span><h2>{intent.title || (task ? "服务需求" : "社交需求")}</h2><p>{intent.summary || intent.text || "发布者希望先确认活动节奏与边界。"}</p><div className={styles.tagRow}>{(intent.tags || []).slice(0, 4).map((tag) => <span key={tag}>{tag}</span>)}<span>{intent.timeWindow || "时间待确认"}</span></div><button type="button" className={styles.primaryButton} disabled={["accepted", "rejected"].includes(status)} onClick={() => status === "pending" ? onAction(intent, "cancelled") : onAction(intent, "pending")}>{status === "pending" ? "取消申请" : action} <FiChevronRight /></button></article>;
   })}</section>;
@@ -47,7 +47,7 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
   taskIntents: FitMeetPublicIntent[];
   socialApplications: FitMeetIntentApplication[];
   taskApplications: FitMeetIntentApplication[];
-  onApplication: (kind: "social" | "task", intent: FitMeetPublicIntent, status: DemoApplicationStatus) => void;
+  onApplication: (kind: "social" | "task", intent: FitMeetPublicIntent, status: ApplicationViewStatus) => void;
   onNotice: (message: string) => void;
   initialLastPage?: number;
 }) {

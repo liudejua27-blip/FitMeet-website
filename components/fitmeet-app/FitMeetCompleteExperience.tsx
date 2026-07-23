@@ -1,33 +1,35 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FiAlertTriangle, FiArrowUp, FiBell, FiBookOpen, FiBookmark, FiCalendar, FiCheck, FiChevronRight, FiClock, FiCompass, FiEdit3, FiEye, FiFileText, FiFlag, FiHeart, FiHome, FiImage, FiLock, FiMapPin, FiMessageCircle, FiMic, FiMoreHorizontal, FiPlus, FiSearch, FiSend, FiSettings, FiShield, FiSliders, FiStar, FiTrash2, FiUser, FiUserPlus, FiUsers, FiX,
 } from "react-icons/fi";
 import type { AgentInboxEvent, AgentThread, AgentThreadDetail, AgentThreadEntry, BlockedUserRecord, ConversationMessage, DemandDraftSession, FeedPost, FitMeetAgentMemory, FitMeetConnectionRequest, FitMeetConversation, FitMeetConversationMessage, FitMeetDemand, FitMeetIntentApplication, FitMeetProfilePhoto, FitMeetPublicIntent, MeetInvitation, OnboardingPayload, PublicUserProfile, RelationshipState, SocialProfile } from "@/lib/fitmeet-api-contract";
 import {
-  defaultDemoDemand,
+  emptyDemandView,
   type CandidateDecision,
-  type DemoApplicationStatus,
-  type DemoCandidate,
-  type DemoDemand,
-  type DemoInvitationStatus,
-  type DemoMeet,
-  type DemoMeetStatus,
+  type ApplicationViewStatus,
+  type CandidateViewModel,
+  type DemandViewModel,
+  type InvitationViewStatus,
+  type MeetViewModel,
+  type MeetViewStatus,
   invitationMessage,
-  seedExperiencePosts,
-} from "@/lib/fitmeet-experience-runtime";
+} from "@/lib/fitmeet-experience-models";
 import {
+  demandFieldImportance,
+  demandMatchingPolicy,
   demandStatusCopy,
   demandTypeFor,
   displayCandidate,
   displayDemand,
   displayDraftSession,
   effectiveDemandStatus,
+  humanDemandActivity,
   missingFieldsForDemandType,
-  requiresScheduledTime,
   type LiveCandidate,
 } from "@/lib/fitmeet-agent-domain";
+import { FitMeetApiError } from "@/lib/fitmeet-api-client";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { InternalTesterLogin } from "./InternalTesterLogin";
 import { FitMeetBrandIcon } from "./FitMeetBrandIcon";
@@ -93,6 +95,10 @@ function blockedUsersKey(userId: number) {
   return `fitmeet:web-blocked-users:v1:${userId}`;
 }
 
+function closedConversationsKey(userId: number) {
+  return `fitmeet:web-closed-conversations:v1:${userId}`;
+}
+
 function readStoredArray<T>(key: string): T[] {
   if (typeof window === "undefined") return [];
   try {
@@ -121,6 +127,35 @@ function displayConversationMessage(message: FitMeetConversationMessage, current
   };
 }
 
+function conversationPeerId(conversation: FitMeetConversation | null | undefined) {
+  return Number(conversation?.userId ?? conversation?.peer?.id) || null;
+}
+
+function agentEntriesForDetail(detail: AgentThreadDetail) {
+  const draft = detail.activeDraft;
+  const normalizedEntries = detail.entries.map((entry) => {
+    if (entry.toolName !== "classify_demand" || !draft?.demandType) return entry;
+    const label = draft.demandType === "buddy" ? "搭子 / 交友" : draft.demandType === "workout" ? "运动约练" : draft.demandType;
+    return { ...entry, content: `已按当前远端草稿归类为「${label}」需求。` };
+  });
+  if (!draft?.userConfirmedGenerate || normalizedEntries.some((entry) => entry.toolName === "generate_demand_card")) return normalizedEntries;
+  const latestSequence = normalizedEntries.reduce((maximum, entry) => Math.max(maximum, entry.sequence || 0), 0);
+  return [...normalizedEntries, {
+    id: `derived-demand-card-${draft.id}-${draft.updatedAt}`,
+    threadId: detail.thread.id,
+    sequence: latestSequence + 1,
+    kind: "tool_resolution",
+    role: null,
+    content: "需求卡已经按你的明确要求生成；当前仍未发布。",
+    toolName: "generate_demand_card",
+    toolStatus: "completed",
+    payload: { derivedFromRemoteDraft: true, draftSessionId: draft.id },
+    clientTurnId: null,
+    createdAt: draft.updatedAt,
+    updatedAt: draft.updatedAt,
+  } satisfies AgentThreadEntry];
+}
+
 function Avatar({ name, color = "#677cf2", size = 42 }: { name: string; color?: string; size?: number }) {
   return <span className={styles.avatar} style={{ width: size, height: size, "--avatar-color": color } as React.CSSProperties}>{name.slice(0, 1)}</span>;
 }
@@ -146,14 +181,14 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [selectedToolProposal, setSelectedToolProposal] = useState<AgentThreadEntry | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [agentSending, setAgentSending] = useState(false);
-  const [demand, setDemand] = useState<DemoDemand>(defaultDemoDemand);
+  const [demand, setDemand] = useState<DemandViewModel>(emptyDemandView);
   const [demands, setDemands] = useState<FitMeetDemand[]>([]);
   const [hasDemand, setHasDemand] = useState(false);
   const [candidates, setCandidates] = useState<LiveCandidate[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
-  const [inviteStatus, setInviteStatus] = useState<DemoInvitationStatus>("none");
+  const [inviteStatus, setInviteStatus] = useState<InvitationViewStatus>("none");
   const [relationship, setRelationship] = useState<RelationshipState>("none");
-  const [meet, setMeet] = useState<DemoMeet>({ id: 0, status: "none" });
+  const [meet, setMeet] = useState<MeetViewModel>({ id: 0, status: "none" });
   const [socialIntents, setSocialIntents] = useState<FitMeetPublicIntent[]>([]);
   const [taskIntents, setTaskIntents] = useState<FitMeetPublicIntent[]>([]);
   const [socialApplications, setSocialApplications] = useState<FitMeetIntentApplication[]>([]);
@@ -161,7 +196,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [ownerSocialApplications, setOwnerSocialApplications] = useState<FitMeetIntentApplication[]>([]);
   const [ownerTaskApplications, setOwnerTaskApplications] = useState<FitMeetIntentApplication[]>([]);
   const [agentInboxEvents, setAgentInboxEvents] = useState<AgentInboxEvent[]>([]);
-  const [posts, setPosts] = useState<typeof seedExperiencePosts>([]);
+  const [posts, setPosts] = useState<FeedPost[]>([]);
   const [feedLastPage, setFeedLastPage] = useState(1);
   const [profilePhotos, setProfilePhotos] = useState<FitMeetProfilePhoto[]>([]);
   const [likedPostIds, setLikedPostIds] = useState<number[]>([]);
@@ -180,7 +215,9 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [outgoingConnections, setOutgoingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUserRecord[]>([]);
+  const [closedConversationIds, setClosedConversationIds] = useState<string[]>([]);
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
+  const conversationSyncing = useRef(false);
   const api = session.api;
   const liveApi = session.state.status === "authenticated";
   const selectedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId) ?? candidates[0];
@@ -188,11 +225,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const selectedCandidateInvitation = selectedCandidate && liveDemand
     ? invitations.find((invitation) => invitation.demandId === liveDemand.id && Number(invitation.inviteeUserId) === Number(selectedCandidate.candidateUserId))
     : undefined;
-  const selectedCandidateInviteStatus: DemoInvitationStatus = inviteStatus === "draft"
+  const selectedCandidateInviteStatus: InvitationViewStatus = inviteStatus === "draft"
     ? "draft"
     : selectedCandidateInvitation?.status === "pending"
       ? "sent"
       : selectedCandidateInvitation?.status ?? "none";
+  const visibleConversations = conversations.filter((item) => !closedConversationIds.includes(item.id));
+  const selectedConversationClosed = Boolean(selectedConversation && closedConversationIds.includes(selectedConversation.id));
   const notice = useCallback((message: string) => setToast(message), []);
   const voiceInput = useBrowserVoiceInput((transcript) => {
     setChatInput((current) => [current.trim(), transcript].filter(Boolean).join(current.trim() ? "，" : ""));
@@ -203,8 +242,9 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const applyAgentDetail = useCallback((detail: AgentThreadDetail, presentDraft = false) => {
     setActiveAgentThread(detail.thread);
     setAgentThreads((current) => [detail.thread, ...current.filter((thread) => thread.id !== detail.thread.id)]);
-    setAgentEntries(detail.entries);
-    const nextChat = chatFromAgentEntries(detail.entries);
+    const normalizedEntries = agentEntriesForDetail(detail);
+    setAgentEntries(normalizedEntries);
+    const nextChat = chatFromAgentEntries(normalizedEntries);
     setChat(nextChat.length ? nextChat : initialChat);
     setActiveDraftSession(detail.activeDraft);
     if (detail.activeDraft && presentDraft) {
@@ -292,6 +332,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (userId) {
       setLikedPostIds(readStoredArray<number>(likedMomentsKey(userId)).filter((id) => Number.isInteger(id)));
       setBlockedUsers(readStoredArray<BlockedUserRecord>(blockedUsersKey(userId)).filter((item) => Number.isInteger(item?.id) && typeof item?.name === "string"));
+      setClosedConversationIds(readStoredArray<string>(closedConversationsKey(userId)).filter((id) => typeof id === "string" && id));
     }
   }, [session.state.session?.user.id, session.state.status]);
 
@@ -311,6 +352,27 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (key && typeof window !== "undefined") window.localStorage.setItem(key, String(enabled));
     notice(enabled ? "实时提醒已开启；页面打开或处于后台标签页时会提示，彻底关闭浏览器后不会推送。" : "前台实时提醒已关闭；不影响消息和邀请在服务端保存。");
   };
+
+  const rememberClosedConversations = useCallback((ids: string[]) => {
+    const validIds = ids.filter(Boolean);
+    if (!validIds.length) return;
+    setClosedConversationIds((current) => {
+      const next = Array.from(new Set([...current, ...validIds]));
+      const userId = session.state.session?.user.id;
+      if (userId) writeStoredArray(closedConversationsKey(userId), next);
+      return next;
+    });
+  }, [session.state.session?.user.id]);
+
+  const restoreConversationAccess = useCallback((id: string) => {
+    if (!id) return;
+    setClosedConversationIds((current) => {
+      const next = current.filter((item) => item !== id);
+      const userId = session.state.session?.user.id;
+      if (userId) writeStoredArray(closedConversationsKey(userId), next);
+      return next;
+    });
+  }, [session.state.session?.user.id]);
 
   useEffect(() => {
     if (!liveApi) return;
@@ -452,7 +514,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     } catch (reason) { notice(reason instanceof Error ? reason.message : "需求草稿暂时无法恢复。 "); }
   };
 
-  const saveDemandDraft = async (next: DemoDemand) => {
+  const saveDemandDraft = async (next: DemandViewModel) => {
     if (!activeDraftSession) return notice("这张草稿还没有同步到小福；请先发送一条需求描述。 ");
     const demandType = demandTypeFor(next.activityType);
     const knownFields: Record<string, string> = {
@@ -468,7 +530,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     try {
       const saved = await api.updateDemandDraftSession(activeDraftSession.id, {
         category: next.activityType,
-        demandType: knownFields.demandType,
+        demandType,
         knownFields,
         missingFields,
         canGenerateCard: missingFields.length === 0,
@@ -506,16 +568,18 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       return notice("完成资料和照片审核后，才能发布并匹配真实用户。你可以先继续和小福聊聊。 ");
     }
     try {
-      const demandType = demandTypeFor(demand.activityType);
-      const timeIsRequired = requiresScheduledTime(demandType);
-      const hardFilters = [
-        `活动：${demand.activityType}`,
-        ...(timeIsRequired ? [`时间：${demand.timeWindow}`] : []),
-        `地点：${demand.locationText}`,
-        `边界：${demand.privacyBoundary}`,
-      ];
-      const dynamicFields = (demand.fields?.length ? demand.fields : [
-        { title: "活动", value: demand.activityType },
+      const { demandType, activity, matchingPolicy } = demandMatchingPolicy(demand, profile.city, profile.distanceKm);
+      // MobileAPI treats a non-broad category as a required activity facet.
+      // Keep the human activity on the card fields, but route non-workout
+      // demands through their broad type so “Citywalk 与咖啡” does not become
+      // one impossible exact category match.
+      const matchingCategory = demandType === "workout" ? activity : demandType;
+      const dynamicFields = (demand.fields?.length ? demand.fields.map((field) => (
+        ["活动", "运动项目"].includes(field.title) && ["buddy", "workout", "activity", "friends"].includes(field.value.toLowerCase())
+          ? { ...field, value: activity }
+          : field
+      )) : [
+        { title: demandType === "workout" ? "运动项目" : "活动", value: activity },
         { title: "时间", value: demand.timeWindow },
         { title: "地点", value: demand.locationText },
         { title: "方式", value: demand.durationText },
@@ -527,14 +591,14 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
           type: demandType,
           title: demand.title,
           summary: demand.summary,
-          category: demand.activityType,
-          fields: dynamicFields.map((field) => ({ ...field, importance: ["地点", "目的地", "运动项目", "活动", "服务类型"].includes(field.title) ? "required" : "optional" })),
-          matchingPolicy: { city: profile.city || undefined, radiusKm: profile.distanceKm, hardFilters, softPreferences: [...(!timeIsRequired ? [`时间：${demand.timeWindow}`] : []), `方式：${demand.durationText}`] },
+          category: matchingCategory,
+          fields: dynamicFields.map((field) => ({ ...field, importance: demandFieldImportance(field.title, demandType) })),
+          matchingPolicy,
           visibility: "hidden",
           capacityMax: demand.capacityMax,
           sourceConversationId: activeAgentThread?.id,
         });
-      const published = await api.publishDemand(created.id, demand.activityType);
+      const published = await api.publishDemand(created.id, matchingCategory);
       const page = await api.listDemandCandidates(created.id);
       const nextCandidates = page.candidates.map(displayCandidate);
       setLiveDemand({ id: created.id });
@@ -553,7 +617,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     }
   };
 
-  const changeDemandStatus = async (status: DemoDemand["status"]) => {
+  const changeDemandStatus = async (status: DemandViewModel["status"]) => {
     if (!liveDemand) return notice("这是一张还没有发布的草稿。你可以继续编辑，或确认后再开始匹配。");
     if (status === "hidden") {
       try {
@@ -628,7 +692,11 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
         const result = await api.acceptInvitation(invitation.id);
         if (result.meetId) setMeet({ id: result.meetId, status: "scheduled" });
         const acceptedConversationId = result.conversation?.id || result.conversation?.conversationId;
-        if (acceptedConversationId) await openConversation(acceptedConversationId);
+        if (acceptedConversationId) {
+          restoreConversationAccess(acceptedConversationId);
+          await refreshCommunications();
+          await openConversation(acceptedConversationId);
+        }
         notice("邀请已接受。会话现在已开放，你们可以慢慢确认活动细节。");
       }
       if (action === "reject") {
@@ -644,13 +712,25 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   };
 
   const openConversation = async (conversationId: string) => {
-    const summary = conversations.find((item) => item.id === conversationId || item.conversationId === conversationId) ?? { id: conversationId, displayName: "FitMeet 用户" };
+    if (closedConversationIds.includes(conversationId)) {
+      notice("这段旧会话已在拉黑时关闭。解除拉黑不会自动恢复关系，请重新匹配或建立关系后再聊天。");
+      return;
+    }
     try {
+      let nextConversations = conversations;
+      let summary = nextConversations.find((item) => item.id === conversationId || item.conversationId === conversationId);
+      if (!summary || !conversationPeerId(summary)) {
+        nextConversations = await api.listConversations();
+        setConversations(nextConversations);
+        summary = nextConversations.find((item) => item.id === conversationId || item.conversationId === conversationId);
+      }
+      if (!summary || !conversationPeerId(summary)) throw new Error("会话缺少可验证的对方账号，请从最新消息列表重新进入。");
       const messages = await api.getConversation(conversationId);
       const currentUserId = session.state.session?.user.id;
       setConversation(messages.map((message) => displayConversationMessage(message, currentUserId)));
       setSelectedConversation(summary);
       setConversations((items) => items.map((item) => item.id === summary.id ? { ...item, unread: 0 } : item));
+      setUnreadCount((current) => Math.max(0, current - Number(summary.unread || 0)));
       setOverlay("conversation");
       const lastMessageId = messages.at(-1)?.id;
       if (lastMessageId) await Promise.allSettled([api.markConversationDelivered(conversationId, lastMessageId), api.markConversationRead(conversationId, lastMessageId)]);
@@ -701,9 +781,9 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     } catch (reason) { notice(reason instanceof Error ? reason.message : "邀请未能发送，请稍后再试。"); }
   };
 
-  const updateMeet = async (status: DemoMeetStatus, review?: DemoMeet["review"]) => {
+  const updateMeet = async (status: MeetViewStatus, review?: MeetViewModel["review"]) => {
     if (!meet.id) return notice("还没有可操作的真实活动进程。");
-    const copy: Record<DemoMeetStatus, string> = {
+    const copy: Record<MeetViewStatus, string> = {
       none: "", scheduled: "约练已经建立，出发前仍可以取消或调整。", arrived: "已记录确认到达；下一步由双方决定是否完成这次活动。", completed: "活动已完成。评价只用于守约与安全，不会要求你公开私人感受。", no_show: "已记录爽约。你可以选择只结束这次约练，也可以通过安全帮助提交说明。", cancelled: "约练已取消。提前停止是一种对彼此时间的尊重。",
     };
     try {
@@ -808,6 +888,11 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const blockAndRemember = async (target: { id: number; name?: string; avatar?: string | null }) => {
     await api.blockUser(target.id);
     rememberBlockedUser({ id: target.id, name: target.name || "FitMeet 用户", avatar: target.avatar, blockedAt: new Date().toISOString() });
+    const affectedConversationIds = conversations
+      .filter((item) => conversationPeerId(item) === Number(target.id))
+      .map((item) => item.id);
+    if (selectedConversation && conversationPeerId(selectedConversation) === Number(target.id)) affectedConversationIds.push(selectedConversation.id);
+    rememberClosedConversations(affectedConversationIds);
     setConversations((items) => items.filter((item) => Number(item.userId ?? item.peer?.id) !== Number(target.id)));
     setCandidates((items) => items.filter((item) => Number(item.candidateUserId) !== Number(target.id)));
     notice("已拉黑；服务端会停止推荐和后续私信，当前设备也已记录。");
@@ -822,11 +907,11 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
         if (userId) writeStoredArray(blockedUsersKey(userId), next);
         return next;
       });
-      notice(`已解除对 ${target.name} 的拉黑；后续推荐仍以服务端匹配结果为准。`);
+      notice(`已解除对 ${target.name} 的拉黑；旧会话不会自动恢复，需要重新匹配或建立关系后再聊天。`);
     } catch (reason) { notice(reason instanceof Error ? reason.message : "解除拉黑暂时未能完成。"); }
   };
 
-  const changeApplication = async (kind: "social" | "task", intent: FitMeetPublicIntent, next: DemoApplicationStatus) => {
+  const changeApplication = async (kind: "social" | "task", intent: FitMeetPublicIntent, next: ApplicationViewStatus) => {
     const current = kind === "social" ? socialApplications.find((item) => item.publicIntentId === intent?.id) : taskApplications.find((item) => item.taskIntentId === intent?.id);
     try {
       if (next === "pending") {
@@ -853,6 +938,12 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     } catch (reason) { notice(reason instanceof Error ? reason.message : "通知暂时无法标记为已读。"); }
   };
 
+  const openInboxEvent = async (event: AgentInboxEvent) => {
+    const conversationId = typeof event.payload?.conversationId === "string" ? event.payload.conversationId : "";
+    if (conversationId) await openConversation(conversationId);
+    await acknowledgeInboxEvent(event.id);
+  };
+
   const resolveIntentApplication = async (kind: "social" | "task", application: FitMeetIntentApplication, decision: "accept" | "reject") => {
     try {
       if (kind === "social") {
@@ -876,14 +967,22 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
 
   const sendConversation = async () => {
     const text = conversationInput.trim();
-    if (!text || !selectedConversation) return;
+    if (!text || !selectedConversation || selectedConversationClosed) return;
     try {
       const response = await api.sendConversationMessage(selectedConversation.id, text);
       const currentUserId = session.state.session?.user.id;
       setConversation((items) => [...items, displayConversationMessage({ ...response, text: response.text || response.body?.text || text }, currentUserId)]);
       setConversationInput("");
       await refreshCommunications();
-    } catch (reason) { notice(reason instanceof Error ? reason.message : "消息未能发送，请稍后再试。"); }
+    } catch (reason) {
+      if (reason instanceof FitMeetApiError && reason.status === 403) {
+        rememberClosedConversations([selectedConversation.id]);
+        setConversations((items) => items.filter((item) => item.id !== selectedConversation.id));
+        notice("这段会话已经关闭，消息没有发送。解除拉黑不会自动恢复旧关系，请重新匹配或建立关系。");
+        return;
+      }
+      notice(reason instanceof Error ? reason.message : "消息未能发送，请稍后再试。");
+    }
   };
 
   const recallConversationMessage = async (messageId: string) => {
@@ -941,9 +1040,34 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     } catch (reason) { notice(reason instanceof Error ? reason.message : "偏好未能删除，请稍后再试。"); }
   };
 
+  const syncOpenConversation = useCallback(async () => {
+    if (!liveApi || !selectedConversation || closedConversationIds.includes(selectedConversation.id) || conversationSyncing.current) return;
+    conversationSyncing.current = true;
+    try {
+      const messages = await api.getConversation(selectedConversation.id);
+      const currentUserId = session.state.session?.user.id;
+      setConversation(messages.map((message) => displayConversationMessage(message, currentUserId)));
+      const lastMessageId = messages.at(-1)?.id;
+      if (lastMessageId) {
+        await Promise.allSettled([
+          api.markConversationDelivered(selectedConversation.id, lastMessageId),
+          api.markConversationRead(selectedConversation.id, lastMessageId),
+        ]);
+      }
+      const [nextConversations, nextUnread] = await Promise.all([api.listConversations(), api.getUnreadCount()]);
+      setConversations(nextConversations);
+      setUnreadCount(nextUnread.unreadCount ?? 0);
+      const nextSummary = nextConversations.find((item) => item.id === selectedConversation.id || item.conversationId === selectedConversation.id);
+      if (nextSummary) setSelectedConversation(nextSummary);
+    } finally {
+      conversationSyncing.current = false;
+    }
+  }, [api, closedConversationIds, liveApi, selectedConversation, session.state.session?.user.id]);
+
   const reconcileRealtimeState = useCallback(async () => {
     if (!liveApi) return;
     const results = await Promise.allSettled([
+      api.getFeed(),
       api.listMyDemands(),
       api.listMeetInvitations(),
       api.listConversations(),
@@ -954,7 +1078,11 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       api.listMyPublicIntentApplications("owner"),
       api.listMyTaskIntentApplications("owner"),
     ] as const);
-    const [demandsResult, invitationsResult, conversationsResult, inboxResult, outboxResult, unreadResult, eventsResult, socialApplicationsResult, taskApplicationsResult] = results;
+    const [feedResult, demandsResult, invitationsResult, conversationsResult, inboxResult, outboxResult, unreadResult, eventsResult, socialApplicationsResult, taskApplicationsResult] = results;
+    if (feedResult.status === "fulfilled") {
+      setPosts(feedResult.value.data);
+      setFeedLastPage(feedResult.value.metadata?.lastPage ?? 1);
+    }
     if (invitationsResult.status === "fulfilled") setInvitations(invitationsResult.value);
     if (conversationsResult.status === "fulfilled") setConversations(conversationsResult.value);
     if (inboxResult.status === "fulfilled") setIncomingConnections(inboxResult.value);
@@ -967,17 +1095,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     const latest = demandsResult.status === "fulfilled" ? demandsResult.value.data.find((item) => item.id === liveDemand?.id) ?? demandsResult.value.data[0] : undefined;
     if (latest) await activateDemand(latest);
     if (activeAgentThread) await loadAgentThread(activeAgentThread.id);
-    if (selectedConversation) {
-      const messages = await api.getConversation(selectedConversation.id);
-      const currentUserId = session.state.session?.user.id;
-      setConversation(messages.map((message) => displayConversationMessage(message, currentUserId)));
-      const lastMessageId = messages.at(-1)?.id;
-      if (lastMessageId) await Promise.allSettled([api.markConversationDelivered(selectedConversation.id, lastMessageId), api.markConversationRead(selectedConversation.id, lastMessageId)]);
-    }
+    await syncOpenConversation();
     if (results.every((result) => result.status === "rejected")) throw new Error("实时数据暂时无法同步。");
-  }, [activateDemand, activeAgentThread, api, liveApi, liveDemand?.id, loadAgentThread, selectedConversation, session.state.session?.user.id]);
+  }, [activateDemand, activeAgentThread, api, liveApi, liveDemand?.id, loadAgentThread, syncOpenConversation]);
 
   const handleRealtimeEvent = useCallback((event: FitMeetRealtimeEvent) => {
+    const eventConversationId = typeof event.payload?.conversationId === "string" ? event.payload.conversationId : "";
+    if (event.eventType === "chat.unlocked" && eventConversationId) restoreConversationAccess(eventConversationId);
     void reconcileRealtimeState().catch(() => notice("实时同步暂时中断；网络恢复后会自动补齐。"));
     const eventCopy: Record<string, string> = {
       "demand.candidates.ready": "小福找到了新的候选人，已为你刷新。",
@@ -999,7 +1123,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
         new Notification("FitMeet", { body: copy, icon: "/fitmeet-icon.png", tag: event.eventType });
       }
     }
-  }, [notificationEnabled, notice, reconcileRealtimeState]);
+  }, [notificationEnabled, notice, reconcileRealtimeState, restoreConversationAccess]);
 
   const realtimeStatus = useFitMeetRealtime(session.state.session?.accessToken, handleRealtimeEvent, () => {
     void reconcileRealtimeState().catch(() => {
@@ -1007,6 +1131,28 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       // only an invalidation hint, so a later reconnect will safely retry.
     });
   });
+
+  useEffect(() => {
+    if (!liveApi || overlay !== "conversation" || !selectedConversation || selectedConversationClosed) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void syncOpenConversation().catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 2_500);
+    return () => window.clearInterval(timer);
+  }, [liveApi, overlay, selectedConversation, selectedConversationClosed, syncOpenConversation]);
+
+  useEffect(() => {
+    if (!liveApi || activeTab !== "moments") return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void api.getFeed().then((page) => {
+        setPosts(page.data);
+        setFeedLastPage(page.metadata?.lastPage ?? 1);
+      }).catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 6_000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, api, liveApi]);
 
   const openToolProposal = (proposal: AgentThreadEntry) => {
     setSelectedToolProposal(proposal);
@@ -1035,7 +1181,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   if (session.state.status === "loading") return <main className={styles.appPage}><section className={`${styles.mobileSurface} ${styles.loadingSurface}`} aria-live="polite"><FitMeetBrandIcon size={78} priority /><p>正在准备你的 FitMeet 内测档案…</p></section></main>;
   if (session.state.status === "anonymous") return <InternalTesterLogin onLogin={session.login} initialError={session.state.error} />;
 
-  if (surface === "onboarding") return <OnboardingFlow initialProfile={session.state.socialProfile} initialStatus={session.state.onboarding} onComplete={completeOnboarding} onUploadPhotos={uploadProfilePhotos} onExit={session.logout} onLifeNeed={(purpose) => {
+  if (surface === "onboarding") return <OnboardingFlow userId={session.state.session?.user.id ?? 0} initialProfile={session.state.socialProfile} initialStatus={session.state.onboarding} onComplete={completeOnboarding} onUploadPhotos={uploadProfilePhotos} onExit={session.logout} onLifeNeed={(purpose) => {
     const labels = { friends: "交友", dating: "恋爱", workout: "约练", buddy: "找搭子", travel: "找旅伴", service: "找服务", housing: "找房", activity: "找活动", help: "求助", other: "其他需求" };
     setAgentOnlyMode(true); setSurface("main"); setActiveTab("home");
     void (async () => {
@@ -1052,7 +1198,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     <div className={styles.appScroll}>
       {activeTab === "home" ? <HomeScreen nickname={profile.nickname} chat={chat} entries={agentEntries} input={chatInput} onInput={setChatInput} onSend={() => void sendAgentMessage()} onQuickPrompt={(prompt) => void sendAgentMessage(prompt)} sending={agentSending} onVoice={startVoiceInput} voiceActive={voiceInput.isListening} demand={hasDemand ? demand : null} draftMissingFields={activeDraftSession?.missingFields ?? []} candidateCount={activeCandidates.length} onDemand={() => hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onDemandList={() => demands.length ? setOverlay("demandList") : hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onEditDemand={() => hasDemand ? setOverlay("demandEdit") : void prepareDemandDraft()} onCandidates={() => setOverlay("candidate")} onConversation={openDemandConversation} onCreateDemand={() => activeDraftSession ? void prepareDemandDraft() : void startNewDemand()} onReviewDemandCard={() => void confirmDemandCardDraft()} onToolProposal={openToolProposal} onMemory={() => setOverlay("memory")} onHistory={() => setOverlay("history")} realtimeStatus={realtimeStatus} /> : null}
       {activeTab === "moments" ? <MomentsExperience api={api} userId={session.state.session?.user.id ?? 0} posts={posts} onPostsChange={setPosts} likedPostIds={likedPostIds} onLike={(id) => void toggleLike(id)} channel={discoverChannel} onChannel={setDiscoverChannel} onCompose={() => setOverlay("composer")} onDelete={deletePost} socialIntents={socialIntents} taskIntents={taskIntents} socialApplications={socialApplications} taskApplications={taskApplications} onApplication={(kind, intent, status) => void changeApplication(kind, intent, status)} onNotice={notice} initialLastPage={feedLastPage} /> : null}
-      {activeTab === "messages" ? <MessagesExperience invitations={invitations} conversations={conversations} incomingConnections={incomingConnections} outgoingConnections={outgoingConnections} agentEvents={agentInboxEvents} ownerSocialApplications={ownerSocialApplications} ownerTaskApplications={ownerTaskApplications} currentUserId={session.state.session?.user.id ?? 0} unreadCount={unreadCount} onConversation={(id) => void openConversation(id)} onInvitation={(invitation, action) => void resolveInvitation(invitation, action)} onIntentApplication={(kind, application, decision) => void resolveIntentApplication(kind, application, decision)} onAcknowledge={(id) => void acknowledgeInboxEvent(id)} onMeet={() => meet.id ? setOverlay("meet") : notice("还没有已确认的真实活动。 ")} onRelationship={() => setOverlay("relationships")} onRefresh={reconcileRealtimeState} /> : null}
+      {activeTab === "messages" ? <MessagesExperience invitations={invitations} conversations={visibleConversations} incomingConnections={incomingConnections} outgoingConnections={outgoingConnections} agentEvents={agentInboxEvents} ownerSocialApplications={ownerSocialApplications} ownerTaskApplications={ownerTaskApplications} currentUserId={session.state.session?.user.id ?? 0} unreadCount={unreadCount} onConversation={(id) => void openConversation(id)} onInvitation={(invitation, action) => void resolveInvitation(invitation, action)} onIntentApplication={(kind, application, decision) => void resolveIntentApplication(kind, application, decision)} onSystemEvent={(event) => void openInboxEvent(event)} onMeet={() => meet.id ? setOverlay("meet") : notice("还没有已确认的真实活动。 ")} onRelationship={() => setOverlay("relationships")} onRefresh={reconcileRealtimeState} /> : null}
       {activeTab === "profile" ? <ProfileExperience api={api} userId={session.state.session?.user.id ?? 0} profile={profile} photos={profilePhotos} notificationEnabled={notificationEnabled} postCount={posts.filter((post) => Number(post.userId) === Number(session.state.session?.user.id)).length} relationshipCount={incomingConnections.length + outgoingConnections.length} blockedUsers={blockedUsers} onPhotosChange={setProfilePhotos} onNotice={notice} onEdit={() => setOverlay("editProfile")} onPrivacy={() => setOverlay("privacy")} onNotification={(value) => void updateNotificationPreference(value)} onRelationships={() => setOverlay("relationships")} onReboard={() => { setAgentOnlyMode(false); setSurface("onboarding"); }} onSafety={() => setOverlay("accountSafety")} onMoments={() => setActiveTab("moments")} onLogout={session.logout} onBlockUser={async (user: PublicUserProfile) => { try { await blockAndRemember({ id: user.id, name: user.name, avatar: user.avatar }); } catch (reason) { notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。"); } }} onUnblockUser={unblockKnownUser} /> : null}
     </div>
     <nav className={styles.tabBar} aria-label="FitMeet 主导航">{tabs.map((tab) => { const Icon = tab.icon; const selected = activeTab === tab.id; return <button key={tab.id} type="button" className={`${styles.tabButton} ${selected ? styles.tabButtonActive : ""}`} onClick={() => setActiveTab(tab.id)} aria-current={selected ? "page" : undefined} aria-label={tab.label}><Icon /><small>{tab.label}</small></button>; })}</nav>
@@ -1065,7 +1211,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   {overlay === "demandEdit" ? <DemandEditSheet demand={demand} onClose={() => setOverlay(null)} onSave={(next) => void saveDemandDraft(next)} /> : null}
   {overlay === "invitation" && selectedCandidate ? <InviteSheet candidate={selectedCandidate} demand={demand} onClose={() => { setInviteStatus("none"); setOverlay(null); }} onSend={(message) => void sendInvite(message)} /> : null}
   {overlay === "composer" ? <ComposeSheet value={postText} images={postImages} publishing={postPublishing} onChange={setPostText} onFiles={(files) => void selectPostImages(files)} onRemoveImage={(id) => setPostImages((items) => items.filter((item) => item.id !== id))} onClose={() => setOverlay(null)} onPublish={() => void publishPost()} /> : null}
-  {overlay === "conversation" && selectedConversation ? <ConversationSheet conversation={selectedConversation} unlocked items={conversation} input={conversationInput} onInput={setConversationInput} onSend={() => void sendConversation()} onMute={() => void toggleConversationMute()} onRecall={(id) => void recallConversationMessage(id)} onReport={(id) => void reportConversationMessage(id)} onBlock={() => { const targetId = Number(selectedConversation.userId ?? selectedConversation.peer?.id); if (!targetId) return notice("当前会话没有可验证的对方账号，无法拉黑。"); void blockAndRemember({ id: targetId, name: selectedConversation.displayName || selectedConversation.username || selectedConversation.peer?.name, avatar: selectedConversation.avatar || selectedConversation.peer?.avatar }).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。")); }} onClose={() => setOverlay(null)} /> : null}
+  {overlay === "conversation" && selectedConversation ? <ConversationSheet conversation={selectedConversation} unlocked={!selectedConversationClosed} closed={selectedConversationClosed} items={conversation} input={conversationInput} onInput={setConversationInput} onSend={() => void sendConversation()} onMute={() => void toggleConversationMute()} onRecall={(id) => void recallConversationMessage(id)} onReport={(id) => void reportConversationMessage(id)} onBlock={() => { const targetId = Number(selectedConversation.userId ?? selectedConversation.peer?.id); if (!targetId) return notice("当前会话没有可验证的对方账号，无法拉黑。"); void blockAndRemember({ id: targetId, name: selectedConversation.displayName || selectedConversation.username || selectedConversation.peer?.name, avatar: selectedConversation.avatar || selectedConversation.peer?.avatar }).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。")); }} onClose={() => setOverlay(null)} /> : null}
   {overlay === "memory" ? <MemorySheet memories={memories} onClose={() => setOverlay(null)} onSave={saveMemory} onDelete={deleteMemory} /> : null}
   {overlay === "history" ? <HistorySheet threads={agentThreads} activeThreadId={activeAgentThread?.id} onClose={() => setOverlay(null)} onSelect={(id) => { void loadAgentThread(id, true).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "对话记录暂时无法打开。")); }} onNew={() => void startNewDemand()} /> : null}
   {overlay === "toolApproval" && selectedToolProposal ? <ToolApprovalSheet key={selectedToolProposal.id} proposal={selectedToolProposal} onClose={() => { setOverlay(null); setSelectedToolProposal(null); }} onResolve={(decision, message) => void resolveToolProposal(decision, message)} /> : null}
@@ -1079,7 +1225,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   </main>;
 }
 
-function HomeScreen({ nickname, chat, entries, input, onInput, onSend, onQuickPrompt, sending, onVoice, voiceActive, demand, draftMissingFields, candidateCount, onDemand, onDemandList, onEditDemand, onCandidates, onConversation, onCreateDemand, onReviewDemandCard, onToolProposal, onMemory, onHistory, realtimeStatus }: { nickname: string; chat: ChatLine[]; entries: AgentThreadEntry[]; input: string; onInput: (value: string) => void; onSend: () => void; onQuickPrompt: (prompt: string) => void; sending: boolean; onVoice: () => void; voiceActive: boolean; demand: DemoDemand | null; draftMissingFields: string[]; candidateCount: number; onDemand: () => void; onDemandList: () => void; onEditDemand: () => void; onCandidates: () => void; onConversation: () => void; onCreateDemand: () => void; onReviewDemandCard: () => void; onToolProposal: (proposal: AgentThreadEntry) => void; onMemory: () => void; onHistory: () => void; realtimeStatus: "offline" | "connecting" | "connected" | "reconnecting" }) {
+function HomeScreen({ nickname, chat, entries, input, onInput, onSend, onQuickPrompt, sending, onVoice, voiceActive, demand, draftMissingFields, candidateCount, onDemand, onDemandList, onEditDemand, onCandidates, onConversation, onCreateDemand, onReviewDemandCard, onToolProposal, onMemory, onHistory, realtimeStatus }: { nickname: string; chat: ChatLine[]; entries: AgentThreadEntry[]; input: string; onInput: (value: string) => void; onSend: () => void; onQuickPrompt: (prompt: string) => void; sending: boolean; onVoice: () => void; voiceActive: boolean; demand: DemandViewModel | null; draftMissingFields: string[]; candidateCount: number; onDemand: () => void; onDemandList: () => void; onEditDemand: () => void; onCandidates: () => void; onConversation: () => void; onCreateDemand: () => void; onReviewDemandCard: () => void; onToolProposal: (proposal: AgentThreadEntry) => void; onMemory: () => void; onHistory: () => void; realtimeStatus: "offline" | "connecting" | "connected" | "reconnecting" }) {
   const [showFullTimeline, setShowFullTimeline] = useState(false);
   const syncLabel = realtimeStatus === "connected" ? "实时在线" : realtimeStatus === "reconnecting" ? "正在重连" : realtimeStatus === "offline" ? "离线，待恢复" : "正在连接";
   const timeline = entries.length ? entries : chat.map((item) => ({ id: String(item.id), kind: "message", role: item.role, content: item.text } as AgentThreadEntry));
@@ -1156,7 +1302,7 @@ function AgentToolTimelineCard({ entry, onReviewDemandCard, onOpenProposal }: { 
   return <article className={`${styles.toolTimelineCard} ${awaitingConfirmation ? styles.toolTimelinePending : ""}`}><header><span><FiShield /></span><div><strong>{toolTitle(entry.toolName, entry.toolStatus)}</strong><small>{statusCopy}</small></div></header><p>{entry.content || (readyForReview ? "信息已整理好，但不会自动生成或发布。" : "小福已把这一步记录在账号级对话里。")}</p>{readyForReview ? <button type="button" className={styles.secondaryButton} onClick={onReviewDemandCard}>由我生成需求卡 <FiChevronRight /></button> : null}{awaitingConfirmation ? <button type="button" className={entry.toolStatus === "failed" ? styles.secondaryButton : styles.primaryButton} onClick={onOpenProposal}>{entry.toolStatus === "failed" ? "检查后重试" : "查看并确认"} <FiChevronRight /></button> : null}</article>;
 }
 
-function DemandCard({ demand, candidateCount, onEdit, onOpen, onCandidates, onConversation }: { demand: DemoDemand; candidateCount: number; onEdit: () => void; onOpen: () => void; onCandidates: () => void; onConversation: () => void }) {
+function DemandCard({ demand, candidateCount, onEdit, onOpen, onCandidates, onConversation }: { demand: DemandViewModel; candidateCount: number; onEdit: () => void; onOpen: () => void; onCandidates: () => void; onConversation: () => void }) {
   const effectiveStatus = effectiveDemandStatus(demand, candidateCount);
   const primary = effectiveStatus === "draft" ? "确认并开始匹配" : effectiveStatus === "matching" || effectiveStatus === "published" ? "正在匹配 · 查看详情" : effectiveStatus === "matched" ? `查看 ${candidateCount} 位候选人` : effectiveStatus === "invited" ? "邀请已发送 · 等待回应" : effectiveStatus === "communicating" ? "已匹配 · 进入聊天" : effectiveStatus === "hidden" ? "匹配已暂停" : "这条需求已取消";
   const click = effectiveStatus === "matched" ? onCandidates : effectiveStatus === "communicating" ? onConversation : onOpen;
@@ -1168,11 +1314,11 @@ function DemandCard({ demand, candidateCount, onEdit, onOpen, onCandidates, onCo
   return <section className={styles.demandCard} aria-label={`${demand.title}需求卡`}><header><span><FiStar /></span><strong>{demand.title}</strong>{effectiveStatus === "draft" ? <button type="button" aria-label="编辑需求" onClick={onEdit}><FiEdit3 /></button> : <FiChevronRight />}</header>{dynamicRows.slice(0, 6).map(({ title, value }) => { const RowIcon = iconFor(title); return <button type="button" className={styles.demandRow} key={`${title}-${value}`} onClick={onOpen}><RowIcon /><span>{title}</span><strong>{value}</strong>{effectiveStatus === "draft" ? <FiEdit3 /> : <FiChevronRight />}</button> })}<button type="button" className={styles.primaryButton} onClick={click} disabled={effectiveStatus === "cancelled"}>{primary} {effectiveStatus === "matched" ? <FiChevronRight /> : <FiCheck />}</button></section>;
 }
 
-function MomentsScreen({ posts, likedPostIds, onLike, channel, onChannel, onCompose, socialIntent, taskIntent, socialApplication, taskApplication, onApplication }: { posts: typeof seedExperiencePosts; likedPostIds: number[]; onLike: (id: number) => void; channel: "moments" | "social" | "tasks"; onChannel: (value: "moments" | "social" | "tasks") => void; onCompose: () => void; socialIntent: FitMeetPublicIntent | null; taskIntent: FitMeetPublicIntent | null; socialApplication: DemoApplicationStatus; taskApplication: DemoApplicationStatus; onApplication: (kind: "social" | "task", status: DemoApplicationStatus) => void }) {
+function MomentsScreen({ posts, likedPostIds, onLike, channel, onChannel, onCompose, socialIntent, taskIntent, socialApplication, taskApplication, onApplication }: { posts: FeedPost[]; likedPostIds: number[]; onLike: (id: number) => void; channel: "moments" | "social" | "tasks"; onChannel: (value: "moments" | "social" | "tasks") => void; onCompose: () => void; socialIntent: FitMeetPublicIntent | null; taskIntent: FitMeetPublicIntent | null; socialApplication: ApplicationViewStatus; taskApplication: ApplicationViewStatus; onApplication: (kind: "social" | "task", status: ApplicationViewStatus) => void }) {
   return <div className={styles.standardScreen}><header className={styles.screenHeader}><div><h1>发现</h1><p>分享动态，也看看附近真实需求</p></div><button type="button" aria-label="发布动态" onClick={onCompose}><FiPlus /></button></header><div className={styles.segmented}>{(["moments", "social", "tasks"] as const).map((id) => <button type="button" key={id} className={channel === id ? styles.segmentActive : ""} onClick={() => onChannel(id)}>{id === "moments" ? "朋友圈" : id === "social" ? "社交大厅" : "任务大厅"}</button>)}</div>{channel === "moments" ? <div className={styles.feedList}>{posts.length ? posts.map((post) => <article className={styles.postCard} key={post.id}><header><Avatar name={post.username} color={post.id % 2 ? "#ed7f94" : "#6889ec"} /><div><strong>{post.username}</strong><small>{post.createdAt} · {post.city}</small></div><FiMoreHorizontal /></header><h2>{post.title}</h2><p>{post.text}</p><div className={styles.postImage}><span>{post.tags[0]?.slice(0, 1) ?? "F"}</span></div><div className={styles.tagRow}>{post.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><footer><button type="button" className={likedPostIds.includes(post.id) ? styles.liked : ""} onClick={() => onLike(post.id)}><FiHeart /> {post.likes}</button><button type="button"><FiMessageCircle /> {post.comments}</button><button type="button"><FiSend /> 分享</button></footer></article>) : <p className={styles.emptyState}>暂时没有动态。你可以发布第一条轻松的近况。</p>}</div> : <DiscoveryHall task={channel === "tasks"} intent={channel === "tasks" ? taskIntent : socialIntent} status={channel === "tasks" ? taskApplication : socialApplication} onAction={(status) => onApplication(channel === "tasks" ? "task" : "social", status)} />}</div>;
 }
 
-function DiscoveryHall({ task, intent, status, onAction }: { task: boolean; intent: FitMeetPublicIntent | null; status: DemoApplicationStatus; onAction: (status: DemoApplicationStatus) => void }) {
+function DiscoveryHall({ task, intent, status, onAction }: { task: boolean; intent: FitMeetPublicIntent | null; status: ApplicationViewStatus; onAction: (status: ApplicationViewStatus) => void }) {
   if (!intent) return <section className={styles.discoveryHall}><p className={styles.emptyState}>暂时没有可申请的真实需求。你可以稍后再看，或发布自己的需求卡。</p></section>;
   const title = intent.title || (task ? "服务需求" : "社交需求");
   const action = status === "idle" ? task ? "申请接单" : "申请加入" : status === "pending" ? "等待对方确认" : status === "accepted" ? "已接受 · 可进入会话" : status === "rejected" ? "对方暂未接受" : "申请已取消";
@@ -1189,7 +1335,7 @@ function ProfileScreen({ profile, notificationEnabled, postCount, relationshipCo
   return <div className={styles.profileScreen}><header><button type="button" aria-label="隐私设置" onClick={onPrivacy}><FiShield /></button><button type="button" aria-label="设置" onClick={onSettings}><FiSettings /></button></header><section className={styles.profileHero}><Avatar name={profile.nickname} color="#657cf3" size={72} /><div><h1>{profile.nickname}</h1><p>{profile.city || "城市待填写"}</p><span>内测资料</span></div><button type="button" onClick={onEdit}>编辑资料</button></section><p className={styles.profileBio}>{profile.bio || "写几句话介绍自己，让小福更好地理解你的兴趣与边界。"}</p><section className={styles.profileStats}><span><strong>{postCount}</strong>动态</span><span><strong>{profile.interests.length}</strong>兴趣</span><span><strong>{relationshipCount}</strong>待处理关系</span></section><div className={styles.profileTags}>{profile.interests.map((interest) => <span key={interest}>{interest}</span>)}</div><section className={styles.profileRows}><button type="button" onClick={onRelationships}><span><FiUsers /></span><strong>我的关系</strong><small>{relationshipCount ? `${relationshipCount} 个待处理` : "好友与申请"}</small><FiChevronRight /></button><button type="button" onClick={onPrivacy}><span><FiLock /></span><strong>隐私边界</strong><small>附近推荐 / 先聊天</small><FiChevronRight /></button><button type="button" onClick={onSettings}><span><FiBell /></span><strong>通知设置</strong><small>{notificationEnabled ? "已开启" : "已关闭"}</small><FiChevronRight /></button><button type="button" onClick={onReboard}><span><FiSliders /></span><strong>重新完善资料</strong><small>完整 onboarding</small><FiChevronRight /></button></section></div>;
 }
 
-function CandidateSheet({ candidate, candidates, relationship, inviteStatus, onClose, onSelect, onDismiss, onSave, onFriend, onInvite, onConversation }: { candidate: DemoCandidate; candidates: DemoCandidate[]; relationship: RelationshipState; inviteStatus: DemoInvitationStatus; onClose: () => void; onSelect: (id: number) => void; onDismiss: () => void; onSave: () => void; onFriend: () => void; onInvite: () => void; onConversation: () => void }) {
+function CandidateSheet({ candidate, candidates, relationship, inviteStatus, onClose, onSelect, onDismiss, onSave, onFriend, onInvite, onConversation }: { candidate: CandidateViewModel; candidates: CandidateViewModel[]; relationship: RelationshipState; inviteStatus: InvitationViewStatus; onClose: () => void; onSelect: (id: number) => void; onDismiss: () => void; onSave: () => void; onFriend: () => void; onInvite: () => void; onConversation: () => void }) {
   const invitationAccepted = inviteStatus === "accepted";
   return <Sheet title="候选人" onClose={onClose}><p className={styles.sheetLead}>先看共同点和活动节奏，再决定要不要继续。没有“必须合适”的人。</p><div className={styles.candidatePicker}>{candidates.map((item) => <button type="button" key={item.id} className={candidate.id === item.id ? styles.candidatePickerActive : ""} onClick={() => onSelect(item.id)}>{item.name}</button>)}</div><article className={styles.candidateDetail}><header><Avatar name={candidate.name} color="#9d7df2" size={68} /><div><h3>{candidate.name}</h3><p>{candidate.age} · {candidate.sport} · {candidate.level} · {candidate.distance}</p></div></header><p className={styles.candidateReason}><FiStar /> {candidate.reason}</p><div className={styles.tagRow}>{candidate.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><p className={styles.sheetSafety}><FiShield /> 小福不会替你私信。对方接受邀请或好友申请后，才能聊天。</p><div className={styles.stackActions}><button type="button" className={styles.secondaryButton} onClick={onSave}><FiBookmark /> 先收藏</button><button type="button" className={styles.secondaryButton} onClick={onDismiss}>这次不合适</button>{relationship === "none" ? <button type="button" className={styles.secondaryButton} onClick={onFriend}><FiUserPlus /> 先申请好友</button> : null}<button type="button" className={styles.primaryButton} onClick={invitationAccepted ? onConversation : onInvite} disabled={inviteStatus === "sent"}>{inviteStatus === "sent" ? "邀请已发送 · 等待回应" : invitationAccepted ? <>已匹配 · 进入聊天 <FiChevronRight /></> : <>生成邀请草稿 <FiChevronRight /></>}</button></div></article></Sheet>;
 }
@@ -1209,19 +1355,19 @@ function DemandListSheet({ demands, activeDemandId, onClose, onSelect, onCreate 
   </Sheet>;
 }
 
-function DemandSheet({ demand, candidateCount, onClose, onEdit, onPublish, onHide, onCancel, onCandidates, onConversation }: { demand: DemoDemand; candidateCount: number; onClose: () => void; onEdit: () => void; onPublish: () => void; onHide: () => void; onCancel: () => void; onCandidates: () => void; onConversation: () => void }) {
+function DemandSheet({ demand, candidateCount, onClose, onEdit, onPublish, onHide, onCancel, onCandidates, onConversation }: { demand: DemandViewModel; candidateCount: number; onClose: () => void; onEdit: () => void; onPublish: () => void; onHide: () => void; onCancel: () => void; onCandidates: () => void; onConversation: () => void }) {
   const effectiveStatus = effectiveDemandStatus(demand, candidateCount);
   const statusText = effectiveStatus === "draft" ? "待确认" : ["matching", "published"].includes(effectiveStatus) ? "正在匹配" : effectiveStatus === "matched" ? "已找到候选人" : effectiveStatus === "invited" ? "已发送邀请" : effectiveStatus === "communicating" ? "已匹配，可聊天" : effectiveStatus === "hidden" ? "已暂停" : "已取消";
   const detailFields = demand.fields?.length ? demand.fields : [{ title: "时间", value: demand.timeWindow }, { title: "地点", value: demand.locationText }, { title: "边界", value: demand.privacyBoundary }];
   return <Sheet title="我的需求" onClose={onClose}><p className={styles.sheetLead}>需求先以草稿保存。发布、暂停、取消和查看候选人都对应 iOS 的 demand 状态，而不是一次性的展示按钮。</p><article className={styles.detailCard}><span>当前状态</span><strong>{statusText}</strong><p>{demand.summary}</p><dl className={styles.detailRows}>{detailFields.slice(0, 6).map((field) => <div key={`${field.title}-${field.value}`}><dt>{field.title}</dt><dd>{field.value}</dd></div>)}</dl></article><div className={styles.stackActions}>{effectiveStatus === "draft" ? <button type="button" className={styles.secondaryButton} onClick={onEdit}><FiEdit3 /> 编辑草稿</button> : null}{effectiveStatus === "draft" || effectiveStatus === "hidden" ? <button type="button" className={styles.primaryButton} onClick={onPublish}>确认并开始匹配</button> : null}{effectiveStatus === "matched" ? <button type="button" className={styles.primaryButton} onClick={onCandidates}>查看 {candidateCount} 位候选人</button> : null}{effectiveStatus === "communicating" ? <button type="button" className={styles.primaryButton} onClick={onConversation}>进入聊天</button> : null}{effectiveStatus === "invited" ? <p className={styles.statusRow}><FiClock /> 等待对方接受；接受前不会开放连续私信。</p> : null}{["published", "matching", "matched"].includes(effectiveStatus) ? <button type="button" className={styles.secondaryButton} onClick={onHide}>暂停匹配</button> : null}{!["cancelled", "communicating"].includes(effectiveStatus) ? <button type="button" className={styles.dangerButton} onClick={onCancel}>取消这条需求</button> : null}</div></Sheet>;
 }
 
-function DemandEditSheet({ demand, onClose, onSave }: { demand: DemoDemand; onClose: () => void; onSave: (demand: DemoDemand) => void }) {
+function DemandEditSheet({ demand, onClose, onSave }: { demand: DemandViewModel; onClose: () => void; onSave: (demand: DemandViewModel) => void }) {
   const [draft, setDraft] = useState(demand);
   return <Sheet title="编辑需求草稿" onClose={onClose}><div className={styles.draftForm}><Field label="活动名称"><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></Field><Field label="时间"><input value={draft.timeWindow} onChange={(event) => setDraft({ ...draft, timeWindow: event.target.value })} /></Field><Field label="大致地点"><input value={draft.locationText} onChange={(event) => setDraft({ ...draft, locationText: event.target.value })} /></Field><Field label="活动方式"><input value={draft.durationText} onChange={(event) => setDraft({ ...draft, durationText: event.target.value })} /></Field><Field label="舒服的边界"><textarea value={draft.privacyBoundary} onChange={(event) => setDraft({ ...draft, privacyBoundary: event.target.value })} /></Field></div><button type="button" className={styles.primaryButton} onClick={() => onSave({ ...draft, status: "draft" })}>保存草稿</button></Sheet>;
 }
 
-function InviteSheet({ candidate, demand, onClose, onSend }: { candidate: DemoCandidate; demand: DemoDemand; onClose: () => void; onSend: (message: string) => void }) {
+function InviteSheet({ candidate, demand, onClose, onSend }: { candidate: CandidateViewModel; demand: DemandViewModel; onClose: () => void; onSend: (message: string) => void }) {
   const [message, setMessage] = useState(invitationMessage(candidate, demand));
   return <Sheet title={`邀请 ${candidate.name} 一起活动`} onClose={onClose}><div className={styles.inviteDraft}><span>邀请说明</span><textarea className={styles.publishTextarea} aria-label="邀请文案" value={message} onChange={(event) => setMessage(event.target.value)} /><small>发送前可以随时修改；对方接受前不会开放私信。</small></div><button type="button" className={styles.primaryButton} disabled={!message.trim()} onClick={() => onSend(message)}><FiSend /> 确认发送邀请</button></Sheet>;
 }
@@ -1266,16 +1412,16 @@ function ComposeSheet({ value, images, publishing, onChange, onFiles, onRemoveIm
   return <Sheet title="发布动态" onClose={onClose}><textarea className={styles.publishTextarea} value={value} onChange={(event) => onChange(event.target.value)} placeholder="分享一个今天的瞬间，或说说你正在寻找的同伴…" aria-label="动态内容" />{images.length ? <div className={styles.momentDraftGrid}>{images.map((image) => <figure key={image.id}><img src={image.preview} alt="待发布图片预览" /><button type="button" aria-label="移除图片" onClick={() => onRemoveImage(image.id)}><FiX /></button></figure>)}</div> : null}<label className={styles.momentMediaPicker}><FiImage /><span><strong>添加图片</strong><small>{images.length}/9 · 单张不超过 8MB</small></span><input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={publishing || images.length >= 9} onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = ""; }} /></label><div className={styles.publishOptions}><span><FiMapPin /> 模糊定位</span><span><FiUsers /> 公开给同城兴趣圈</span></div><button type="button" className={styles.primaryButton} onClick={onPublish} disabled={publishing || (!value.trim() && !images.length)}>{publishing ? "正在审核并发布…" : "发布到朋友圈"}</button><p className={styles.sheetSafety}><FiShield /> 图片先上传到统一审核接口；全部通过后才会创建动态。</p></Sheet>;
 }
 
-function ConversationSheet({ conversation, unlocked, items, input, onInput, onSend, onMute, onRecall, onReport, onBlock, onClose }: { conversation: FitMeetConversation; unlocked: boolean; items: ConversationMessage[]; input: string; onInput: (value: string) => void; onSend: () => void; onMute: () => void; onRecall: (id: string) => void; onReport: (id: string) => void; onBlock: () => void; onClose: () => void }) {
+function ConversationSheet({ conversation, unlocked, closed, items, input, onInput, onSend, onMute, onRecall, onReport, onBlock, onClose }: { conversation: FitMeetConversation; unlocked: boolean; closed: boolean; items: ConversationMessage[]; input: string; onInput: (value: string) => void; onSend: () => void; onMute: () => void; onRecall: (id: string) => void; onReport: (id: string) => void; onBlock: () => void; onClose: () => void }) {
   const [actionMessageId, setActionMessageId] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState(false);
   const title = conversation.displayName || conversation.username || "FitMeet 用户";
   const muted = conversation.notificationLevel === "muted" || Boolean(conversation.mutedUntil && new Date(conversation.mutedUntil).getTime() > Date.now());
-  return <Sheet title={title} onClose={onClose}><div className={styles.threadToolbar}><button type="button" onClick={onMute}><FiBell /> {muted ? "恢复提醒" : "静音"}</button><button type="button" className={confirmBlock ? styles.threadDangerAction : ""} onClick={() => { if (confirmBlock) onBlock(); else setConfirmBlock(true); }}><FiShield /> {confirmBlock ? "确认拉黑" : "拉黑"}</button></div><p className={styles.threadNote}><FiShield /> {unlocked ? "双方确认后开放的真实会话；当前服务端仅支持文字消息" : "等待双方接受邀请或好友关系后，才会开启连续会话"}</p>{unlocked ? <><div className={styles.thread}>{items.map((item) => {
+  return <Sheet title={title} onClose={onClose}>{closed ? null : <div className={styles.threadToolbar}><button type="button" onClick={onMute}><FiBell /> {muted ? "恢复提醒" : "静音"}</button><button type="button" className={confirmBlock ? styles.threadDangerAction : ""} onClick={() => { if (confirmBlock) onBlock(); else setConfirmBlock(true); }}><FiShield /> {confirmBlock ? "确认拉黑" : "拉黑"}</button></div>}<p className={styles.threadNote}><FiShield /> {closed ? "这段旧会话已关闭；历史记录只读保留" : unlocked ? "双方确认后开放的真实会话；当前服务端仅支持文字消息" : "等待双方接受邀请或好友关系后，才会开启连续会话"}</p>{unlocked || closed ? <div className={styles.thread}>{items.map((item) => {
     const recalled = item.lifecycleStatus === "recalled" || Boolean(item.recalledAt);
     const canRecall = item.role === "user" && !recalled && Date.now() - new Date(item.createdAt).getTime() <= 2 * 60 * 1000;
     return <article key={item.id} className={`${styles.threadMessage} ${item.role === "user" ? styles.threadMine : ""}`}><p>{item.text}</p><footer><small>{item.role === "user" ? recalled ? "已撤回" : item.readByOther ? "已读" : item.status === "delivered" ? "已送达" : "已发送" : new Date(item.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</small>{!recalled ? <button type="button" aria-label="消息操作" onClick={() => setActionMessageId(actionMessageId === item.id ? null : item.id)}><FiMoreHorizontal /></button> : null}</footer>{actionMessageId === item.id ? <aside>{canRecall ? <button type="button" onClick={() => { onRecall(item.id); setActionMessageId(null); }}><FiTrash2 /> 撤回消息</button> : null}{item.role === "peer" ? <button type="button" onClick={() => { onReport(item.id); setActionMessageId(null); }}><FiFlag /> 举报消息</button> : null}{!canRecall && item.role === "user" ? <small>发送超过 2 分钟，无法撤回</small> : null}</aside> : null}</article>;
-  })}</div><form className={styles.sheetComposer} onSubmit={(event) => { event.preventDefault(); onSend(); }}><input value={input} onChange={(event) => onInput(event.target.value)} placeholder="说点什么" aria-label="消息内容" /><button type="submit" aria-label="发送消息" disabled={!input.trim()}><FiSend /></button></form></> : <section className={styles.lockedConversation}><FiLock /><strong>还没有开启会话</strong><p>你可以等待对方决定，也可以撤回邀请；小福不会替你越过这一步。</p></section>}</Sheet>;
+  })}</div> : null}{unlocked ? <form className={styles.sheetComposer} onSubmit={(event) => { event.preventDefault(); onSend(); }}><input value={input} onChange={(event) => onInput(event.target.value)} placeholder="说点什么" aria-label="消息内容" /><button type="submit" aria-label="发送消息" disabled={!input.trim()}><FiSend /></button></form> : <section className={styles.lockedConversation}><FiLock /><strong>{closed ? "旧会话已关闭" : "还没有开启会话"}</strong><p>{closed ? "解除拉黑不会自动恢复原关系。重新匹配、重新邀请或双方重新建立关系后，新的会话才会开放。" : "你可以等待对方决定，也可以撤回邀请；小福不会替你越过这一步。"}</p></section>}</Sheet>;
 }
 
 function MemorySheet({ memories, onClose, onSave, onDelete }: { memories: FitMeetAgentMemory[]; onClose: () => void; onSave: (id: string) => void; onDelete: (id: string) => void }) {
@@ -1303,7 +1449,7 @@ function RelationshipSheet({ incoming, outgoing, onClose, onAction }: { incoming
   return <Sheet title="我的关系" onClose={onClose}><p className={styles.sheetLead}>关系申请、接受与拒绝都由服务端写入；没有任何动作会替你自动完成。</p>{incoming.length ? incoming.map((request) => <article className={styles.relationshipCard} key={request.id}><Avatar name={request.requesterName || "F"} color="#9d7df2" size={56} /><div><strong>{request.requesterName || "FitMeet 用户"}</strong><p>{request.message || "想先从共同兴趣开始聊聊。"}</p></div><div className={styles.inlineActions}><button type="button" onClick={() => onAction(request, "accept")}>接受</button><button type="button" onClick={() => onAction(request, "reject")}>拒绝</button></div></article>) : null}{outgoing.length ? outgoing.map((request) => <article className={styles.relationshipCard} key={request.id}><Avatar name={request.targetName || "F"} color="#7790e8" size={56} /><div><strong>{request.targetName || "FitMeet 用户"}</strong><p>等待对方决定；在接受前不会开放连续私信。</p></div><button type="button" onClick={() => onAction(request, "cancel")}>撤回</button></article>) : null}{!incoming.length && !outgoing.length ? <p className={styles.emptyState}>还没有待处理的关系申请。你可以从真实候选人页先发起申请。</p> : null}<p className={styles.sheetSafety}><FiShield /> 好友关系、邀请和会话权限由服务端状态决定；拒绝、取消或拉黑都不会开放聊天。</p></Sheet>;
 }
 
-function MeetLifecycleSheet({ meet, demand, onClose, onUpdate }: { meet: DemoMeet; demand: DemoDemand; onClose: () => void; onUpdate: (status: DemoMeetStatus, review?: DemoMeet["review"]) => void }) {
+function MeetLifecycleSheet({ meet, demand, onClose, onUpdate }: { meet: MeetViewModel; demand: DemandViewModel; onClose: () => void; onUpdate: (status: MeetViewStatus, review?: MeetViewModel["review"]) => void }) {
   return <Sheet title="活动闭环" onClose={onClose}><p className={styles.sheetLead}>开始前提醒、确认到达、完成活动、爽约和评价都会改变状态；不会被悄悄跳过。</p><article className={styles.detailCard}><span>当前状态</span><strong>{meet.status === "scheduled" ? "等待出发" : meet.status === "arrived" ? "已确认到达" : meet.status === "completed" ? "已完成活动" : meet.status === "no_show" ? "已记录爽约" : meet.status === "cancelled" ? "已取消" : "尚未建立"}</strong><p>{demand.timeWindow} · {demand.locationText} · {demand.privacyBoundary}</p></article>{meet.status === "scheduled" ? <div className={styles.lifecycleGrid}><button type="button" className={styles.primaryButton} onClick={() => onUpdate("arrived")}>确认到达</button><button type="button" className={styles.secondaryButton} onClick={() => onUpdate("cancelled")}>取消活动</button></div> : null}{meet.status === "arrived" ? <div className={styles.lifecycleGrid}><button type="button" className={styles.primaryButton} onClick={() => onUpdate("completed")}>完成活动</button><button type="button" className={styles.secondaryButton} onClick={() => onUpdate("no_show")}>报告爽约</button></div> : null}{meet.status === "completed" && !meet.review ? <div className={styles.reviewChoices}><p>这次活动感觉如何？</p>{(["守约", "愉快", "不合适"] as const).map((review) => <button type="button" key={review} onClick={() => onUpdate("completed", review)}>{review}</button>)}</div> : null}{meet.review ? <p className={styles.statusRow}><FiCheck /> 已提交「{meet.review}」评价；不会公开你的私人感受。</p> : null}{meet.status === "no_show" ? <p className={styles.sheetSafety}><FiShield /> 已记录。若涉及人身安全或持续骚扰，请使用安全帮助；否则你也可以只结束这次活动。</p> : null}</Sheet>;
 }
 

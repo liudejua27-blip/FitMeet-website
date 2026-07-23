@@ -1,7 +1,7 @@
 import type { DemandDraftSession, FitMeetDemand, FitMeetDemandCandidate } from "./fitmeet-api-contract";
-import { defaultDemoDemand, type DemoCandidate, type DemoDemand } from "./fitmeet-experience-runtime";
+import type { CandidateViewModel, DemandViewModel } from "./fitmeet-experience-models";
 
-export type LiveCandidate = DemoCandidate & {
+export type LiveCandidate = CandidateViewModel & {
   candidateRecordId: number;
   candidateUserId: number;
   avatar?: string | null;
@@ -17,19 +17,19 @@ export type LiveCandidate = DemoCandidate & {
   boundaryNotes?: string[];
 };
 
-export function demandStatus(status: string, candidateCount = 0): DemoDemand["status"] {
+export function demandStatus(status: string, candidateCount = 0): DemandViewModel["status"] {
   const normalized = status === "canceled" ? "cancelled" : status;
   if (normalized === "matchedCommunicating") return "communicating";
   if (normalized === "invited") return "invited";
   if (normalized === "hasCandidates" || candidateCount > 0) return "matched";
   if (["candidatePool", "published", "active"].includes(normalized)) return "matching";
   if (["hidden", "cancelled", "matching", "matched", "communicating", "draft"].includes(normalized)) {
-    return normalized as DemoDemand["status"];
+    return normalized as DemandViewModel["status"];
   }
   return "draft";
 }
 
-export function effectiveDemandStatus(demand: DemoDemand, candidateCount: number): DemoDemand["status"] {
+export function effectiveDemandStatus(demand: DemandViewModel, candidateCount: number): DemandViewModel["status"] {
   if (demand.status === "communicating" || demand.status === "invited") return demand.status;
   return candidateCount > 0 ? "matched" : demand.status;
 }
@@ -38,12 +38,33 @@ function fieldValue(fields: FitMeetDemand["fields"], title: string, fallback: st
   return fields.find((field) => field.title === title)?.value || fallback;
 }
 
-export function displayDemand(value: FitMeetDemand): DemoDemand {
+const internalDemandTypeLabels: Record<string, string> = {
+  friends: "认识新朋友",
+  dating: "认真认识彼此",
+  workout: "一起运动",
+  buddy: "一起找搭子",
+  travel: "一起旅行",
+  activity: "一起参加活动",
+  service: "找合适的服务",
+  housing: "找房或室友",
+  help: "寻求帮助",
+  other: "一起做点喜欢的事",
+};
+
+export function humanDemandActivity(activityType: string, fields: Array<{ title: string; value: string }> = []) {
+  const normalized = activityType.trim().toLowerCase();
+  if (!internalDemandTypeLabels[normalized]) return activityType || "一起活动";
+  return fields.find((field) => ["运动项目", "活动", "服务类型", "求助事项", "目的地"].includes(field.title) && field.value.trim())?.value
+    || internalDemandTypeLabels[normalized];
+}
+
+export function displayDemand(value: FitMeetDemand): DemandViewModel {
+  const activityType = humanDemandActivity(value.category || value.type || "一起活动", value.fields);
   return {
     id: value.id,
     title: value.title,
     summary: value.summary,
-    activityType: value.category || value.type || "一起活动",
+    activityType,
     timeWindow: fieldValue(value.fields, "时间", "时间待确认"),
     locationText: fieldValue(value.fields, "地点", "大致地点待确认"),
     capacityMax: value.capacityMax || 2,
@@ -84,7 +105,7 @@ export function displayCandidate(value: FitMeetDemandCandidate): LiveCandidate {
   };
 }
 
-export function displayDraftSession(session: DemandDraftSession): DemoDemand {
+export function displayDraftSession(session: DemandDraftSession): DemandViewModel {
   const fields = session.knownFields || {};
   const activity = fields["运动项目"] || fields["活动"] || fields["服务类型"] || fields.activity || session.category || "一起活动";
   const cardFields = ["运动项目", "活动", "服务类型", "求助事项", "目的地", "地点", "时间", "水平或偏好", "搭子要求", "偏好", "预算", "数量或人数"]
@@ -92,13 +113,13 @@ export function displayDraftSession(session: DemandDraftSession): DemoDemand {
     .map((key) => ({ title: key, value: fields[key] }))
     .slice(0, 6);
   return {
-    ...defaultDemoDemand,
     id: session.generatedCardId || session.id,
     title: activity === "一起活动" ? "一起做点喜欢的事" : `轻松${activity}局`,
-    summary: session.rawUserIntent || defaultDemoDemand.summary,
+    summary: session.rawUserIntent?.trim() || Object.values(fields).filter(Boolean).join(" · ") || "需求内容待补充",
     activityType: activity,
     timeWindow: fields["时间"] || fields.time || "时间待确认",
     locationText: fields["地点"] || fields["目的地"] || fields.location || "大致地点待确认",
+    capacityMax: 2,
     durationText: fields["水平或偏好"] || fields["搭子要求"] || fields["偏好"] || fields.boundary || "节奏待确认，可继续补充",
     privacyBoundary: fields.boundary || fields["搭子要求"] || fields["偏好"] || "公共场所集合，先聊天再决定",
     status: "draft",
@@ -117,6 +138,42 @@ export function demandTypeFor(activityType: string) {
   if (/求助|帮忙|跑腿/.test(activity)) return "help";
   if (/交友|认识朋友/.test(activity)) return "friends";
   return "buddy";
+}
+
+export function demandMatchingPolicy(demand: DemandViewModel, city: string, radiusKm: number) {
+  const demandType = demandTypeFor(demand.activityType);
+  const activity = humanDemandActivity(demand.activityType, demand.fields);
+  const hardFilters = demandType === "workout" && activity
+    ? [`运动项目：${activity}`]
+    : [];
+  const softPreferences = Array.from(new Set([
+    activity ? `活动：${activity}` : "",
+    demand.timeWindow && !/待确认/.test(demand.timeWindow) ? `时间：${demand.timeWindow}` : "",
+    demand.locationText && !/待确认/.test(demand.locationText) ? `地点：${demand.locationText}` : "",
+    demand.durationText && !/待确认/.test(demand.durationText) ? `方式：${demand.durationText}` : "",
+    demand.privacyBoundary ? `边界：${demand.privacyBoundary}` : "",
+  ].filter(Boolean)));
+  return {
+    demandType,
+    activity,
+    matchingPolicy: {
+      city: city || undefined,
+      radiusKm,
+      hardFilters,
+      softPreferences,
+    },
+  };
+}
+
+export function demandFieldImportance(title: string, demandType: string): "required" | "optional" | "context" {
+  // The current MobileAPI matcher only distinguishes `required` and
+  // `optional`; an unknown `context` value falls back to the field kind and
+  // turns a safety boundary into an exact hard filter. Keep the boundary in
+  // matchingPolicy.softPreferences and render it on the card, while marking
+  // the field optional for backend compatibility.
+  if (title === "边界") return "optional";
+  if (demandType === "workout" && title === "运动项目") return "required";
+  return "optional";
 }
 
 export function requiresScheduledTime(demandType: string) {

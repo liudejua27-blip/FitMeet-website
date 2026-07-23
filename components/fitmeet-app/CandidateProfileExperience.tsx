@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FiBookmark, FiCheck, FiChevronLeft, FiChevronRight, FiFlag, FiHeart, FiMapPin, FiMessageCircle, FiRefreshCw, FiShield, FiStar, FiUserPlus, FiX } from "react-icons/fi";
 import type { FeedPost, RelationshipState } from "@/lib/fitmeet-api-contract";
 import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
-import type { DemoInvitationStatus } from "@/lib/fitmeet-experience-runtime";
+import type { InvitationViewStatus } from "@/lib/fitmeet-experience-models";
 import type { LiveCandidate } from "@/lib/fitmeet-agent-domain";
 import styles from "./fitmeet-complete.module.css";
 import { useAccessibleDialog } from "./useAccessibleDialog";
@@ -29,7 +29,7 @@ export function CandidateProfileExperience({ api, candidate, candidates, relatio
   candidate: LiveCandidate;
   candidates: LiveCandidate[];
   relationship: RelationshipState;
-  inviteStatus: DemoInvitationStatus;
+  inviteStatus: InvitationViewStatus;
   onClose: () => void;
   onSelect: (id: number) => void;
   onDismiss: () => void;

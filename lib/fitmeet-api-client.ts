@@ -44,6 +44,18 @@ import {
 
 type ApiErrorPayload = { code?: string; message?: string; details?: unknown };
 
+export class FitMeetApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "FitMeetApiError";
+  }
+}
+
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "data" in payload) return (payload as { data: T }).data;
   return payload as T;
@@ -105,7 +117,7 @@ export class FitMeetApiClient {
     const payload: unknown = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = payload && typeof payload === "object" ? payload as ApiErrorPayload : {};
-      throw new Error(error.message || error.code || `请求失败 (${response.status})`);
+      throw new FitMeetApiError(error.message || error.code || `请求失败 (${response.status})`, response.status, error.code, error.details);
     }
     return unwrap<T>(payload);
   }
@@ -123,7 +135,7 @@ export class FitMeetApiClient {
     const payload: unknown = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = payload && typeof payload === "object" ? payload as ApiErrorPayload : {};
-      throw new Error(error.message || error.code || `请求失败 (${response.status})`);
+      throw new FitMeetApiError(error.message || error.code || `请求失败 (${response.status})`, response.status, error.code, error.details);
     }
     return payload as T;
   }
@@ -206,8 +218,23 @@ export class FitMeetApiClient {
   createAdvantage(payload: Pick<UserAdvantage, "title"> & Partial<UserAdvantage>) { return this.request<UserAdvantage>({ method: "POST", path: fitMeetPaths.users.advantages, body: payload, idempotencyKey: `web-advantage-${crypto.randomUUID()}` }); }
   deleteAdvantage(id: string) { return this.request<{ id: string; status: string }>({ method: "DELETE", path: fitMeetPaths.users.advantage(id) }); }
   async listVerifications() {
-    const payload = await this.request<{ items?: UserVerification[]; data?: UserVerification[] } | UserVerification[]>({ method: "GET", path: fitMeetPaths.users.verifications });
-    return Array.isArray(payload) ? payload : payload.items ?? payload.data ?? [];
+    const token = this.getToken();
+    const response = await fetch("/api/fitmeet/verifications", {
+      method: "GET",
+      cache: "no-store",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const payload: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = payload && typeof payload === "object" ? payload as ApiErrorPayload : {};
+      throw new FitMeetApiError(error.message || "认证资料暂时无法同步。", response.status, error.code, error.details);
+    }
+    const source = unwrap<{ items?: UserVerification[]; available?: boolean; message?: string }>(payload);
+    return {
+      items: Array.isArray(source.items) ? source.items : [],
+      available: source.available !== false,
+      message: source.message,
+    };
   }
   createVerification(payload: { title: string; verificationType?: string; evidenceAssetIds?: number[] }) { return this.request<UserVerification>({ method: "POST", path: fitMeetPaths.users.verifications, body: payload, idempotencyKey: `web-verification-${crypto.randomUUID()}` }); }
   deleteVerification(id: string) { return this.request<{ id: string; status: string }>({ method: "DELETE", path: fitMeetPaths.users.verification(id) }); }

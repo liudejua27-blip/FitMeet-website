@@ -48,6 +48,8 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   const [accountBusy, setAccountBusy] = useState(false);
   const [advantages, setAdvantages] = useState<UserAdvantage[]>([]);
   const [verifications, setVerifications] = useState<UserVerification[]>([]);
+  const [verificationsAvailable, setVerificationsAvailable] = useState(true);
+  const [verificationsMessage, setVerificationsMessage] = useState("");
   const [friends, setFriends] = useState<PublicUserProfile[]>([]);
   const [newAdvantage, setNewAdvantage] = useState("");
   const [newVerification, setNewVerification] = useState("");
@@ -74,12 +76,25 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
   useEffect(() => {
     let active = true;
-    void Promise.all([api.listAdvantages(), api.listVerifications(), api.listFriends()]).then(([nextAdvantages, nextVerifications, nextFriends]) => {
+    void Promise.allSettled([api.listAdvantages(), api.listVerifications(), api.listFriends()]).then(([advantagesResult, verificationsResult, friendsResult]) => {
       if (!active) return;
-      setAdvantages(nextAdvantages.filter((item) => item.status !== "deleted"));
-      setVerifications(nextVerifications.filter((item) => item.status !== "deleted"));
-      setFriends(nextFriends);
-    }).catch(() => onNotice("优势、认证或好友资料暂时无法同步。"));
+      if (advantagesResult.status === "fulfilled") setAdvantages(advantagesResult.value.filter((item) => item.status !== "deleted"));
+      if (friendsResult.status === "fulfilled") setFriends(friendsResult.value);
+      if (verificationsResult.status === "fulfilled") {
+        setVerifications(verificationsResult.value.items.filter((item) => item.status !== "deleted"));
+        setVerificationsAvailable(verificationsResult.value.available);
+        setVerificationsMessage(verificationsResult.value.message || "");
+      } else {
+        setVerifications([]);
+        setVerificationsAvailable(false);
+        setVerificationsMessage("认证服务暂时无法同步，其他资料仍可正常使用。");
+      }
+      const unavailable = [
+        advantagesResult.status === "rejected" ? "优势" : "",
+        friendsResult.status === "rejected" ? "好友" : "",
+      ].filter(Boolean);
+      if (unavailable.length) onNotice(`${unavailable.join("、")}资料暂时无法同步；其他资料不受影响。`);
+    });
     return () => { active = false; };
   }, [api, onNotice]);
 
@@ -103,7 +118,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
   const addVerification = async () => {
     const title = newVerification.trim();
-    if (!title || profileDataBusy) return;
+    if (!title || profileDataBusy || !verificationsAvailable) return;
     setProfileDataBusy(true);
     try {
       const created = await api.createVerification({ title, verificationType: "self_reported", evidenceAssetIds: [] });
@@ -218,7 +233,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
     {panel === "advantages" ? <ProfilePanelShell title="我的优势" onClose={() => setPanel(null)}><p className={styles.sheetLead}>正式优势会作为高权重能力资料参与任务匹配，只在合适场景展示。</p><form className={styles.profileDataForm} onSubmit={(event) => { event.preventDefault(); void addAdvantage(); }}><input value={newAdvantage} onChange={(event) => setNewAdvantage(event.target.value)} placeholder="例如：擅长羽毛球入门陪练" /><button type="submit" disabled={!newAdvantage.trim() || profileDataBusy}><FiPlus /> 添加</button></form><div className={styles.profileDataList}>{advantages.length ? advantages.map((item) => <article key={item.id}><span><FiBriefcase /></span><div><strong>{item.title}</strong><small>{item.serviceArea || item.availableTime || "仅在匹配场景展示"}</small></div><button type="button" aria-label="删除优势" onClick={() => void removeAdvantage(item)}><FiTrash2 /></button></article>) : <p className={styles.emptyState}>还没有正式优势。先添加一项真实、可验证的能力。</p>}</div></ProfilePanelShell> : null}
 
-    {panel === "verifications" ? <ProfilePanelShell title="认证中心" onClose={() => setPanel(null)}><p className={styles.sheetLead}>创建申请不等于已认证；只有证明材料审核通过后才展示 badge。</p><form className={styles.profileDataForm} onSubmit={(event) => { event.preventDefault(); void addVerification(); }}><input value={newVerification} onChange={(event) => setNewVerification(event.target.value)} placeholder="例如：国家二级运动员" /><button type="submit" disabled={!newVerification.trim() || profileDataBusy}><FiPlus /> 申请</button></form><div className={styles.profileDataList}>{verifications.length ? verifications.map((item) => <article key={item.id}><span><FiAward /></span><div><strong>{item.title}</strong><small>{item.status === "verified" ? item.badgeTitle || "已认证" : item.status === "pending_review" ? "材料审核中" : item.reviewerNote || "待提交证明"}</small></div>{item.status !== "verified" ? <button type="button" aria-label="删除认证申请" onClick={() => void removeVerification(item)}><FiTrash2 /></button> : <FiCheck />}</article>) : <p className={styles.emptyState}>暂无认证记录。</p>}</div></ProfilePanelShell> : null}
+    {panel === "verifications" ? <ProfilePanelShell title="认证中心" onClose={() => setPanel(null)}><p className={styles.sheetLead}>{verificationsAvailable ? "创建申请不等于已认证；只有证明材料审核通过后才展示 badge。" : verificationsMessage || "认证服务正在维护，其他资料和匹配功能不受影响。"}</p>{verificationsAvailable ? <form className={styles.profileDataForm} onSubmit={(event) => { event.preventDefault(); void addVerification(); }}><input value={newVerification} onChange={(event) => setNewVerification(event.target.value)} placeholder="例如：国家二级运动员" /><button type="submit" disabled={!newVerification.trim() || profileDataBusy}><FiPlus /> 申请</button></form> : null}<div className={styles.profileDataList}>{verifications.length ? verifications.map((item) => <article key={item.id}><span><FiAward /></span><div><strong>{item.title}</strong><small>{item.status === "verified" ? item.badgeTitle || "已认证" : item.status === "pending_review" ? "材料审核中" : item.reviewerNote || "待提交证明"}</small></div>{item.status !== "verified" ? <button type="button" aria-label="删除认证申请" onClick={() => void removeVerification(item)}><FiTrash2 /></button> : <FiCheck />}</article>) : <p className={styles.emptyState}>{verificationsAvailable ? "暂无认证记录。" : "认证记录暂时不可读取，请稍后再试。"}</p>}</div></ProfilePanelShell> : null}
 
     {panel === "friends" ? <ProfilePanelShell title="好友列表" onClose={() => setPanel(null)}><p className={styles.sheetLead}>这里只展示双方已确认的关系。解除好友与拉黑是两个独立动作。</p><div className={styles.profileDataList}>{friends.length ? friends.map((friend) => <article key={friend.id}>{friend.avatar ? <img src={friend.avatar} alt={`${friend.name}头像`} /> : <span>{friend.name.slice(0, 1)}</span>}<div><strong>{friend.name}</strong><small>{pendingBlockUserId === friend.id ? "再次点击盾牌确认拉黑" : friend.city || "城市未公开"}</small></div><aside className={styles.profileRecordActions}><button type="button" aria-label="解除好友" onClick={() => void removeFriend(friend)}><FiTrash2 /></button><button type="button" aria-label={pendingBlockUserId === friend.id ? "确认拉黑用户" : "拉黑用户"} onClick={() => { if (pendingBlockUserId === friend.id) { void onBlockUser(friend); setPendingBlockUserId(null); } else setPendingBlockUserId(friend.id); }}><FiShield /></button></aside></article>) : <p className={styles.emptyState}>还没有双方确认的好友。</p>}</div></ProfilePanelShell> : null}
 
