@@ -1,6 +1,6 @@
 import type { DemandDraftSession, FitMeetDemand, FitMeetDemandCandidate } from "./fitmeet-api-contract";
 import type { CandidateViewModel, DemandViewModel } from "./fitmeet-experience-models";
-import { agentDraftActivity, orderedAgentDraftFields } from "./fitmeet-agent-thread-state";
+import { agentDraftActivity, deduplicateAgentCardFields, orderedAgentDraftFields } from "./fitmeet-agent-thread-state";
 
 export type LiveCandidate = CandidateViewModel & {
   candidateRecordId: number;
@@ -60,19 +60,20 @@ export function humanDemandActivity(activityType: string, fields: Array<{ title:
 }
 
 export function displayDemand(value: FitMeetDemand): DemandViewModel {
-  const activityType = humanDemandActivity(value.category || value.type || "一起活动", value.fields);
+  const displayFields = deduplicateAgentCardFields(value.fields);
+  const activityType = humanDemandActivity(value.category || value.type || "一起活动", displayFields);
   return {
     id: value.id,
     title: value.title,
     summary: value.summary,
     activityType,
-    timeWindow: fieldValue(value.fields, "时间", "时间待确认"),
-    locationText: fieldValue(value.fields, "地点", "大致地点待确认"),
+    timeWindow: fieldValue(displayFields, "时间", "时间待确认"),
+    locationText: fieldValue(displayFields, "地点", "大致地点待确认"),
     capacityMax: value.capacityMax || 2,
-    durationText: fieldValue(value.fields, "方式", "节奏待确认"),
-    privacyBoundary: fieldValue(value.fields, "边界", "公共场所集合，先聊天再决定"),
+    durationText: fieldValue(displayFields, "方式", "节奏待确认"),
+    privacyBoundary: fieldValue(displayFields, "边界", "公共场所集合，先聊天再决定"),
     status: demandStatus(value.status, value.candidateCount),
-    fields: value.fields.map((field) => ({ title: field.title, value: field.value })),
+    fields: displayFields.map((field) => ({ title: field.title, value: field.value })),
   };
 }
 

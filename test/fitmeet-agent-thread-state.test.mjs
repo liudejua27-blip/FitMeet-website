@@ -6,6 +6,7 @@ import {
   agentReplySuggestions,
   agentTurnNotice,
   canonicalAgentDraftCardPatch,
+  deduplicateAgentCardFields,
   demandLifecyclePrompt,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
@@ -249,4 +250,13 @@ test("canonical card removes a preference already represented by partner require
   });
   assert.equal(patch.knownFields["偏好"], undefined);
   assert.equal(patch.knownFields["边界"], "先在线聊天，只在公共场所见面");
+});
+
+test("published card hides a preference already represented by partner requirements", () => {
+  const fields = deduplicateAgentCardFields([
+    { title: "搭子要求", value: "年龄相近；节奏轻松，不赶场" },
+    { title: "偏好", value: "节奏轻松" },
+    { title: "边界", value: "先在线聊天，只在公共场所见面" },
+  ]);
+  assert.deepEqual(fields.map((field) => field.title), ["搭子要求", "边界"]);
 });

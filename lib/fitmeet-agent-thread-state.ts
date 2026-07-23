@@ -175,6 +175,17 @@ export function canonicalAgentDraftCardPatch(session: DemandDraftSession) {
   return { knownFields, category };
 }
 
+export function deduplicateAgentCardFields(fields: Array<{ title: string; value: string }>) {
+  const requirements = clean(fields.find((field) => field.title === "搭子要求")?.value);
+  const preference = clean(fields.find((field) => field.title === "偏好")?.value);
+  if (
+    !requirements
+    || !preference
+    || (!requirements.includes(preference) && !preference.includes(requirements))
+  ) return fields;
+  return fields.filter((field) => field.title !== "偏好");
+}
+
 /**
  * A lifecycle prompt such as "publish this card" is control-plane input, not a
  * new demand fact. MobileAPI can currently merge that prompt into semantic
