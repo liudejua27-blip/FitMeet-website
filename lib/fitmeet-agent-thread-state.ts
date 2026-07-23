@@ -152,6 +152,8 @@ export function canonicalAgentDraftCardPatch(session: DemandDraftSession) {
   const activityType = clean(knownFields["活动类型"]);
   const people = clean(knownFields["人数"]);
   const meetingStyle = clean(knownFields["见面方式"]);
+  const requirements = clean(knownFields["搭子要求"]);
+  const preference = clean(knownFields["偏好"]);
   if (activityType) {
     knownFields["活动"] = activityType;
     delete knownFields["活动类型"];
@@ -164,6 +166,11 @@ export function canonicalAgentDraftCardPatch(session: DemandDraftSession) {
     knownFields["边界"] = meetingStyle;
     delete knownFields["见面方式"];
   }
+  if (
+    requirements
+    && preference
+    && (requirements.includes(preference) || preference.includes(requirements))
+  ) delete knownFields["偏好"];
   const category = agentDraftActivity({ ...session, knownFields });
   return { knownFields, category };
 }

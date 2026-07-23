@@ -228,3 +228,17 @@ test("aligns card fields with explicit facts from the same server assistant repl
   assert.equal(patch?.knownFields?.["边界"], "先在线聊天，只在公共场所见面");
   assert.equal(patch?.knownFields?.["偏好"], undefined);
 });
+
+test("canonical card removes a preference already represented by partner requirements", () => {
+  const patch = canonicalAgentDraftCardPatch({
+    ...draft,
+    knownFields: {
+      活动: "Citywalk + 喝咖啡",
+      搭子要求: "年龄相近；节奏轻松，不赶场",
+      偏好: "节奏轻松",
+      边界: "先在线聊天，只在公共场所见面",
+    },
+  });
+  assert.equal(patch.knownFields["偏好"], undefined);
+  assert.equal(patch.knownFields["边界"], "先在线聊天，只在公共场所见面");
+});
