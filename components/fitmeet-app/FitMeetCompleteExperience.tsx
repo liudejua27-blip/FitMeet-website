@@ -109,6 +109,10 @@ function closedConversationsKey(userId: number) {
   return `fitmeet:web-closed-conversations:v1:${userId}`;
 }
 
+function activeAgentThreadKey(userId: number) {
+  return `fitmeet:web-active-agent-thread:v1:${userId}`;
+}
+
 function readStoredArray<T>(key: string): T[] {
   if (typeof window === "undefined") return [];
   try {
@@ -261,6 +265,10 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
 
   const applyAgentDetail = useCallback((detail: AgentThreadDetail, presentDraft = false) => {
     activeAgentThreadIdRef.current = detail.thread.id;
+    const userId = session.state.session?.user.id;
+    if (userId && typeof window !== "undefined") {
+      window.localStorage.setItem(activeAgentThreadKey(userId), detail.thread.id);
+    }
     setActiveAgentThread(detail.thread);
     setAgentThreads((current) => [detail.thread, ...current.filter((thread) => thread.id !== detail.thread.id)]);
     const normalizedEntries = agentEntriesForDetail(detail);
@@ -281,7 +289,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       setCandidates([]);
       setSelectedCandidateId(null);
     }
-  }, []);
+  }, [session.state.session?.user.id]);
 
   const loadAgentThread = useCallback(async (threadId: string, presentDraft = false) => {
     let detail = await api.getAgentThread(threadId);
@@ -455,9 +463,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       setAgentThreads(nextThreads);
       let hasRemoteDraft = false;
       try {
+        const userId = session.state.session?.user.id;
+        const rememberedThreadId = userId && typeof window !== "undefined"
+          ? window.localStorage.getItem(activeAgentThreadKey(userId))
+          : null;
         const requestedThread = agentThreadSwitchingRef.current
           ? null
-          : preferredAgentThread(nextThreads, activeAgentThreadIdRef.current);
+          : preferredAgentThread(nextThreads, activeAgentThreadIdRef.current || rememberedThreadId);
         if (requestedThread) {
           const detail = await loadAgentThread(requestedThread.id);
           hasRemoteDraft = Boolean(detail.activeDraft);
@@ -477,7 +489,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       if (latest && !hasRemoteDraft) await activateDemand(latest);
       if (results.every((result) => result.status === "rejected")) notice("未能同步你的 FitMeet 数据，请检查网络后重试。");
     })().catch((reason) => notice(reason instanceof Error ? reason.message : "未能同步你的 FitMeet 数据。"));
-  }, [activateDemand, api, applyAgentDetail, liveApi, loadAgentThread, notice]);
+  }, [activateDemand, api, applyAgentDetail, liveApi, loadAgentThread, notice, session.state.session?.user.id]);
 
   useEffect(() => {
     if (!liveApi) return;

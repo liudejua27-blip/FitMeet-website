@@ -200,6 +200,14 @@ test("restores the explicitly selected thread instead of jumping to the latest o
   assert.equal(preferredAgentThread(threads, "missing")?.id, "latest");
 });
 
+test("skips an empty newest thread when no explicit thread was remembered", () => {
+  const threads = [
+    { id: "empty", messageCount: 0, preview: "" },
+    { id: "meaningful", messageCount: 4, preview: "Citywalk" },
+  ];
+  assert.equal(preferredAgentThread(threads, null)?.id, "meaningful");
+});
+
 test("aligns card fields with explicit facts from the same server assistant reply", () => {
   const serverReply = `收到，这个安排听上去很舒服。
 

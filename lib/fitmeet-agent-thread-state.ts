@@ -244,11 +244,12 @@ export function reconcileDraftWithAssistantSummary(
   return { category, knownFields };
 }
 
-export function preferredAgentThread<T extends { id: string }>(
+export function preferredAgentThread<T extends { id: string; messageCount?: number; preview?: string | null }>(
   threads: T[],
   requestedId: string | null | undefined,
 ) {
   return (requestedId ? threads.find((thread) => thread.id === requestedId) : undefined)
+    ?? threads.find((thread) => Number(thread.messageCount || 0) > 0 || Boolean(clean(thread.preview)))
     ?? threads[0]
     ?? null;
 }
