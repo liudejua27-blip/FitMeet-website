@@ -226,8 +226,9 @@ export class FitMeetApiClient {
     const payload = await this.requestEnvelope<FeedPost[] | FeedPage>(`${fitMeetPaths.feed.userPosts(userId)}?page=${page}&limit=${limit}`);
     return Array.isArray(payload) ? { data: payload } : payload;
   }
-  createFeedPost(payload: Pick<FeedPost, "title" | "text" | "tags"> & { city: string; visibility?: "public" | "private" }) {
-    return this.request<FeedPost>({ method: "POST", path: fitMeetPaths.feed.posts, body: { type: "log", sport: "", ...payload, images: [], loc: "", visibility: payload.visibility ?? "public" }, idempotencyKey: `web-feed-${crypto.randomUUID()}` });
+  createFeedPost(payload: Pick<FeedPost, "title" | "text" | "tags"> & { city: string; visibility?: "public" | "private"; images?: Array<{ assetId: number; url: string; width?: number | null; height?: number | null }> }) {
+    const images = payload.images ?? [];
+    return this.request<FeedPost>({ method: "POST", path: fitMeetPaths.feed.posts, body: { type: "log", sport: "", ...payload, images, mediaAssetIds: images.map((image) => image.assetId), loc: "", visibility: payload.visibility ?? "public" }, idempotencyKey: `web-feed-${crypto.randomUUID()}` });
   }
   likeFeedPost(id: number) { return this.request<{ postId: number; liked: boolean; likes: number }>({ method: "POST", path: fitMeetPaths.feed.likes(id), body: {}, idempotencyKey: `web-like-${id}-${crypto.randomUUID()}` }); }
   unlikeFeedPost(id: number) { return this.request<{ postId: number; liked: boolean; likes: number }>({ method: "DELETE", path: fitMeetPaths.feed.likes(id) }); }
@@ -332,10 +333,16 @@ export class FitMeetApiClient {
 
   reportSafety(payload: SafetyReportPayload) { return this.request({ method: "POST", path: fitMeetPaths.safety.reports, body: payload, idempotencyKey: `web-safety-report-${crypto.randomUUID()}` }); }
   blockUser(id: number) { return this.request({ method: "POST", path: fitMeetPaths.safety.block(id), body: {}, idempotencyKey: `web-block-${id}-${crypto.randomUUID()}` }); }
+  unblockUser(id: number) { return this.request({ method: "DELETE", path: fitMeetPaths.safety.block(id) }); }
 
   listConversations() { return this.request<FitMeetConversation[]>({ method: "GET", path: fitMeetPaths.messages.conversations }); }
   getConversation(id: string) { return this.request<FitMeetConversationMessage[]>({ method: "GET", path: fitMeetPaths.messages.thread(id) }); }
   sendConversationMessage(id: string, text: string) { return this.request<FitMeetConversationMessage>({ method: "POST", path: fitMeetPaths.messages.send(id), body: { text, clientMessageId: `web-message-${crypto.randomUUID()}` }, idempotencyKey: `web-message-${crypto.randomUUID()}` }); }
+  markConversationRead(id: string, lastReadMessageId: string) { return this.request({ method: "POST", path: fitMeetPaths.messages.read(id), body: { lastReadMessageId }, idempotencyKey: `web-read-${id}-${lastReadMessageId}` }); }
+  markConversationDelivered(id: string, lastDeliveredMessageId: string) { return this.request({ method: "POST", path: fitMeetPaths.messages.delivered(id), body: { lastDeliveredMessageId }, idempotencyKey: `web-delivered-${id}-${lastDeliveredMessageId}` }); }
+  updateConversationSettings(id: string, payload: { mutedUntil?: string | null; notificationLevel?: "normal" | "mentions_only" | "muted"; pinned?: boolean; archived?: boolean; hidden?: boolean }) { return this.request<FitMeetConversation>({ method: "PATCH", path: fitMeetPaths.messages.memberSettings(id), body: payload, idempotencyKey: `web-conversation-settings-${id}-${crypto.randomUUID()}` }); }
+  recallConversationMessage(id: string) { return this.request<FitMeetConversationMessage>({ method: "POST", path: fitMeetPaths.messages.recall(id), body: {}, idempotencyKey: `web-message-recall-${id}` }); }
+  reportConversationMessage(id: string, reason: string, details?: string) { return this.request({ method: "POST", path: fitMeetPaths.messages.report(id), body: { reason, details }, idempotencyKey: `web-message-report-${id}` }); }
   getUnreadCount() { return this.request<{ unreadCount: number }>({ method: "GET", path: fitMeetPaths.messages.unread }); }
 
   async listAgentMemories() {

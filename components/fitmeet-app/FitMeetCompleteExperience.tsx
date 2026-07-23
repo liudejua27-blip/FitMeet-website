@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   FiAlertTriangle, FiArrowUp, FiBell, FiBookOpen, FiBookmark, FiCalendar, FiCheck, FiChevronRight, FiClock, FiCompass, FiEdit3, FiEye, FiFileText, FiFlag, FiHeart, FiHome, FiImage, FiLock, FiMapPin, FiMessageCircle, FiMic, FiMoreHorizontal, FiPlus, FiSearch, FiSend, FiSettings, FiShield, FiSliders, FiStar, FiTrash2, FiUser, FiUserPlus, FiUsers, FiX,
 } from "react-icons/fi";
-import type { AgentInboxEvent, AgentThread, AgentThreadDetail, AgentThreadEntry, ConversationMessage, DemandDraftSession, FitMeetAgentMemory, FitMeetConnectionRequest, FitMeetConversation, FitMeetDemand, FitMeetIntentApplication, FitMeetProfilePhoto, FitMeetPublicIntent, MeetInvitation, OnboardingPayload, RelationshipState, SocialProfile } from "@/lib/fitmeet-api-contract";
+import type { AgentInboxEvent, AgentThread, AgentThreadDetail, AgentThreadEntry, BlockedUserRecord, ConversationMessage, DemandDraftSession, FeedPost, FitMeetAgentMemory, FitMeetConnectionRequest, FitMeetConversation, FitMeetConversationMessage, FitMeetDemand, FitMeetIntentApplication, FitMeetProfilePhoto, FitMeetPublicIntent, MeetInvitation, OnboardingPayload, PublicUserProfile, RelationshipState, SocialProfile } from "@/lib/fitmeet-api-contract";
 import {
   defaultDemoDemand,
   type CandidateDecision,
@@ -38,11 +38,13 @@ import { ProfileExperience } from "./ProfileExperience";
 import { useFitMeetSession } from "./useFitMeetSession";
 import { useFitMeetRealtime, type FitMeetRealtimeEvent } from "./useFitMeetRealtime";
 import { useBrowserVoiceInput } from "./useBrowserVoiceInput";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 import styles from "./fitmeet-complete.module.css";
 
 type TabId = "home" | "moments" | "messages" | "profile";
 type Overlay = "candidate" | "demand" | "demandList" | "demandEdit" | "invitation" | "composer" | "conversation" | "memory" | "editProfile" | "privacy" | "settings" | "relationships" | "meet" | "safety" | "accountSafety" | "history" | "toolApproval" | null;
 type ChatLine = { id: string | number; role: "assistant" | "user"; text: string };
+type MomentDraftImage = { id: string; file: File; preview: string };
 
 const tabs: Array<{ id: TabId; label: string; icon: typeof FiHome }> = [
   { id: "home", label: "首页", icon: FiHome },
@@ -83,12 +85,49 @@ function notificationPreferenceKey(userId: number | undefined) {
   return userId ? `fitmeet:web-foreground-notifications:${userId}` : null;
 }
 
+function likedMomentsKey(userId: number) {
+  return `fitmeet:web-liked-moments:v1:${userId}`;
+}
+
+function blockedUsersKey(userId: number) {
+  return `fitmeet:web-blocked-users:v1:${userId}`;
+}
+
+function readStoredArray<T>(key: string): T[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(key) || "[]");
+    return Array.isArray(value) ? value as T[] : [];
+  } catch { return []; }
+}
+
+function writeStoredArray(key: string, value: unknown[]) {
+  if (typeof window !== "undefined") window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function displayConversationMessage(message: FitMeetConversationMessage, currentUserId?: number): ConversationMessage {
+  const mine = typeof message.isMine === "boolean" ? message.isMine : Number(message.senderId) === Number(currentUserId);
+  const recalled = message.lifecycleStatus === "recalled" || Boolean(message.recalledAt);
+  return {
+    id: message.id,
+    role: mine ? "user" : "peer",
+    text: recalled ? mine ? "你撤回了一条消息" : "对方撤回了一条消息" : message.text || message.body?.text || "",
+    createdAt: message.createdAt,
+    senderId: message.senderId,
+    readByOther: message.readByOther,
+    status: message.status,
+    lifecycleStatus: message.lifecycleStatus,
+    recalledAt: message.recalledAt,
+  };
+}
+
 function Avatar({ name, color = "#677cf2", size = 42 }: { name: string; color?: string; size?: number }) {
   return <span className={styles.avatar} style={{ width: size, height: size, "--avatar-color": color } as React.CSSProperties}>{name.slice(0, 1)}</span>;
 }
 
 function Sheet({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}><section className={styles.sheet} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}><div className={styles.sheetHandle} /><header><h2>{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><FiX /></button></header>{children}</section></div>;
+  const dialogRef = useAccessibleDialog(true, onClose);
+  return <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}><section ref={dialogRef} tabIndex={-1} className={styles.sheet} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}><div className={styles.sheetHandle} /><header><h2>{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><FiX /></button></header>{children}</section></div>;
 }
 
 export function FitMeetCompleteExperience({ initialSurface = "main" }: { initialSurface?: "main" | "onboarding" }) {
@@ -127,6 +166,8 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [profilePhotos, setProfilePhotos] = useState<FitMeetProfilePhoto[]>([]);
   const [likedPostIds, setLikedPostIds] = useState<number[]>([]);
   const [postText, setPostText] = useState("");
+  const [postImages, setPostImages] = useState<MomentDraftImage[]>([]);
+  const [postPublishing, setPostPublishing] = useState(false);
   const [discoverChannel, setDiscoverChannel] = useState<"moments" | "social" | "tasks">("moments");
   const [memories, setMemories] = useState<FitMeetAgentMemory[]>([]);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
@@ -138,6 +179,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [incomingConnections, setIncomingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [outgoingConnections, setOutgoingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUserRecord[]>([]);
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
   const api = session.api;
   const liveApi = session.state.status === "authenticated";
@@ -244,15 +286,30 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
 
   useEffect(() => {
     if (session.state.status !== "authenticated" || typeof window === "undefined") return;
-    const key = notificationPreferenceKey(session.state.session?.user.id);
+    const userId = session.state.session?.user.id;
+    const key = notificationPreferenceKey(userId);
     setNotificationEnabled(!key || window.localStorage.getItem(key) !== "false");
+    if (userId) {
+      setLikedPostIds(readStoredArray<number>(likedMomentsKey(userId)).filter((id) => Number.isInteger(id)));
+      setBlockedUsers(readStoredArray<BlockedUserRecord>(blockedUsersKey(userId)).filter((item) => Number.isInteger(item?.id) && typeof item?.name === "string"));
+    }
   }, [session.state.session?.user.id, session.state.status]);
 
-  const updateNotificationPreference = (enabled: boolean) => {
+  const updateNotificationPreference = async (enabled: boolean) => {
+    if (enabled && typeof window !== "undefined" && "Notification" in window) {
+      const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+      if (permission !== "granted") {
+        setNotificationEnabled(false);
+        const deniedKey = notificationPreferenceKey(session.state.session?.user.id);
+        if (deniedKey) window.localStorage.setItem(deniedKey, "false");
+        notice("浏览器通知权限未开启；页面内实时消息仍会正常更新。");
+        return;
+      }
+    }
     setNotificationEnabled(enabled);
     const key = notificationPreferenceKey(session.state.session?.user.id);
     if (key && typeof window !== "undefined") window.localStorage.setItem(key, String(enabled));
-    notice(enabled ? "前台实时提醒已开启。浏览器关闭后不会推送，避免假装有后台通知。" : "前台实时提醒已关闭；不影响消息和邀请在服务端保存。");
+    notice(enabled ? "实时提醒已开启；页面打开或处于后台标签页时会提示，彻底关闭浏览器后不会推送。" : "前台实时提醒已关闭；不影响消息和邀请在服务端保存。");
   };
 
   useEffect(() => {
@@ -591,14 +648,12 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     try {
       const messages = await api.getConversation(conversationId);
       const currentUserId = session.state.session?.user.id;
-      setConversation(messages.map((message) => ({
-        id: message.id,
-        role: Number(message.senderId) === Number(currentUserId) ? "user" : "peer",
-        text: message.text || message.body?.text || "",
-        createdAt: message.createdAt,
-      })));
+      setConversation(messages.map((message) => displayConversationMessage(message, currentUserId)));
       setSelectedConversation(summary);
+      setConversations((items) => items.map((item) => item.id === summary.id ? { ...item, unread: 0 } : item));
       setOverlay("conversation");
+      const lastMessageId = messages.at(-1)?.id;
+      if (lastMessageId) await Promise.allSettled([api.markConversationDelivered(conversationId, lastMessageId), api.markConversationRead(conversationId, lastMessageId)]);
       await refreshCommunications();
     } catch (reason) { notice(reason instanceof Error ? reason.message : "会话暂时无法打开，请稍后再试。"); }
   };
@@ -669,25 +724,105 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     try {
       if (liked) {
         const next = await api.unlikeFeedPost(id);
-        setLikedPostIds((items) => items.filter((item) => item !== id));
+        setLikedPostIds((items) => {
+          const updated = items.filter((item) => item !== id);
+          const userId = session.state.session?.user.id;
+          if (userId) writeStoredArray(likedMomentsKey(userId), updated);
+          return updated;
+        });
         setPosts((items) => items.map((post) => post.id === id ? { ...post, likes: next.likes } : post));
       } else {
         const next = await api.likeFeedPost(id);
-        setLikedPostIds((items) => [...items, id]);
+        setLikedPostIds((items) => {
+          const updated = Array.from(new Set([...items, id]));
+          const userId = session.state.session?.user.id;
+          if (userId) writeStoredArray(likedMomentsKey(userId), updated);
+          return updated;
+        });
         setPosts((items) => items.map((post) => post.id === id ? { ...post, likes: next.likes } : post));
       }
     } catch (reason) { notice(reason instanceof Error ? reason.message : "点赞未能保存，请稍后再试。"); }
   };
 
-  const publishPost = async () => {
-    const text = postText.trim(); if (!text) return;
+  const selectPostImages = async (files: File[]) => {
+    const available = Math.max(0, 9 - postImages.length);
+    const selected = files.slice(0, available);
+    if (files.length > available) notice("每条动态最多添加 9 张图片。");
+    const valid = selected.filter((file) => {
+      if (!file.type.startsWith("image/")) { notice(`${file.name} 不是支持的图片格式。`); return false; }
+      if (file.size > 8 * 1024 * 1024) { notice(`${file.name} 超过 8MB，请压缩后再上传。`); return false; }
+      return true;
+    });
     try {
-      const post = await api.createFeedPost({ title: "我的新动态", text, tags: profile.interests.slice(0, 3), city: profile.city });
+      const additions = await Promise.all(valid.map((file) => new Promise<MomentDraftImage>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ id: crypto.randomUUID(), file, preview: String(reader.result || "") });
+        reader.onerror = () => reject(new Error(`${file.name} 读取失败。`));
+        reader.readAsDataURL(file);
+      })));
+      setPostImages((current) => [...current, ...additions].slice(0, 9));
+    } catch (reason) { notice(reason instanceof Error ? reason.message : "图片暂时无法读取。"); }
+  };
+
+  const publishPost = async () => {
+    const text = postText.trim();
+    if ((!text && !postImages.length) || postPublishing) return;
+    setPostPublishing(true);
+    try {
+      const uploads = await Promise.all(postImages.map((image) => api.uploadImage(image.file)));
+      const rejected = uploads.find((upload) => (upload.moderationStatus ?? upload.moderation_status ?? "approved") !== "approved");
+      if (rejected) throw new Error("有图片尚未通过安全审核，动态没有发布；你可以调整后重试。");
+      const images = uploads.map((upload) => ({ assetId: Number(upload.assetId ?? upload.asset_id ?? upload.id), url: upload.url, width: upload.width, height: upload.height }));
+      if (images.some((image) => !image.assetId)) throw new Error("图片缺少有效资源编号，动态没有发布。");
+      const post = await api.createFeedPost({ title: text ? "我的新动态" : "图片动态", text: text || "分享了今天的瞬间", tags: profile.interests.slice(0, 3), city: profile.city, images });
       setPosts((items) => [post, ...items]);
       setPostText("");
+      setPostImages([]);
       setOverlay(null);
-      notice("动态已发布；精确位置没有展示。");
+      notice(images.length ? `动态与 ${images.length} 张图片已发布；精确位置没有展示。` : "动态已发布；精确位置没有展示。");
     } catch (reason) { notice(reason instanceof Error ? reason.message : "动态未能发布，请稍后再试。"); }
+    finally { setPostPublishing(false); }
+  };
+
+  const deletePost = async (post: FeedPost) => {
+    try {
+      await api.deleteFeedPost(post.id);
+      setPosts((items) => items.filter((item) => item.id !== post.id));
+      notice("动态已从 FitMeet 服务端删除。");
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : "动态暂时无法删除。");
+      throw reason;
+    }
+  };
+
+  const rememberBlockedUser = useCallback((record: BlockedUserRecord) => {
+    setBlockedUsers((current) => {
+      const next = [record, ...current.filter((item) => item.id !== record.id)];
+      const userId = session.state.session?.user.id;
+      if (userId) writeStoredArray(blockedUsersKey(userId), next);
+      return next;
+    });
+  }, [session.state.session?.user.id]);
+
+  const blockAndRemember = async (target: { id: number; name?: string; avatar?: string | null }) => {
+    await api.blockUser(target.id);
+    rememberBlockedUser({ id: target.id, name: target.name || "FitMeet 用户", avatar: target.avatar, blockedAt: new Date().toISOString() });
+    setConversations((items) => items.filter((item) => Number(item.userId ?? item.peer?.id) !== Number(target.id)));
+    setCandidates((items) => items.filter((item) => Number(item.candidateUserId) !== Number(target.id)));
+    notice("已拉黑；服务端会停止推荐和后续私信，当前设备也已记录。");
+  };
+
+  const unblockKnownUser = async (target: BlockedUserRecord) => {
+    try {
+      await api.unblockUser(target.id);
+      setBlockedUsers((current) => {
+        const next = current.filter((item) => item.id !== target.id);
+        const userId = session.state.session?.user.id;
+        if (userId) writeStoredArray(blockedUsersKey(userId), next);
+        return next;
+      });
+      notice(`已解除对 ${target.name} 的拉黑；后续推荐仍以服务端匹配结果为准。`);
+    } catch (reason) { notice(reason instanceof Error ? reason.message : "解除拉黑暂时未能完成。"); }
   };
 
   const changeApplication = async (kind: "social" | "task", intent: FitMeetPublicIntent, next: DemoApplicationStatus) => {
@@ -744,10 +879,37 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     try {
       const response = await api.sendConversationMessage(selectedConversation.id, text);
       const currentUserId = session.state.session?.user.id;
-      setConversation((items) => [...items, { id: response.id, role: Number(response.senderId) === Number(currentUserId) ? "user" : "peer", text: response.text || response.body?.text || text, createdAt: response.createdAt }]);
+      setConversation((items) => [...items, displayConversationMessage({ ...response, text: response.text || response.body?.text || text }, currentUserId)]);
       setConversationInput("");
       await refreshCommunications();
     } catch (reason) { notice(reason instanceof Error ? reason.message : "消息未能发送，请稍后再试。"); }
+  };
+
+  const recallConversationMessage = async (messageId: string) => {
+    try {
+      const recalled = await api.recallConversationMessage(messageId);
+      setConversation((items) => items.map((item) => item.id === messageId ? displayConversationMessage({ ...recalled, lifecycleStatus: "recalled", recalledAt: recalled.recalledAt || new Date().toISOString() }, session.state.session?.user.id) : item));
+      notice("消息已撤回；服务端仍会保留必要的安全审计记录。");
+    } catch (reason) { notice(reason instanceof Error ? reason.message : "消息未能撤回；撤回仅在发送后短时间内可用。"); }
+  };
+
+  const reportConversationMessage = async (messageId: string) => {
+    try {
+      await api.reportConversationMessage(messageId, "inappropriate_content", "网页端会话消息举报");
+      notice("这条消息已提交安全审核；不会自动回复或继续联系对方。");
+    } catch (reason) { notice(reason instanceof Error ? reason.message : "消息举报暂时未能提交。"); }
+  };
+
+  const toggleConversationMute = async () => {
+    if (!selectedConversation) return;
+    const muted = selectedConversation.notificationLevel === "muted" || Boolean(selectedConversation.mutedUntil && new Date(selectedConversation.mutedUntil).getTime() > Date.now());
+    try {
+      const next = await api.updateConversationSettings(selectedConversation.id, { notificationLevel: muted ? "normal" : "muted", mutedUntil: null });
+      const updated = { ...selectedConversation, ...next, notificationLevel: muted ? "normal" : "muted", mutedUntil: null };
+      setSelectedConversation(updated);
+      setConversations((items) => items.map((item) => item.id === selectedConversation.id ? updated : item));
+      notice(muted ? "已恢复这段会话的提醒。" : "已静音这段会话；消息仍会保存在服务端。");
+    } catch (reason) { notice(reason instanceof Error ? reason.message : "会话提醒设置暂时无法更新。"); }
   };
 
   const saveProfile = async (patch: Partial<SocialProfile>) => {
@@ -807,12 +969,9 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (selectedConversation) {
       const messages = await api.getConversation(selectedConversation.id);
       const currentUserId = session.state.session?.user.id;
-      setConversation(messages.map((message) => ({
-        id: message.id,
-        role: Number(message.senderId) === Number(currentUserId) ? "user" : "peer",
-        text: message.text || message.body?.text || "",
-        createdAt: message.createdAt,
-      })));
+      setConversation(messages.map((message) => displayConversationMessage(message, currentUserId)));
+      const lastMessageId = messages.at(-1)?.id;
+      if (lastMessageId) await Promise.allSettled([api.markConversationDelivered(selectedConversation.id, lastMessageId), api.markConversationRead(selectedConversation.id, lastMessageId)]);
     }
     if (results.every((result) => result.status === "rejected")) throw new Error("实时数据暂时无法同步。");
   }, [activateDemand, activeAgentThread, api, liveApi, liveDemand?.id, loadAgentThread, selectedConversation, session.state.session?.user.id]);
@@ -832,7 +991,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       "public_intent.application.created": "你的社交需求收到了一条新申请。",
       "task.application.created": "你的任务需求收到了一条新申请。",
     };
-    if (notificationEnabled && eventCopy[event.eventType]) notice(eventCopy[event.eventType]);
+    const copy = eventCopy[event.eventType];
+    if (notificationEnabled && copy) {
+      notice(copy);
+      if (typeof document !== "undefined" && document.visibilityState !== "visible" && typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification("FitMeet", { body: copy, icon: "/fitmeet-icon.png", tag: event.eventType });
+      }
+    }
   }, [notificationEnabled, notice, reconcileRealtimeState]);
 
   const realtimeStatus = useFitMeetRealtime(session.state.session?.accessToken, handleRealtimeEvent, () => {
@@ -885,30 +1050,30 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   return <main className={styles.appPage}><section className={styles.mobileSurface} aria-label="FitMeet 完整体验账号">
     <div className={styles.appScroll}>
       {activeTab === "home" ? <HomeScreen nickname={profile.nickname} chat={chat} entries={agentEntries} input={chatInput} onInput={setChatInput} onSend={() => void sendAgentMessage()} onQuickPrompt={(prompt) => void sendAgentMessage(prompt)} sending={agentSending} onVoice={startVoiceInput} voiceActive={voiceInput.isListening} demand={hasDemand ? demand : null} draftMissingFields={activeDraftSession?.missingFields ?? []} candidateCount={activeCandidates.length} onDemand={() => hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onDemandList={() => demands.length ? setOverlay("demandList") : hasDemand ? setOverlay("demand") : void prepareDemandDraft()} onEditDemand={() => hasDemand ? setOverlay("demandEdit") : void prepareDemandDraft()} onCandidates={() => setOverlay("candidate")} onConversation={openDemandConversation} onCreateDemand={() => activeDraftSession ? void prepareDemandDraft() : void startNewDemand()} onReviewDemandCard={() => void confirmDemandCardDraft()} onToolProposal={openToolProposal} onMemory={() => setOverlay("memory")} onHistory={() => setOverlay("history")} realtimeStatus={realtimeStatus} /> : null}
-      {activeTab === "moments" ? <MomentsExperience api={api} userId={session.state.session?.user.id ?? 0} posts={posts} onPostsChange={setPosts} likedPostIds={likedPostIds} onLike={(id) => void toggleLike(id)} channel={discoverChannel} onChannel={setDiscoverChannel} onCompose={() => setOverlay("composer")} socialIntents={socialIntents} taskIntents={taskIntents} socialApplications={socialApplications} taskApplications={taskApplications} onApplication={(kind, intent, status) => void changeApplication(kind, intent, status)} onNotice={notice} initialLastPage={feedLastPage} /> : null}
+      {activeTab === "moments" ? <MomentsExperience api={api} userId={session.state.session?.user.id ?? 0} posts={posts} onPostsChange={setPosts} likedPostIds={likedPostIds} onLike={(id) => void toggleLike(id)} channel={discoverChannel} onChannel={setDiscoverChannel} onCompose={() => setOverlay("composer")} onDelete={deletePost} socialIntents={socialIntents} taskIntents={taskIntents} socialApplications={socialApplications} taskApplications={taskApplications} onApplication={(kind, intent, status) => void changeApplication(kind, intent, status)} onNotice={notice} initialLastPage={feedLastPage} /> : null}
       {activeTab === "messages" ? <MessagesExperience invitations={invitations} conversations={conversations} incomingConnections={incomingConnections} outgoingConnections={outgoingConnections} agentEvents={agentInboxEvents} ownerSocialApplications={ownerSocialApplications} ownerTaskApplications={ownerTaskApplications} currentUserId={session.state.session?.user.id ?? 0} unreadCount={unreadCount} onConversation={(id) => void openConversation(id)} onInvitation={(invitation, action) => void resolveInvitation(invitation, action)} onIntentApplication={(kind, application, decision) => void resolveIntentApplication(kind, application, decision)} onAcknowledge={(id) => void acknowledgeInboxEvent(id)} onMeet={() => meet.id ? setOverlay("meet") : notice("还没有已确认的真实活动。 ")} onRelationship={() => setOverlay("relationships")} onRefresh={reconcileRealtimeState} /> : null}
-      {activeTab === "profile" ? <ProfileExperience api={api} userId={session.state.session?.user.id ?? 0} profile={profile} photos={profilePhotos} notificationEnabled={notificationEnabled} postCount={posts.filter((post) => Number(post.userId) === Number(session.state.session?.user.id)).length} relationshipCount={incomingConnections.length + outgoingConnections.length} onPhotosChange={setProfilePhotos} onNotice={notice} onEdit={() => setOverlay("editProfile")} onPrivacy={() => setOverlay("privacy")} onNotification={updateNotificationPreference} onRelationships={() => setOverlay("relationships")} onReboard={() => { setAgentOnlyMode(false); setSurface("onboarding"); }} onSafety={() => setOverlay("accountSafety")} onMoments={() => setActiveTab("moments")} onLogout={session.logout} /> : null}
+      {activeTab === "profile" ? <ProfileExperience api={api} userId={session.state.session?.user.id ?? 0} profile={profile} photos={profilePhotos} notificationEnabled={notificationEnabled} postCount={posts.filter((post) => Number(post.userId) === Number(session.state.session?.user.id)).length} relationshipCount={incomingConnections.length + outgoingConnections.length} blockedUsers={blockedUsers} onPhotosChange={setProfilePhotos} onNotice={notice} onEdit={() => setOverlay("editProfile")} onPrivacy={() => setOverlay("privacy")} onNotification={(value) => void updateNotificationPreference(value)} onRelationships={() => setOverlay("relationships")} onReboard={() => { setAgentOnlyMode(false); setSurface("onboarding"); }} onSafety={() => setOverlay("accountSafety")} onMoments={() => setActiveTab("moments")} onLogout={session.logout} onBlockUser={async (user: PublicUserProfile) => { try { await blockAndRemember({ id: user.id, name: user.name, avatar: user.avatar }); } catch (reason) { notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。"); } }} onUnblockUser={unblockKnownUser} /> : null}
     </div>
     <nav className={styles.tabBar} aria-label="FitMeet 主导航">{tabs.map((tab) => { const Icon = tab.icon; const selected = activeTab === tab.id; return <button key={tab.id} type="button" className={`${styles.tabButton} ${selected ? styles.tabButtonActive : ""}`} onClick={() => setActiveTab(tab.id)} aria-current={selected ? "page" : undefined} aria-label={tab.label}><Icon /><small>{tab.label}</small></button>; })}</nav>
     {toast ? <p className={styles.toast} role="status"><FiCheck /> {toast}</p> : null}
   </section>
 
-  {overlay === "candidate" && selectedCandidate ? <CandidateProfileExperience api={api} candidate={selectedCandidate} candidates={activeCandidates} relationship={relationship} inviteStatus={selectedCandidateInviteStatus} onClose={() => setOverlay(null)} onSelect={(id) => { setSelectedCandidateId(id); setInviteStatus("none"); }} onDismiss={dismissCandidate} onSave={() => recordCandidate(selectedCandidate.id, "saved")} onFriend={() => void requestFriendship()} onInvite={createInvite} onConversation={openDemandConversation} onReport={async () => { await api.reportSafety({ targetType: "user", targetId: selectedCandidate.candidateUserId, targetUserId: selectedCandidate.candidateUserId, reason: "inappropriate_behavior", description: "网页候选人资料举报" }); notice("举报已提交安全审核；不会自动联系对方。"); }} onBlock={async () => { await api.blockUser(selectedCandidate.candidateUserId); setRelationship("blocked"); notice("已拉黑；对方不会再被推荐或打开会话。"); }} /> : null}
+  {overlay === "candidate" && selectedCandidate ? <CandidateProfileExperience api={api} candidate={selectedCandidate} candidates={activeCandidates} relationship={relationship} inviteStatus={selectedCandidateInviteStatus} onClose={() => setOverlay(null)} onSelect={(id) => { setSelectedCandidateId(id); setInviteStatus("none"); }} onDismiss={dismissCandidate} onSave={() => recordCandidate(selectedCandidate.id, "saved")} onFriend={() => void requestFriendship()} onInvite={createInvite} onConversation={openDemandConversation} onReport={async () => { await api.reportSafety({ targetType: "user", targetId: selectedCandidate.candidateUserId, targetUserId: selectedCandidate.candidateUserId, reason: "inappropriate_behavior", description: "网页候选人资料举报" }); notice("举报已提交安全审核；不会自动联系对方。"); }} onBlock={async () => { await blockAndRemember({ id: selectedCandidate.candidateUserId, name: selectedCandidate.name, avatar: selectedCandidate.avatar }); setRelationship("blocked"); }} /> : null}
   {overlay === "demandList" ? <DemandListSheet demands={demands} activeDemandId={liveDemand?.id} onClose={() => setOverlay(null)} onSelect={(record) => void activateDemand(record, true)} onCreate={() => void startNewDemand()} /> : null}
   {overlay === "demand" && hasDemand ? <DemandSheet demand={demand} candidateCount={activeCandidates.length} onClose={() => setOverlay(null)} onEdit={() => setOverlay("demandEdit")} onPublish={() => void publishDemand()} onHide={() => void changeDemandStatus("hidden")} onCancel={() => void changeDemandStatus("cancelled")} onCandidates={() => setOverlay("candidate")} onConversation={openDemandConversation} /> : null}
   {overlay === "demandEdit" ? <DemandEditSheet demand={demand} onClose={() => setOverlay(null)} onSave={(next) => void saveDemandDraft(next)} /> : null}
   {overlay === "invitation" && selectedCandidate ? <InviteSheet candidate={selectedCandidate} demand={demand} onClose={() => { setInviteStatus("none"); setOverlay(null); }} onSend={(message) => void sendInvite(message)} /> : null}
-  {overlay === "composer" ? <ComposeSheet value={postText} onChange={setPostText} onClose={() => setOverlay(null)} onPublish={() => void publishPost()} /> : null}
-  {overlay === "conversation" && selectedConversation ? <ConversationSheet title={selectedConversation.displayName || selectedConversation.username || "FitMeet 用户"} unlocked items={conversation} input={conversationInput} onInput={setConversationInput} onSend={() => void sendConversation()} onClose={() => setOverlay(null)} /> : null}
+  {overlay === "composer" ? <ComposeSheet value={postText} images={postImages} publishing={postPublishing} onChange={setPostText} onFiles={(files) => void selectPostImages(files)} onRemoveImage={(id) => setPostImages((items) => items.filter((item) => item.id !== id))} onClose={() => setOverlay(null)} onPublish={() => void publishPost()} /> : null}
+  {overlay === "conversation" && selectedConversation ? <ConversationSheet conversation={selectedConversation} unlocked items={conversation} input={conversationInput} onInput={setConversationInput} onSend={() => void sendConversation()} onMute={() => void toggleConversationMute()} onRecall={(id) => void recallConversationMessage(id)} onReport={(id) => void reportConversationMessage(id)} onBlock={() => { const targetId = Number(selectedConversation.userId ?? selectedConversation.peer?.id); if (!targetId) return notice("当前会话没有可验证的对方账号，无法拉黑。"); void blockAndRemember({ id: targetId, name: selectedConversation.displayName || selectedConversation.username || selectedConversation.peer?.name, avatar: selectedConversation.avatar || selectedConversation.peer?.avatar }).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。")); }} onClose={() => setOverlay(null)} /> : null}
   {overlay === "memory" ? <MemorySheet memories={memories} onClose={() => setOverlay(null)} onSave={saveMemory} onDelete={deleteMemory} /> : null}
   {overlay === "history" ? <HistorySheet threads={agentThreads} activeThreadId={activeAgentThread?.id} onClose={() => setOverlay(null)} onSelect={(id) => { void loadAgentThread(id, true).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "对话记录暂时无法打开。")); }} onNew={() => void startNewDemand()} /> : null}
   {overlay === "toolApproval" && selectedToolProposal ? <ToolApprovalSheet key={selectedToolProposal.id} proposal={selectedToolProposal} onClose={() => { setOverlay(null); setSelectedToolProposal(null); }} onResolve={(decision, message) => void resolveToolProposal(decision, message)} /> : null}
   {overlay === "editProfile" ? <EditProfileSheet profile={profile} onClose={() => setOverlay(null)} onSave={saveProfile} /> : null}
   {overlay === "privacy" ? <PrivacySheet profile={profile} onClose={() => setOverlay(null)} onSave={saveProfile} /> : null}
-  {overlay === "settings" ? <SettingsSheet notificationEnabled={notificationEnabled} onNotification={updateNotificationPreference} onClose={() => setOverlay(null)} onReset={() => { setOverlay(null); setAgentOnlyMode(false); setSurface("onboarding"); notice("已进入重新建档流程。") }} onSafety={() => setOverlay("accountSafety")} /> : null}
+  {overlay === "settings" ? <SettingsSheet notificationEnabled={notificationEnabled} onNotification={(value) => void updateNotificationPreference(value)} onClose={() => setOverlay(null)} onReset={() => { setOverlay(null); setAgentOnlyMode(false); setSurface("onboarding"); notice("已进入重新建档流程。") }} onSafety={() => setOverlay("accountSafety")} /> : null}
   {overlay === "relationships" ? <RelationshipSheet incoming={incomingConnections} outgoing={outgoingConnections} onClose={() => setOverlay(null)} onAction={(request, action) => void resolveConnection(request, action)} /> : null}
   {overlay === "meet" && meet.id ? <MeetLifecycleSheet meet={meet} demand={demand} onClose={() => setOverlay(null)} onUpdate={(status, review) => void updateMeet(status, review)} /> : null}
-  {overlay === "safety" ? <SafetySheet onClose={() => setOverlay(null)} onReport={() => { if (!selectedCandidate) return notice("请先从候选人或会话中选择需要帮助的对象。"); void api.reportSafety({ targetType: "user", targetId: selectedCandidate.candidateUserId, targetUserId: selectedCandidate.candidateUserId, reason: "用户请求安全帮助" }).then(() => notice("安全帮助请求已提交。我们不会替你继续联系对方。 ")).catch((reason) => notice(reason instanceof Error ? reason.message : "安全帮助请求未能提交。")); }} onBlock={() => { if (!selectedCandidate) return notice("请先从候选人或会话中选择需要拉黑的对象。"); void api.blockUser(selectedCandidate.candidateUserId).then(() => { setRelationship("blocked"); notice("已拉黑，对方不会再被推荐或打开会话。 "); }).catch((reason) => notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。")); }} /> : null}
+  {overlay === "safety" ? <SafetySheet onClose={() => setOverlay(null)} onReport={() => { if (!selectedCandidate) return notice("请先从候选人或会话中选择需要帮助的对象。"); void api.reportSafety({ targetType: "user", targetId: selectedCandidate.candidateUserId, targetUserId: selectedCandidate.candidateUserId, reason: "用户请求安全帮助" }).then(() => notice("安全帮助请求已提交。我们不会替你继续联系对方。 ")).catch((reason) => notice(reason instanceof Error ? reason.message : "安全帮助请求未能提交。")); }} onBlock={() => { if (!selectedCandidate) return notice("请先从候选人或会话中选择需要拉黑的对象。"); void blockAndRemember({ id: selectedCandidate.candidateUserId, name: selectedCandidate.name, avatar: selectedCandidate.avatar }).then(() => setRelationship("blocked")).catch((reason) => notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。")); }} /> : null}
   {overlay === "accountSafety" ? <AccountSafetySheet profile={profile} photos={profilePhotos} onClose={() => setOverlay(null)} onPrivacy={() => setOverlay("privacy")} onRelationships={() => setOverlay("relationships")} /> : null}
   </main>;
 }
@@ -1096,12 +1261,20 @@ function ToolApprovalSheet({ proposal, onClose, onResolve }: { proposal: AgentTh
   return <Sheet title={approval.title} onClose={onClose}><p className={styles.sheetLead}><FiShield /> {approval.summary}</p><article className={styles.detailCard}><span>你将确认的内容</span>{editable ? <><textarea className={styles.publishTextarea} aria-label="确认前可编辑的文案" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="写一句你想表达的话" /><small>你可以先改成自己舒服的说法；发送前仍由你最后确认。</small></> : null}{displayedArguments.length ? <dl className={styles.detailRows}>{displayedArguments.map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, " ")}</dt><dd>{typeof value === "string" ? value : JSON.stringify(value)}</dd></div>)}</dl> : null}</article><div className={styles.stackActions}><button type="button" className={styles.primaryButton} disabled={editable && !message.trim()} onClick={() => onResolve("approve", editable ? message.trim() : undefined)}><FiCheck /> 我确认执行</button><button type="button" className={styles.secondaryButton} onClick={() => onResolve("decline")}>不执行这一步</button></div><p className={styles.sheetSafety}><FiShield /> 只有服务端返回成功后，界面才会显示“已完成”；网络失败不会被当作已发送或已发布。</p></Sheet>;
 }
 
-function ComposeSheet({ value, onChange, onClose, onPublish }: { value: string; onChange: (value: string) => void; onClose: () => void; onPublish: () => void }) {
-  return <Sheet title="发布动态" onClose={onClose}><textarea className={styles.publishTextarea} value={value} onChange={(event) => onChange(event.target.value)} placeholder="分享一个今天的瞬间，或说说你正在寻找的同伴…" aria-label="动态内容" /><div className={styles.publishOptions}><span><FiMapPin /> 模糊定位</span><span><FiUsers /> 公开给同城兴趣圈</span></div><button type="button" className={styles.primaryButton} onClick={onPublish} disabled={!value.trim()}>发布到朋友圈</button></Sheet>;
+function ComposeSheet({ value, images, publishing, onChange, onFiles, onRemoveImage, onClose, onPublish }: { value: string; images: MomentDraftImage[]; publishing: boolean; onChange: (value: string) => void; onFiles: (files: File[]) => void; onRemoveImage: (id: string) => void; onClose: () => void; onPublish: () => void }) {
+  return <Sheet title="发布动态" onClose={onClose}><textarea className={styles.publishTextarea} value={value} onChange={(event) => onChange(event.target.value)} placeholder="分享一个今天的瞬间，或说说你正在寻找的同伴…" aria-label="动态内容" />{images.length ? <div className={styles.momentDraftGrid}>{images.map((image) => <figure key={image.id}><img src={image.preview} alt="待发布图片预览" /><button type="button" aria-label="移除图片" onClick={() => onRemoveImage(image.id)}><FiX /></button></figure>)}</div> : null}<label className={styles.momentMediaPicker}><FiImage /><span><strong>添加图片</strong><small>{images.length}/9 · 单张不超过 8MB</small></span><input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={publishing || images.length >= 9} onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = ""; }} /></label><div className={styles.publishOptions}><span><FiMapPin /> 模糊定位</span><span><FiUsers /> 公开给同城兴趣圈</span></div><button type="button" className={styles.primaryButton} onClick={onPublish} disabled={publishing || (!value.trim() && !images.length)}>{publishing ? "正在审核并发布…" : "发布到朋友圈"}</button><p className={styles.sheetSafety}><FiShield /> 图片先上传到统一审核接口；全部通过后才会创建动态。</p></Sheet>;
 }
 
-function ConversationSheet({ title, unlocked, items, input, onInput, onSend, onClose }: { title: string; unlocked: boolean; items: ConversationMessage[]; input: string; onInput: (value: string) => void; onSend: () => void; onClose: () => void }) {
-  return <Sheet title={title} onClose={onClose}><p className={styles.threadNote}><FiShield /> {unlocked ? "这是一段双方确认后开放的真实会话" : "等待双方接受邀请或好友关系后，才会开启连续会话"}</p>{unlocked ? <><div className={styles.thread}>{items.map((item) => <p key={item.id} className={item.role === "user" ? styles.threadMine : ""}>{item.text}</p>)}</div><form className={styles.sheetComposer} onSubmit={(event) => { event.preventDefault(); onSend(); }}><input value={input} onChange={(event) => onInput(event.target.value)} placeholder="说点什么" aria-label="消息内容" /><button type="submit" aria-label="发送消息" disabled={!input.trim()}><FiSend /></button></form></> : <section className={styles.lockedConversation}><FiLock /><strong>还没有开启会话</strong><p>你可以等待对方决定，也可以撤回邀请；小福不会替你越过这一步。</p></section>}</Sheet>;
+function ConversationSheet({ conversation, unlocked, items, input, onInput, onSend, onMute, onRecall, onReport, onBlock, onClose }: { conversation: FitMeetConversation; unlocked: boolean; items: ConversationMessage[]; input: string; onInput: (value: string) => void; onSend: () => void; onMute: () => void; onRecall: (id: string) => void; onReport: (id: string) => void; onBlock: () => void; onClose: () => void }) {
+  const [actionMessageId, setActionMessageId] = useState<string | null>(null);
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const title = conversation.displayName || conversation.username || "FitMeet 用户";
+  const muted = conversation.notificationLevel === "muted" || Boolean(conversation.mutedUntil && new Date(conversation.mutedUntil).getTime() > Date.now());
+  return <Sheet title={title} onClose={onClose}><div className={styles.threadToolbar}><button type="button" onClick={onMute}><FiBell /> {muted ? "恢复提醒" : "静音"}</button><button type="button" className={confirmBlock ? styles.threadDangerAction : ""} onClick={() => { if (confirmBlock) onBlock(); else setConfirmBlock(true); }}><FiShield /> {confirmBlock ? "确认拉黑" : "拉黑"}</button></div><p className={styles.threadNote}><FiShield /> {unlocked ? "双方确认后开放的真实会话；当前服务端仅支持文字消息" : "等待双方接受邀请或好友关系后，才会开启连续会话"}</p>{unlocked ? <><div className={styles.thread}>{items.map((item) => {
+    const recalled = item.lifecycleStatus === "recalled" || Boolean(item.recalledAt);
+    const canRecall = item.role === "user" && !recalled && Date.now() - new Date(item.createdAt).getTime() <= 2 * 60 * 1000;
+    return <article key={item.id} className={`${styles.threadMessage} ${item.role === "user" ? styles.threadMine : ""}`}><p>{item.text}</p><footer><small>{item.role === "user" ? recalled ? "已撤回" : item.readByOther ? "已读" : item.status === "delivered" ? "已送达" : "已发送" : new Date(item.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</small>{!recalled ? <button type="button" aria-label="消息操作" onClick={() => setActionMessageId(actionMessageId === item.id ? null : item.id)}><FiMoreHorizontal /></button> : null}</footer>{actionMessageId === item.id ? <aside>{canRecall ? <button type="button" onClick={() => { onRecall(item.id); setActionMessageId(null); }}><FiTrash2 /> 撤回消息</button> : null}{item.role === "peer" ? <button type="button" onClick={() => { onReport(item.id); setActionMessageId(null); }}><FiFlag /> 举报消息</button> : null}{!canRecall && item.role === "user" ? <small>发送超过 2 分钟，无法撤回</small> : null}</aside> : null}</article>;
+  })}</div><form className={styles.sheetComposer} onSubmit={(event) => { event.preventDefault(); onSend(); }}><input value={input} onChange={(event) => onInput(event.target.value)} placeholder="说点什么" aria-label="消息内容" /><button type="submit" aria-label="发送消息" disabled={!input.trim()}><FiSend /></button></form></> : <section className={styles.lockedConversation}><FiLock /><strong>还没有开启会话</strong><p>你可以等待对方决定，也可以撤回邀请；小福不会替你越过这一步。</p></section>}</Sheet>;
 }
 
 function MemorySheet({ memories, onClose, onSave, onDelete }: { memories: FitMeetAgentMemory[]; onClose: () => void; onSave: (id: string) => void; onDelete: (id: string) => void }) {

@@ -70,6 +70,11 @@ export const fitMeetPaths = {
     unread: "/messages/unread",
     thread: (id: string) => `/messages/conversations/${encodeURIComponent(id)}`,
     send: (id: string) => `/messages/conversations/${encodeURIComponent(id)}/send`,
+    read: (id: string) => `/messages/conversations/${encodeURIComponent(id)}/read`,
+    delivered: (id: string) => `/messages/conversations/${encodeURIComponent(id)}/delivered`,
+    memberSettings: (id: string) => `/messages/conversations/${encodeURIComponent(id)}/member-settings`,
+    recall: (id: string) => `/messages/${encodeURIComponent(id)}/recall`,
+    report: (id: string) => `/messages/${encodeURIComponent(id)}/report`,
   },
   relationships: {
     friends: "/friends",
@@ -342,6 +347,7 @@ export type FitMeetDemandCandidate = {
 export type FitMeetConversation = {
   id: string;
   conversationId?: string;
+  userId?: number;
   displayName?: string;
   username?: string;
   title?: string;
@@ -351,6 +357,11 @@ export type FitMeetConversation = {
   avatar?: string | null;
   updatedAt?: string;
   status?: string;
+  online?: boolean;
+  mutedUntil?: string | null;
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
+  notificationLevel?: "normal" | "mentions_only" | "muted" | string;
   peer?: { id: number; name?: string; avatar?: string | null };
 };
 
@@ -361,8 +372,22 @@ export type FitMeetConversationMessage = {
   text: string;
   body?: { text?: string };
   createdAt: string;
+  updatedAt?: string;
   status?: string;
   lifecycleStatus?: string;
+  isMine?: boolean;
+  readByOther?: boolean | null;
+  messageType?: string;
+  clientMessageId?: string | null;
+  recalledAt?: string | null;
+  moderationStatus?: string;
+};
+
+export type BlockedUserRecord = {
+  id: number;
+  name: string;
+  avatar?: string | null;
+  blockedAt: string;
 };
 
 export type FitMeetAgentMemory = {
@@ -478,6 +503,11 @@ export type ConversationMessage = {
   role: "user" | "peer" | "assistant";
   text: string;
   createdAt: string;
+  senderId?: number;
+  readByOther?: boolean | null;
+  status?: string;
+  lifecycleStatus?: string;
+  recalledAt?: string | null;
 };
 
 export type DemandDraftSession = {

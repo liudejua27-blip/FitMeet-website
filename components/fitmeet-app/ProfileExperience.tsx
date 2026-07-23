@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FiAward, FiBell, FiBriefcase, FiCamera, FiCheck, FiChevronRight, FiDownload, FiEdit3, FiEye, FiImage, FiLock, FiLogOut, FiPlus, FiSettings, FiShield, FiSliders, FiTrash2, FiUpload, FiUsers, FiX } from "react-icons/fi";
-import type { FeedPost, FitMeetProfilePhoto, PublicUserProfile, SocialProfile, UserAdvantage, UserVerification } from "@/lib/fitmeet-api-contract";
+import type { BlockedUserRecord, FeedPost, FitMeetProfilePhoto, PublicUserProfile, SocialProfile, UserAdvantage, UserVerification } from "@/lib/fitmeet-api-contract";
 import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 import styles from "./fitmeet-complete.module.css";
 
 type ProfilePanel = "preview" | "photos" | "advantages" | "verifications" | "friends" | "settings" | "blocklist" | "closure" | null;
@@ -13,10 +14,11 @@ function ProfileImage({ photo, name, className }: { photo?: FitMeetProfilePhoto;
 }
 
 function ProfilePanelShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className={styles.sheetShade} role="presentation"><section className={`${styles.sheet} ${styles.profilePanelSheet}`} role="dialog" aria-modal="true" aria-label={title}><div className={styles.sheetHandle} /><header><h2>{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><FiX /></button></header>{children}</section></div>;
+  const dialogRef = useAccessibleDialog(true, onClose);
+  return <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}><section ref={dialogRef} tabIndex={-1} className={`${styles.sheet} ${styles.profilePanelSheet}`} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}><div className={styles.sheetHandle} /><header><h2>{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><FiX /></button></header>{children}</section></div>;
 }
 
-export function ProfileExperience({ api, userId, profile, photos, notificationEnabled, postCount, relationshipCount, onPhotosChange, onNotice, onEdit, onPrivacy, onNotification, onRelationships, onReboard, onSafety, onMoments, onLogout }: {
+export function ProfileExperience({ api, userId, profile, photos, notificationEnabled, postCount, relationshipCount, blockedUsers, onPhotosChange, onNotice, onEdit, onPrivacy, onNotification, onRelationships, onReboard, onSafety, onMoments, onLogout, onBlockUser, onUnblockUser }: {
   api: FitMeetApiClient;
   userId: number;
   profile: SocialProfile;
@@ -24,6 +26,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   notificationEnabled: boolean;
   postCount: number;
   relationshipCount: number;
+  blockedUsers: BlockedUserRecord[];
   onPhotosChange: (photos: FitMeetProfilePhoto[]) => void;
   onNotice: (message: string) => void;
   onEdit: () => void;
@@ -34,6 +37,8 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   onSafety: () => void;
   onMoments: () => void;
   onLogout: () => void;
+  onBlockUser: (user: PublicUserProfile) => Promise<void>;
+  onUnblockUser: (user: BlockedUserRecord) => Promise<void>;
 }) {
   const [panel, setPanel] = useState<ProfilePanel>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -47,6 +52,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   const [newAdvantage, setNewAdvantage] = useState("");
   const [newVerification, setNewVerification] = useState("");
   const [profileDataBusy, setProfileDataBusy] = useState(false);
+  const [pendingBlockUserId, setPendingBlockUserId] = useState<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const orderedPhotos = useMemo(() => [...photos].sort((left, right) => (left.sortOrder ?? left.sort_order ?? 0) - (right.sortOrder ?? right.sort_order ?? 0)), [photos]);
   const cover = orderedPhotos.find((photo) => photo.isCover || photo.is_cover) || orderedPhotos[0];
@@ -214,11 +220,11 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
     {panel === "verifications" ? <ProfilePanelShell title="认证中心" onClose={() => setPanel(null)}><p className={styles.sheetLead}>创建申请不等于已认证；只有证明材料审核通过后才展示 badge。</p><form className={styles.profileDataForm} onSubmit={(event) => { event.preventDefault(); void addVerification(); }}><input value={newVerification} onChange={(event) => setNewVerification(event.target.value)} placeholder="例如：国家二级运动员" /><button type="submit" disabled={!newVerification.trim() || profileDataBusy}><FiPlus /> 申请</button></form><div className={styles.profileDataList}>{verifications.length ? verifications.map((item) => <article key={item.id}><span><FiAward /></span><div><strong>{item.title}</strong><small>{item.status === "verified" ? item.badgeTitle || "已认证" : item.status === "pending_review" ? "材料审核中" : item.reviewerNote || "待提交证明"}</small></div>{item.status !== "verified" ? <button type="button" aria-label="删除认证申请" onClick={() => void removeVerification(item)}><FiTrash2 /></button> : <FiCheck />}</article>) : <p className={styles.emptyState}>暂无认证记录。</p>}</div></ProfilePanelShell> : null}
 
-    {panel === "friends" ? <ProfilePanelShell title="好友列表" onClose={() => setPanel(null)}><p className={styles.sheetLead}>这里只展示双方已确认的关系。解除后不会再进入好友动态。</p><div className={styles.profileDataList}>{friends.length ? friends.map((friend) => <article key={friend.id}>{friend.avatar ? <img src={friend.avatar} alt={`${friend.name}头像`} /> : <span>{friend.name.slice(0, 1)}</span>}<div><strong>{friend.name}</strong><small>{friend.city || "城市未公开"}</small></div><button type="button" aria-label="解除好友" onClick={() => void removeFriend(friend)}><FiTrash2 /></button></article>) : <p className={styles.emptyState}>还没有双方确认的好友。</p>}</div></ProfilePanelShell> : null}
+    {panel === "friends" ? <ProfilePanelShell title="好友列表" onClose={() => setPanel(null)}><p className={styles.sheetLead}>这里只展示双方已确认的关系。解除好友与拉黑是两个独立动作。</p><div className={styles.profileDataList}>{friends.length ? friends.map((friend) => <article key={friend.id}>{friend.avatar ? <img src={friend.avatar} alt={`${friend.name}头像`} /> : <span>{friend.name.slice(0, 1)}</span>}<div><strong>{friend.name}</strong><small>{pendingBlockUserId === friend.id ? "再次点击盾牌确认拉黑" : friend.city || "城市未公开"}</small></div><aside className={styles.profileRecordActions}><button type="button" aria-label="解除好友" onClick={() => void removeFriend(friend)}><FiTrash2 /></button><button type="button" aria-label={pendingBlockUserId === friend.id ? "确认拉黑用户" : "拉黑用户"} onClick={() => { if (pendingBlockUserId === friend.id) { void onBlockUser(friend); setPendingBlockUserId(null); } else setPendingBlockUserId(friend.id); }}><FiShield /></button></aside></article>) : <p className={styles.emptyState}>还没有双方确认的好友。</p>}</div></ProfilePanelShell> : null}
 
     {panel === "settings" ? <ProfilePanelShell title="更多设置" onClose={() => setPanel(null)}><label className={styles.switchRow}><span><strong>前台实时通知</strong><small>私信、互动和邀请在网页打开时实时更新</small></span><input type="checkbox" checked={notificationEnabled} onChange={(event) => onNotification(event.target.checked)} /><i /></label><div className={styles.settingsActions}><button type="button" onClick={onPrivacy}><FiEye /> 隐私与资料可见范围</button><button type="button" onClick={onRelationships}><FiUsers /> 好友与申请</button><button type="button" onClick={() => setPanel("blocklist")}><FiShield /> 黑名单</button><button type="button" onClick={onSafety}><FiLock /> 账号安全</button><button type="button" onClick={onReboard}><FiSliders /> 重新完善资料</button><button type="button" onClick={() => setPanel("closure")}><FiTrash2 /> 数据导出与注销账号</button><button type="button" onClick={onLogout}><FiLogOut /> 退出登录</button></div><p className={styles.sheetSafety}><FiShield /> 网页关闭后不宣称有后台推送；消息仍会保存在服务端。</p></ProfilePanelShell> : null}
 
-    {panel === "blocklist" ? <ProfilePanelShell title="黑名单" onClose={() => setPanel(null)}><section className={styles.blocklistEmpty}><FiShield /><strong>暂无可展示的黑名单记录</strong><p>拉黑成功后，对方会从推荐、私信和互动通知中隐藏。当前后端只提供对具体用户的拉黑/解除操作，和 iOS 一样不在这里伪造名单。</p></section><div className={styles.detailRows}><div><span>私信</span><b>停止后续发送</b></div><div><span>匹配</span><b>不再进入候选</b></div><div><span>互动</span><b>相关通知隐藏</b></div></div><p className={styles.sheetSafety}><FiShield /> 遇到骚扰、诈骗或线下风险时，应同时使用具体内容或用户页的举报入口。</p></ProfilePanelShell> : null}
+    {panel === "blocklist" ? <ProfilePanelShell title="黑名单" onClose={() => setPanel(null)}>{blockedUsers.length ? <div className={styles.profileDataList}>{blockedUsers.map((user) => <article key={user.id}>{user.avatar ? <img src={user.avatar} alt={`${user.name}头像`} /> : <span>{user.name.slice(0, 1)}</span>}<div><strong>{user.name}</strong><small>{new Date(user.blockedAt).toLocaleDateString("zh-CN")} · 当前设备已确认</small></div><button type="button" aria-label={`解除拉黑 ${user.name}`} onClick={() => void onUnblockUser(user)}><FiX /></button></article>)}</div> : <section className={styles.blocklistEmpty}><FiShield /><strong>当前设备没有已确认记录</strong><p>拉黑成功后，对方会从推荐和私信入口中隐藏。</p></section>}<div className={styles.detailRows}><div><span>服务端</span><b>实际限制关系</b></div><div><span>当前设备</span><b>记录已确认对象</b></div></div><p className={styles.sheetSafety}><FiShield /> MobileAPI 暂无黑名单列表接口，因此这里只展示本设备确认过的记录；解除操作仍会写入服务端。</p></ProfilePanelShell> : null}
 
     {panel === "closure" ? <ProfilePanelShell title="数据与账号" onClose={() => setPanel(null)}><p className={styles.sheetLead}>注销是高风险操作。你可以先从后端导出账号数据；注销必须输入完整确认文字。</p><button type="button" className={styles.secondaryButton} disabled={accountBusy} onClick={() => void exportAccount()}><FiDownload /> {accountBusy ? "处理中…" : "导出我的数据"}</button><div className={styles.closurePanel}><strong>注销前请确认</strong><p>照片、动态和资料将不再公开；私信和互动会停止，必要安全审计按平台规则保留。</p><label><span>输入“注销账号”继续</span><input value={closureText} onChange={(event) => setClosureText(event.target.value)} placeholder="注销账号" /></label><button type="button" className={styles.dangerButton} disabled={closureText.trim() !== "注销账号" || accountBusy} onClick={() => void closeAccount()}>{accountBusy ? "正在提交…" : "确认注销账号"}</button></div></ProfilePanelShell> : null}
   </div>;

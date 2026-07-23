@@ -218,6 +218,7 @@
 /* Sheets */
 .sheetShade { position: fixed; z-index: 20; inset: 0; display: grid; align-items: end; justify-items: center; padding: 0; background: rgba(17,23,39,.38); }
 .sheet { width: min(100%,430px); max-height: min(82dvh,740px); overflow-y: auto; padding: 8px 16px calc(20px + env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; background: #f9faff; box-shadow: 0 -12px 40px rgba(19,25,45,.14); }
+.sheet:focus { outline: none; }
 .sheetHandle { width: 36px; height: 4px; margin: 0 auto 10px; border-radius: 6px; background: #d8dce5; }
 .sheet>header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
 .sheet>header h2 { margin: 0; font-size: 17px; }
@@ -241,11 +242,33 @@
 .publishTextarea:focus,.field textarea:focus,.field input:focus,.field select:focus { border-color: #7797ec; box-shadow: 0 0 0 3px rgba(72,126,239,.12); }
 .publishOptions { display: flex; gap: 7px; margin-top: 10px; }
 .publishOptions span { display: inline-flex; align-items: center; gap: 4px; color: #71809a; font-size: 10px; }
+.momentMediaPicker { display: flex; min-height: 54px; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px dashed #cbd5e5; border-radius: 14px; background: #fff; color: #5e75ab; cursor: pointer; }
+.momentMediaPicker>svg { font-size: 21px; }
+.momentMediaPicker>span { display: grid; gap: 2px; }
+.momentMediaPicker strong { color: #40506f; font-size: 11px; }
+.momentMediaPicker small { color: #929bad; font-size: 9px; }
+.momentDraftGrid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-top: 10px; }
+.momentDraftGrid figure { position: relative; overflow: hidden; margin: 0; border-radius: 12px; background: #e9edf5; }
+.momentDraftGrid img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.momentDraftGrid button { position: absolute; top: 5px; right: 5px; display: grid; width: 25px; height: 25px; place-items: center; border: 0; border-radius: 50%; background: rgba(22,28,43,.78); color: #fff; }
 .threadNote { display: flex; gap: 6px; margin: 0 0 10px; color: #758198; font-size: 10px; }
 .threadNote svg { color: #5581e6; }
 .thread { display: grid; gap: 8px; min-height: 180px; padding: 9px 0; }
 .thread p { width: fit-content; max-width: 82%; margin: 0; padding: 10px 11px; border-radius: 14px 14px 14px 4px; background: #fff; color: #455168; font-size: 12px; line-height: 1.5; box-shadow: 0 5px 13px rgba(45,55,85,.05); }
 .thread .threadMine { justify-self: end; border-radius: 14px 14px 4px 14px; background: #182032; color: white; }
+.threadToolbar { display: flex; justify-content: flex-end; gap: 7px; margin: -4px 0 10px; }
+.threadToolbar button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid #dfe5ee; border-radius: 10px; background: #fff; color: #68758a; font-size: 9px; font-weight: 750; }
+.threadToolbar .threadDangerAction { border-color: #efc9d0; background: #fff4f5; color: #ba5667; }
+.thread .threadMessage { position: relative; display: grid; width: fit-content; max-width: 84%; gap: 2px; justify-self: start; border-radius: 14px 14px 14px 4px; background: transparent; color: #455168; }
+.thread .threadMessage.threadMine { justify-self: end; border-radius: 14px 14px 4px 14px; background: transparent; color: inherit; }
+.threadMessage>p { max-width: 100%; }
+.threadMessage.threadMine>p { background: #182032; color: #fff; }
+.threadMessage>footer { display: flex; min-height: 20px; align-items: center; justify-content: flex-end; gap: 4px; color: #929bab; }
+.threadMessage>footer small { font-size: 8px; }
+.threadMessage>footer button { display: grid; width: 22px; height: 20px; place-items: center; padding: 0; border: 0; background: transparent; color: #8290a4; }
+.threadMessage>aside { position: absolute; z-index: 2; top: calc(100% - 4px); right: 0; display: grid; min-width: 134px; overflow: hidden; border: 1px solid #e0e5ed; border-radius: 11px; background: #fff; box-shadow: 0 10px 25px rgba(31,41,65,.16); }
+.threadMessage>aside button { display: flex; align-items: center; gap: 6px; padding: 10px; border: 0; border-bottom: 1px solid #edf0f4; background: transparent; color: #bd5868; font-size: 9px; text-align: left; }
+.threadMessage>aside small { padding: 9px; color: #8c96a6; font-size: 8px; }
 .sheetComposer { display: grid; grid-template-columns: 1fr 37px; gap: 8px; padding-top: 8px; border-top: 1px solid #e6eaf1; }
 .sheetComposer input { min-width: 0; padding: 10px 11px; border: 1px solid #dde3ee; border-radius: 12px; outline: 0; background: #fff; }
 .sheetComposer button { display: grid; place-items: center; border: 0; border-radius: 12px; background: #397df1; color: #fff; }
@@ -564,6 +587,9 @@
 .profileDataList article strong { color: #2d374c; font-size: 11px; }
 .profileDataList article small { color: #8992a4; font-size: 9px; }
 .profileDataList article > button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 10px; background: #fff1f2; color: #d75e68; }
+.profileRecordActions { display: flex; gap: 5px; }
+.profileRecordActions button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: #f1f4f9; color: #6f7c92; }
+.profileRecordActions button:last-child { background: #fff1f2; color: #c65969; }
 .commentComposer { display: grid; grid-template-columns: 1fr 35px; gap: 6px; margin-top: 9px; }
 .commentComposer input { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid #dce3ed; border-radius: 11px; outline: 0; font-size: 11px; }
 .commentComposer button { display: grid; place-items: center; border: 0; border-radius: 11px; background: #347df2; color: #fff; }

@@ -7,6 +7,7 @@ import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
 import type { DemoInvitationStatus } from "@/lib/fitmeet-experience-runtime";
 import type { LiveCandidate } from "@/lib/fitmeet-agent-domain";
 import styles from "./fitmeet-complete.module.css";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 
 type CandidateSurface = "deck" | "profile" | "moments";
 type ConfirmAction = "report" | "block" | null;
@@ -45,6 +46,7 @@ export function CandidateProfileExperience({ api, candidate, candidates, relatio
   const [momentsError, setMomentsError] = useState("");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [safetyBusy, setSafetyBusy] = useState(false);
+  const dialogRef = useAccessibleDialog(true, onClose);
   const invitationAccepted = inviteStatus === "accepted";
   const currentIndex = candidates.findIndex((item) => item.id === candidate.id);
   const galleryImages = useMemo(() => Array.from(new Set([candidate.avatar, ...moments.flatMap((post) => post.images.map((image) => image.url))].filter((value): value is string => Boolean(value)))).slice(0, 6), [candidate.avatar, moments]);
@@ -82,7 +84,7 @@ export function CandidateProfileExperience({ api, candidate, candidates, relatio
     }
   };
 
-  return <div className={styles.sheetShade} role="presentation"><section className={`${styles.sheet} ${styles.candidateProfileSheet}`} role="dialog" aria-modal="true" aria-label={surface === "moments" ? `${candidate.name}的动态` : "匹配资料"}>
+  return <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}><section ref={dialogRef} tabIndex={-1} className={`${styles.sheet} ${styles.candidateProfileSheet}`} role="dialog" aria-modal="true" aria-label={surface === "moments" ? `${candidate.name}的动态` : "匹配资料"} onMouseDown={(event) => event.stopPropagation()}>
     <div className={styles.sheetHandle} />
     <header className={styles.candidateProfileHeader}>
       {surface === "deck" ? <span /> : <button type="button" aria-label="返回候选人资料" onClick={() => setSurface(surface === "moments" ? "profile" : "deck")}><FiChevronLeft /></button>}

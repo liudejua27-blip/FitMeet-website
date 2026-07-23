@@ -32,7 +32,7 @@ function DiscoveryHall({ task, intents, applications, onAction }: { task: boolea
   })}</section>;
 }
 
-export function MomentsExperience({ api, userId, posts, onPostsChange, likedPostIds, onLike, channel, onChannel, onCompose, socialIntents, taskIntents, socialApplications, taskApplications, onApplication, onNotice, initialLastPage = 1 }: {
+export function MomentsExperience({ api, userId, posts, onPostsChange, likedPostIds, onLike, channel, onChannel, onCompose, onDelete, socialIntents, taskIntents, socialApplications, taskApplications, onApplication, onNotice, initialLastPage = 1 }: {
   api: FitMeetApiClient;
   userId: number;
   posts: FeedPost[];
@@ -42,6 +42,7 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
   channel: DiscoveryChannel;
   onChannel: (value: DiscoveryChannel) => void;
   onCompose: () => void;
+  onDelete: (post: FeedPost) => Promise<void>;
   socialIntents: FitMeetPublicIntent[];
   taskIntents: FitMeetPublicIntent[];
   socialApplications: FitMeetIntentApplication[];
@@ -62,6 +63,8 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
   const [commentText, setCommentText] = useState("");
   const [menuPostId, setMenuPostId] = useState<number | null>(null);
   const [reportingId, setReportingId] = useState<number | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [lastPage, setLastPage] = useState(initialLastPage);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -90,6 +93,38 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
     } catch (reason) {
       onNotice(reason instanceof Error ? reason.message : "举报暂时未能提交。");
     } finally { setReportingId(null); }
+  };
+
+  const deletePost = async (post: FeedPost) => {
+    if (pendingDeleteId !== post.id) {
+      setPendingDeleteId(post.id);
+      return;
+    }
+    if (deletingId) return;
+    setDeletingId(post.id);
+    try {
+      await onDelete(post);
+      setMenuPostId(null);
+      setPendingDeleteId(null);
+    } finally { setDeletingId(null); }
+  };
+
+  const sharePost = async (post: FeedPost) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("moment", String(post.id));
+    const payload = { title: `${post.username} 的 FitMeet 动态`, text: post.text, url: url.toString() };
+    try {
+      if (navigator.share) {
+        await navigator.share(payload);
+        onNotice("已打开系统分享面板。");
+      } else {
+        await navigator.clipboard.writeText(`${payload.text}\n${payload.url}`);
+        onNotice("动态链接已复制，可以粘贴给朋友。");
+      }
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      onNotice("系统分享不可用，请稍后重试。");
+    }
   };
 
   const loadComments = async (postId: number, page = 1) => {
@@ -161,14 +196,14 @@ export function MomentsExperience({ api, userId, posts, onPostsChange, likedPost
     <div className={styles.segmented}>{(["moments", "social", "tasks"] as const).map((item) => <button type="button" key={item} className={channel === item ? styles.segmentActive : ""} onClick={() => onChannel(item)}>{item === "moments" ? "朋友圈" : item === "social" ? "社交大厅" : "任务大厅"}</button>)}</div>
     {channel !== "moments" ? <DiscoveryHall task={channel === "tasks"} intents={channel === "tasks" ? taskIntents : socialIntents} applications={channel === "tasks" ? taskApplications : socialApplications} onAction={(intent, status) => onApplication(channel === "tasks" ? "task" : "social", intent, status)} /> : <><div className={styles.feedScope} aria-label="动态范围"><button type="button" className={feedScope === "all" ? styles.feedScopeActive : ""} onClick={() => void changeFeedScope("all")}>全部动态</button><button type="button" className={feedScope === "friends" ? styles.feedScopeActive : ""} onClick={() => void changeFeedScope("friends")}><FiUsers /> 好友动态</button></div><div className={styles.feedList}>
       {visiblePosts.length ? visiblePosts.map((post) => <article className={styles.momentPost} key={post.id}>
-        <header><MomentAvatar post={post} /><div><strong>{post.username}<span>✓</span></strong><small>{post.createdAt} · {post.city || "位置未公开"}</small></div><button type="button" aria-label="动态更多操作" onClick={() => setMenuPostId(menuPostId === post.id ? null : post.id)}><FiMoreHorizontal /></button>{menuPostId === post.id ? <aside><button type="button" onClick={() => hidePost(post)}><FiEyeOff /> 不看这条动态</button><button type="button" disabled={reportingId === post.id || reportedIds.includes(post.id)} onClick={() => void reportPost(post)}><FiFlag /> {reportedIds.includes(post.id) ? "已举报" : reportingId === post.id ? "提交中" : "举报动态"}</button></aside> : null}</header>
+        <header><MomentAvatar post={post} /><div><strong>{post.username}<span>✓</span></strong><small>{post.createdAt} · {post.city || "位置未公开"}</small></div><button type="button" aria-label="动态更多操作" onClick={() => { setMenuPostId(menuPostId === post.id ? null : post.id); setPendingDeleteId(null); }}><FiMoreHorizontal /></button>{menuPostId === post.id ? <aside>{Number(post.userId) === Number(userId) ? <button type="button" disabled={deletingId === post.id} onClick={() => void deletePost(post)}><FiTrash2 /> {deletingId === post.id ? "删除中" : pendingDeleteId === post.id ? "确认删除" : "删除动态"}</button> : <><button type="button" onClick={() => hidePost(post)}><FiEyeOff /> 不看这条动态</button><button type="button" disabled={reportingId === post.id || reportedIds.includes(post.id)} onClick={() => void reportPost(post)}><FiFlag /> {reportedIds.includes(post.id) ? "已举报" : reportingId === post.id ? "提交中" : "举报动态"}</button></>}</aside> : null}</header>
         {reportedIds.includes(post.id) ? <p className={styles.moderationNotice}><FiFlag /> 已提交安全审核</p> : null}
         {post.title && post.title.trim() !== post.text.trim() ? <h2>{post.title}</h2> : null}<p>{post.text}</p>
         {post.images.length ? <div className={`${styles.momentPhotoGrid} ${post.images.length === 1 ? styles.momentPhotoSingle : ""}`}>{post.images.slice(0, 6).map((image) => <img key={`${post.id}-${image.url}`} src={image.url} alt="动态图片" />)}</div> : <div className={styles.momentVisualFallback} style={{ "--moment-color": post.color || "#4f7cff" } as React.CSSProperties}><FiImage /><span>{post.emoji || "✨"}</span></div>}
         <div className={styles.tagRow}>{post.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
         {(comments[post.id] || []).length ? <div className={styles.commentPreview}>{comments[post.id].map((comment) => <div key={comment.id}><p><strong>{comment.authorName}：</strong>{comment.body}</p><span>{comment.canDelete ? <button type="button" aria-label="删除评论" onClick={() => void deleteComment(comment)}><FiTrash2 /></button> : <button type="button" aria-label="举报评论" onClick={() => void reportComment(comment)}><FiFlag /></button>}</span></div>)}{commentPages[post.id]?.page < commentPages[post.id]?.lastPage ? <button type="button" onClick={() => void loadComments(post.id, commentPages[post.id].page + 1)}>加载更多评论</button> : null}</div> : null}
         {openCommentId === post.id ? <form className={styles.commentComposer} onSubmit={(event) => { event.preventDefault(); void submitComment(post.id); }}><input autoFocus value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="写下友善的评论" /><button type="submit" disabled={!commentText.trim()}><FiSend /></button></form> : null}
-        <footer><button type="button" className={likedPostIds.includes(post.id) ? styles.liked : ""} onClick={() => onLike(post.id)}><FiHeart /> {post.likes}</button><button type="button" onClick={() => { const opening = openCommentId !== post.id; setOpenCommentId(opening ? post.id : null); setCommentText(""); if (opening && !comments[post.id]) void loadComments(post.id); }}><FiMessageCircle /> {post.comments}</button><button type="button"><FiSend /> 分享</button></footer>
+        <footer><button type="button" className={likedPostIds.includes(post.id) ? styles.liked : ""} onClick={() => onLike(post.id)}><FiHeart /> {post.likes}</button><button type="button" onClick={() => { const opening = openCommentId !== post.id; setOpenCommentId(opening ? post.id : null); setCommentText(""); if (opening && !comments[post.id]) void loadComments(post.id); }}><FiMessageCircle /> {post.comments}</button><button type="button" onClick={() => void sharePost(post)}><FiSend /> 分享</button></footer>
       </article>) : <p className={styles.emptyState}>暂时没有可展示的真实动态。你可以发布第一条近况。</p>}
       <div className={styles.paginationFooter}>{currentPage < lastPage ? <button type="button" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "正在加载…" : "查看更多运动生活"}</button> : visiblePosts.length ? <span>已经看到今天最新动态</span> : null}</div>
     </div></>}
