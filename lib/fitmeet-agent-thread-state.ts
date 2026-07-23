@@ -225,7 +225,12 @@ export function reconcileDraftWithAssistantSummary(
   const requirements = [...peopleParts.slice(1), style].filter(Boolean).join("；");
   if (requirements) knownFields["搭子要求"] = requirements;
   if (boundary) knownFields["边界"] = boundary;
-  if (style && clean(knownFields["偏好"]) === style) delete knownFields["偏好"];
+  const preference = clean(knownFields["偏好"]);
+  if (
+    style
+    && preference
+    && (style.includes(preference) || preference.includes(style))
+  ) delete knownFields["偏好"];
 
   const category = activity || session.category;
   if (category === session.category && JSON.stringify(knownFields) === JSON.stringify(session.knownFields)) return null;

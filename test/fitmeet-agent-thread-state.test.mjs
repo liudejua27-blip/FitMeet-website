@@ -226,4 +226,5 @@ test("aligns card fields with explicit facts from the same server assistant repl
   assert.equal(patch?.knownFields?.["数量或人数"], "1位");
   assert.equal(patch?.knownFields?.["搭子要求"], "年龄相近；节奏轻松，不赶场");
   assert.equal(patch?.knownFields?.["边界"], "先在线聊天，只在公共场所见面");
+  assert.equal(patch?.knownFields?.["偏好"], undefined);
 });

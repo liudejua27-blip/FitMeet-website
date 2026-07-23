@@ -459,13 +459,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
           ? null
           : preferredAgentThread(nextThreads, activeAgentThreadIdRef.current);
         if (requestedThread) {
-          const detail = await api.getAgentThread(requestedThread.id);
+          const detail = await loadAgentThread(requestedThread.id);
           hasRemoteDraft = Boolean(detail.activeDraft);
-          applyAgentDetail(detail, hasRemoteDraft);
+          if (hasRemoteDraft) applyAgentDetail(detail, true);
         } else if (threadsResult.status === "fulfilled" && !agentThreadSwitchingRef.current) {
           const created = await api.createAgentThread();
           activeAgentThreadIdRef.current = created.thread.id;
-          applyAgentDetail(await api.getAgentThread(created.thread.id));
+          await loadAgentThread(created.thread.id);
         }
       } catch (reason) {
         notice(reason instanceof Error ? reason.message : "小福历史暂时无法恢复。");
@@ -477,7 +477,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       if (latest && !hasRemoteDraft) await activateDemand(latest);
       if (results.every((result) => result.status === "rejected")) notice("未能同步你的 FitMeet 数据，请检查网络后重试。");
     })().catch((reason) => notice(reason instanceof Error ? reason.message : "未能同步你的 FitMeet 数据。"));
-  }, [activateDemand, api, applyAgentDetail, liveApi, notice]);
+  }, [activateDemand, api, applyAgentDetail, liveApi, loadAgentThread, notice]);
 
   useEffect(() => {
     if (!liveApi) return;
