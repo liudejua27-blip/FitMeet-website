@@ -34,6 +34,7 @@ import {
   mergeAgentDraftEdits,
   preferredAgentThread,
   reconcileAgentReplyWithDraft,
+  reconcileDraftWithAssistantSummary,
   reconcileExplicitDraftAnswer,
   repairDraftAfterLifecycleTurn,
   type DemandLifecycleAction,
@@ -284,6 +285,14 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
 
   const loadAgentThread = useCallback(async (threadId: string, presentDraft = false) => {
     let detail = await api.getAgentThread(threadId);
+    const latestAssistant = [...detail.entries]
+      .sort((left, right) => right.sequence - left.sequence)
+      .find((entry) => entry.kind === "message" && entry.role === "assistant" && entry.content);
+    const summaryPatch = reconcileDraftWithAssistantSummary(detail.activeDraft, latestAssistant?.content);
+    if (summaryPatch && detail.activeDraft) {
+      await api.updateDemandDraftSession(detail.activeDraft.id, summaryPatch);
+      detail = await api.getAgentThread(threadId);
+    }
     if (detail.activeDraft?.status === "cardGenerated") {
       const canonical = canonicalAgentDraftCardPatch(detail.activeDraft);
       const fieldsChanged = JSON.stringify(canonical.knownFields) !== JSON.stringify(detail.activeDraft.knownFields);
@@ -534,6 +543,14 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       const thread = await ensureAgentThread();
       const turn = await api.sendAgentThreadTurn(thread.id, text);
       let detail = await api.getAgentThread(thread.id);
+      const latestAssistant = [...detail.entries]
+        .sort((left, right) => right.sequence - left.sequence)
+        .find((entry) => entry.kind === "message" && entry.role === "assistant" && entry.content);
+      const summaryPatch = reconcileDraftWithAssistantSummary(detail.activeDraft, latestAssistant?.content);
+      if (summaryPatch && detail.activeDraft) {
+        await api.updateDemandDraftSession(detail.activeDraft.id, summaryPatch);
+        detail = await api.getAgentThread(thread.id);
+      }
       const answerPatch = reconcileExplicitDraftAnswer(text, activeDraftSession, detail.activeDraft);
       if (answerPatch && detail.activeDraft) {
         await api.updateDemandDraftSession(detail.activeDraft.id, answerPatch);
@@ -1334,7 +1351,7 @@ function HomeScreen({ nickname, chat, entries, input, onInput, onSend, onQuickPr
       <button type="button" aria-label="图片理解暂未开放" title="图片理解暂未开放" disabled><FiImage /></button>
       <button type="button" aria-label={voiceActive ? "停止语音输入" : "语音输入"} onClick={onVoice} className={voiceActive ? styles.composerVoiceActive : ""}><FiMic /></button>
       <input value={input} onChange={(event) => onInput(event.target.value)} placeholder={sending ? "小福正在理解和整理…" : "告诉小福你现在想解决什么"} aria-label="告诉小福你现在想解决什么" disabled={sending} />
-      <button type="submit" aria-label="发送给小福" disabled={!input.trim() || sending}><FiArrowUp /></button>
+      <button type="submit" aria-label="发送给小福" disabled={!input.trim() || sending} onClick={(event) => { event.preventDefault(); onSend(); }}><FiArrowUp /></button>
     </form>
   </div>;
 }

@@ -38,6 +38,16 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function assistantLabelValue(content: string, labels: string[]) {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = content.match(new RegExp(`(?:^|\\n)\\s*[-*•]?\\s*\\**${escaped}\\**\\s*[:：]\\s*([^\\n]+)`, "i"));
+    const value = clean(match?.[1]).replace(/\*\*/g, "").trim();
+    if (value && value.length <= 120) return value;
+  }
+  return "";
+}
+
 function firstReplyParagraph(content: string) {
   const paragraph = content
     .split(/\n\s*\n/)
@@ -188,6 +198,38 @@ export function repairDraftAfterLifecycleTurn(
     generatedCardId: before.generatedCardId,
     lastQuestion: before.lastQuestion,
   };
+}
+
+/**
+ * The server model can return a correct structured summary while the legacy
+ * draft merger keeps a narrower value. Reconcile only explicit labelled facts
+ * from that same server reply; this does not classify or infer a new demand in
+ * the browser.
+ */
+export function reconcileDraftWithAssistantSummary(
+  session: DemandDraftSession | null | undefined,
+  assistantContent: string | null | undefined,
+): Partial<DemandDraftSession> | null {
+  if (!session || !clean(assistantContent)) return null;
+  const content = clean(assistantContent);
+  const activity = assistantLabelValue(content, ["活动类型", "活动"]);
+  const peopleLine = assistantLabelValue(content, ["人数"]);
+  const style = assistantLabelValue(content, ["风格", "搭子要求"]);
+  const boundary = assistantLabelValue(content, ["安全约定", "见面边界", "边界"]);
+  if (!activity && !peopleLine && !style && !boundary) return null;
+
+  const knownFields = { ...(session.knownFields || {}) };
+  if (activity) knownFields["活动"] = activity;
+  const peopleParts = peopleLine.split(/[，,；;]/).map((item) => item.trim()).filter(Boolean);
+  if (peopleParts[0]) knownFields["数量或人数"] = peopleParts[0];
+  const requirements = [...peopleParts.slice(1), style].filter(Boolean).join("；");
+  if (requirements) knownFields["搭子要求"] = requirements;
+  if (boundary) knownFields["边界"] = boundary;
+  if (style && clean(knownFields["偏好"]) === style) delete knownFields["偏好"];
+
+  const category = activity || session.category;
+  if (category === session.category && JSON.stringify(knownFields) === JSON.stringify(session.knownFields)) return null;
+  return { category, knownFields };
 }
 
 export function preferredAgentThread<T extends { id: string }>(

@@ -12,6 +12,7 @@ import {
   orderedAgentDraftFields,
   preferredAgentThread,
   reconcileAgentReplyWithDraft,
+  reconcileDraftWithAssistantSummary,
   reconcileExplicitDraftAnswer,
   repairDraftAfterLifecycleTurn,
 } from "../lib/fitmeet-agent-thread-state.ts";
@@ -197,4 +198,32 @@ test("restores the explicitly selected thread instead of jumping to the latest o
   const threads = [{ id: "latest" }, { id: "selected" }];
   assert.equal(preferredAgentThread(threads, "selected")?.id, "selected");
   assert.equal(preferredAgentThread(threads, "missing")?.id, "latest");
+});
+
+test("aligns card fields with explicit facts from the same server assistant reply", () => {
+  const serverReply = `收到，这个安排听上去很舒服。
+
+**☕ 本周日下午 · 上海徐汇 · 找搭子**
+- 活动：Citywalk + 喝咖啡
+- 人数：1位，年龄相近
+- 风格：节奏轻松，不赶场
+- 安全约定：先在线聊天，只在公共场所见面`;
+  const narrowDraft = {
+    ...draft,
+    category: "咖啡",
+    knownFields: {
+      地点: "上海徐汇",
+      时间: "本周日下午",
+      活动: "咖啡",
+      数量或人数: "1位",
+      搭子要求: "节奏轻松",
+      偏好: "节奏轻松，不赶场",
+    },
+  };
+  const patch = reconcileDraftWithAssistantSummary(narrowDraft, serverReply);
+  assert.equal(patch?.category, "Citywalk + 喝咖啡");
+  assert.equal(patch?.knownFields?.["活动"], "Citywalk + 喝咖啡");
+  assert.equal(patch?.knownFields?.["数量或人数"], "1位");
+  assert.equal(patch?.knownFields?.["搭子要求"], "年龄相近；节奏轻松，不赶场");
+  assert.equal(patch?.knownFields?.["边界"], "先在线聊天，只在公共场所见面");
 });
