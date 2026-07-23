@@ -158,6 +158,47 @@ export function canonicalAgentDraftCardPatch(session: DemandDraftSession) {
   return { knownFields, category };
 }
 
+/**
+ * A lifecycle prompt such as "publish this card" is control-plane input, not a
+ * new demand fact. MobileAPI can currently merge that prompt into semantic
+ * fields before returning the tool proposal, so restore the last confirmed
+ * card snapshot before the proposal can be approved.
+ */
+export function repairDraftAfterLifecycleTurn(
+  before: DemandDraftSession | null | undefined,
+  after: DemandDraftSession | null | undefined,
+): Partial<DemandDraftSession> | null {
+  if (!before || !after || before.id !== after.id) return null;
+  const canonical = canonicalAgentDraftCardPatch(before);
+  const semanticChanged = (
+    canonical.category !== after.category
+    || JSON.stringify(canonical.knownFields) !== JSON.stringify(after.knownFields)
+    || before.demandType !== after.demandType
+    || before.status !== after.status
+  );
+  if (!semanticChanged) return null;
+  return {
+    demandType: before.demandType,
+    category: canonical.category,
+    knownFields: canonical.knownFields,
+    missingFields: before.missingFields,
+    canGenerateCard: before.canGenerateCard,
+    userConfirmedGenerate: before.userConfirmedGenerate,
+    status: before.status,
+    generatedCardId: before.generatedCardId,
+    lastQuestion: before.lastQuestion,
+  };
+}
+
+export function preferredAgentThread<T extends { id: string }>(
+  threads: T[],
+  requestedId: string | null | undefined,
+) {
+  return (requestedId ? threads.find((thread) => thread.id === requestedId) : undefined)
+    ?? threads[0]
+    ?? null;
+}
+
 export function agentDraftCanRenderCard(session: DemandDraftSession | null | undefined) {
   if (!session) return false;
   return session.status === "cardGenerated"

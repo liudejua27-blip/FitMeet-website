@@ -32,8 +32,10 @@ import {
   demandLifecyclePrompt,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
+  preferredAgentThread,
   reconcileAgentReplyWithDraft,
   reconcileExplicitDraftAnswer,
+  repairDraftAfterLifecycleTurn,
   type DemandLifecycleAction,
 } from "@/lib/fitmeet-agent-thread-state";
 import { FitMeetApiError } from "@/lib/fitmeet-api-client";
@@ -233,6 +235,8 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [closedConversationIds, setClosedConversationIds] = useState<string[]>([]);
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
   const conversationSyncing = useRef(false);
+  const activeAgentThreadIdRef = useRef<string | null>(null);
+  const agentThreadSwitchingRef = useRef(false);
   const api = session.api;
   const liveApi = session.state.status === "authenticated";
   const selectedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId) ?? candidates[0];
@@ -255,6 +259,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   });
 
   const applyAgentDetail = useCallback((detail: AgentThreadDetail, presentDraft = false) => {
+    activeAgentThreadIdRef.current = detail.thread.id;
     setActiveAgentThread(detail.thread);
     setAgentThreads((current) => [detail.thread, ...current.filter((thread) => thread.id !== detail.thread.id)]);
     const normalizedEntries = agentEntriesForDetail(detail);
@@ -265,6 +270,12 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (detail.activeDraft && presentDraft) {
       setDemand(displayDraftSession(detail.activeDraft));
       setHasDemand(agentDraftCanRenderCard(detail.activeDraft));
+      setLiveDemand(null);
+      setCandidates([]);
+      setSelectedCandidateId(null);
+    } else if (presentDraft) {
+      setDemand(emptyDemandView);
+      setHasDemand(false);
       setLiveDemand(null);
       setCandidates([]);
       setSelectedCandidateId(null);
@@ -311,8 +322,10 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   }, [api, notice]);
 
   const startNewDemand = useCallback(async () => {
+    agentThreadSwitchingRef.current = true;
     try {
       const created = await api.createAgentThread();
+      activeAgentThreadIdRef.current = created.thread.id;
       setLiveDemand(null);
       setHasDemand(false);
       setCandidates([]);
@@ -324,12 +337,19 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       notice("已开始一条新需求；之前的需求和匹配记录仍保留在账号中。");
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : "新的需求暂时无法创建。");
+    } finally {
+      agentThreadSwitchingRef.current = false;
     }
   }, [api, loadAgentThread, notice]);
 
   const ensureAgentThread = useCallback(async () => {
-    if (activeAgentThread) return activeAgentThread;
+    if (activeAgentThread && activeAgentThread.id === activeAgentThreadIdRef.current) return activeAgentThread;
+    if (activeAgentThreadIdRef.current) {
+      const detail = await loadAgentThread(activeAgentThreadIdRef.current);
+      return detail.thread;
+    }
     const created = await api.createAgentThread();
+    activeAgentThreadIdRef.current = created.thread.id;
     const detail = await loadAgentThread(created.thread.id);
     return detail.thread;
   }, [activeAgentThread, api, loadAgentThread]);
@@ -426,12 +446,16 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       setAgentThreads(nextThreads);
       let hasRemoteDraft = false;
       try {
-        if (nextThreads[0]) {
-          const detail = await api.getAgentThread(nextThreads[0].id);
+        const requestedThread = agentThreadSwitchingRef.current
+          ? null
+          : preferredAgentThread(nextThreads, activeAgentThreadIdRef.current);
+        if (requestedThread) {
+          const detail = await api.getAgentThread(requestedThread.id);
           hasRemoteDraft = Boolean(detail.activeDraft);
           applyAgentDetail(detail, hasRemoteDraft);
-        } else if (threadsResult.status === "fulfilled") {
+        } else if (threadsResult.status === "fulfilled" && !agentThreadSwitchingRef.current) {
           const created = await api.createAgentThread();
+          activeAgentThreadIdRef.current = created.thread.id;
           applyAgentDetail(await api.getAgentThread(created.thread.id));
         }
       } catch (reason) {
@@ -586,12 +610,20 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     setAgentSending(true);
     try {
       const thread = await ensureAgentThread();
+      const stableDraft = activeDraftSession
+        ? { ...activeDraftSession, knownFields: { ...activeDraftSession.knownFields }, missingFields: [...activeDraftSession.missingFields] }
+        : null;
       if (action === "publish" && activeDraftSession?.status === "cardGenerated") {
         const canonical = canonicalAgentDraftCardPatch(activeDraftSession);
         await api.updateDemandDraftSession(activeDraftSession.id, canonical);
       }
       await api.sendAgentThreadTurn(thread.id, demandLifecyclePrompt(action));
-      const detail = await loadAgentThread(thread.id, true);
+      let detail = await api.getAgentThread(thread.id);
+      const repair = repairDraftAfterLifecycleTurn(stableDraft, detail.activeDraft);
+      if (repair && detail.activeDraft) {
+        await api.updateDemandDraftSession(detail.activeDraft.id, repair);
+      }
+      detail = await loadAgentThread(thread.id, true);
       const proposal = latestAgentToolProposal(detail.entries, "press_demand_card_button", ["awaiting_confirmation", "failed"]);
       if (!proposal) {
         const lastAssistant = [...detail.entries]
@@ -1129,10 +1161,11 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (demandsResult.status === "fulfilled") setDemands(demandsResult.value.data);
     const latest = demandsResult.status === "fulfilled" ? demandsResult.value.data.find((item) => item.id === liveDemand?.id) ?? demandsResult.value.data[0] : undefined;
     if (latest) await activateDemand(latest);
-    if (activeAgentThread) await loadAgentThread(activeAgentThread.id);
+    const threadIdToRefresh = activeAgentThreadIdRef.current;
+    if (threadIdToRefresh && !agentThreadSwitchingRef.current) await loadAgentThread(threadIdToRefresh);
     await syncOpenConversation();
     if (results.every((result) => result.status === "rejected")) throw new Error("实时数据暂时无法同步。");
-  }, [activateDemand, activeAgentThread, api, liveApi, liveDemand?.id, loadAgentThread, syncOpenConversation]);
+  }, [activateDemand, api, liveApi, liveDemand?.id, loadAgentThread, syncOpenConversation]);
 
   const handleRealtimeEvent = useCallback((event: FitMeetRealtimeEvent) => {
     const eventConversationId = typeof event.payload?.conversationId === "string" ? event.payload.conversationId : "";

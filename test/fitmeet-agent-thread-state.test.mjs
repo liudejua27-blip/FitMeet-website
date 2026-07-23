@@ -10,8 +10,10 @@ import {
   latestAgentToolProposal,
   mergeAgentDraftEdits,
   orderedAgentDraftFields,
+  preferredAgentThread,
   reconcileAgentReplyWithDraft,
   reconcileExplicitDraftAnswer,
+  repairDraftAfterLifecycleTurn,
 } from "../lib/fitmeet-agent-thread-state.ts";
 
 const draft = {
@@ -167,4 +169,32 @@ test("offers one-tap answers without asserting them as user facts", () => {
   const suggestions = agentReplySuggestions({ ...draft, missingFields: ["搭子要求"], canGenerateCard: false, status: "collecting" });
   assert.match(suggestions[0], /年龄相近/);
   assert.equal(agentReplySuggestions({ ...draft, status: "cardGenerated", userConfirmedGenerate: true })[0], "请提出发布确认，不要重新生成卡片");
+});
+
+test("lifecycle control prompts cannot overwrite the confirmed card facts", () => {
+  const before = {
+    ...draft,
+    status: "cardGenerated",
+    userConfirmedGenerate: true,
+    generatedCardId: "card-1",
+  };
+  const polluted = {
+    ...before,
+    category: "请提出发布确认，不要重新生成卡片",
+    knownFields: {
+      ...before.knownFields,
+      活动: "请提出发布确认，不要重新生成卡片",
+    },
+  };
+  const patch = repairDraftAfterLifecycleTurn(before, polluted);
+  assert.equal(patch?.category, "Citywalk 和咖啡");
+  assert.equal(patch?.knownFields?.["活动"], "Citywalk 和咖啡");
+  assert.equal(patch?.status, "cardGenerated");
+  assert.equal(patch?.generatedCardId, "card-1");
+});
+
+test("restores the explicitly selected thread instead of jumping to the latest one", () => {
+  const threads = [{ id: "latest" }, { id: "selected" }];
+  assert.equal(preferredAgentThread(threads, "selected")?.id, "selected");
+  assert.equal(preferredAgentThread(threads, "missing")?.id, "latest");
 });
