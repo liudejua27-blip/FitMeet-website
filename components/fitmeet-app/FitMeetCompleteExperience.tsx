@@ -31,6 +31,7 @@ import {
   canonicalAgentDraftCardPatch,
   demandForAgentThread,
   demandLifecyclePrompt,
+  editableDefaultDraftPatch,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
   preferredAgentThread,
@@ -304,6 +305,12 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     const summaryPatch = reconcileDraftWithAssistantSummary(detail.activeDraft, latestAssistant?.content);
     if (summaryPatch && detail.activeDraft) {
       await api.updateDemandDraftSession(detail.activeDraft.id, summaryPatch);
+      detail = await api.getAgentThread(threadId);
+      if (requestId !== agentThreadLoadRequestRef.current) return detail;
+    }
+    const defaultPatch = editableDefaultDraftPatch(detail.activeDraft);
+    if (defaultPatch && detail.activeDraft) {
+      await api.updateDemandDraftSession(detail.activeDraft.id, defaultPatch);
       detail = await api.getAgentThread(threadId);
       if (requestId !== agentThreadLoadRequestRef.current) return detail;
     }

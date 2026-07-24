@@ -9,6 +9,7 @@ import {
   deduplicateAgentCardFields,
   demandForAgentThread,
   demandLifecyclePrompt,
+  editableDefaultDraftPatch,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
   orderedAgentDraftFields,
@@ -172,6 +173,60 @@ test("offers one-tap answers without asserting them as user facts", () => {
   const suggestions = agentReplySuggestions({ ...draft, missingFields: ["搭子要求"], canGenerateCard: false, status: "collecting" });
   assert.match(suggestions[0], /年龄相近/);
   assert.equal(agentReplySuggestions({ ...draft, status: "cardGenerated", userConfirmedGenerate: true })[0], "请提出发布确认，不要重新生成卡片");
+});
+
+test("fills a dating preference with an explicit editable default", () => {
+  const collecting = {
+    ...draft,
+    demandType: "dating",
+    knownFields: {
+      活动: "周末约会",
+      地点: "上海",
+    },
+    missingFields: ["偏好"],
+    canGenerateCard: false,
+    status: "collecting",
+  };
+  const patch = editableDefaultDraftPatch(collecting);
+  assert.equal(patch?.knownFields?.["偏好"], "不限，优先礼貌、尊重边界（可编辑默认）");
+  assert.deepEqual(patch?.missingFields, []);
+  assert.equal(patch?.canGenerateCard, true);
+  assert.equal(patch?.status, "readyToConfirm");
+  const reply = reconcileAgentReplyWithDraft("还差一个偏好，请继续补充。", { ...collecting, ...patch });
+  assert.match(reply, /可编辑默认值/);
+  assert.match(reply, /要我现在生成吗/);
+});
+
+test("uses safe generic defaults without inventing an exact address", () => {
+  const collecting = {
+    ...draft,
+    knownFields: { 活动: "Citywalk" },
+    missingFields: ["地点", "时间", "搭子要求"],
+    canGenerateCard: false,
+    status: "collecting",
+  };
+  const patch = editableDefaultDraftPatch(collecting);
+  assert.match(patch?.knownFields?.["地点"] || "", /同城公共场所/);
+  assert.match(patch?.knownFields?.["地点"] || "", /可编辑默认/);
+  assert.doesNotMatch(patch?.knownFields?.["地点"] || "", /路|号|小区|住址/);
+  assert.equal(patch?.knownFields?.["时间"], "时间可协商（可编辑默认）");
+  assert.deepEqual(patch?.missingFields, []);
+});
+
+test("does not fabricate the user's core activity or request", () => {
+  const collecting = {
+    ...draft,
+    knownFields: {},
+    missingFields: ["活动", "地点", "时间", "搭子要求"],
+    canGenerateCard: false,
+    status: "collecting",
+  };
+  const patch = editableDefaultDraftPatch(collecting);
+  assert.equal(patch?.knownFields?.["活动"], undefined);
+  assert.deepEqual(patch?.missingFields, ["活动"]);
+  assert.equal(patch?.canGenerateCard, false);
+  assert.equal(patch?.status, "collecting");
+  assert.match(patch?.lastQuestion || "", /活动/);
 });
 
 test("lifecycle control prompts cannot overwrite the confirmed card facts", () => {

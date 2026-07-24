@@ -66,6 +66,57 @@ function oneQuestion(content: string) {
   }).join("").trim();
 }
 
+// These values deliberately cover only negotiable or safety-oriented fields.
+// Core intent fields (activity, destination, service/request content) and any
+// identity, address or contact detail must still come from the user.
+const editableDefaultValues: Record<string, string> = {
+  "偏好": "不限，优先礼貌、尊重边界（可编辑默认）",
+  "搭子要求": "不限，优先礼貌、尊重边界（可编辑默认）",
+  "水平或偏好": "水平不限，以轻松参与和彼此照顾为主（可编辑默认）",
+  "时间": "时间可协商（可编辑默认）",
+  "地点": "同城公共场所，具体地点可协商（可编辑默认）",
+  "预算": "预算与费用方式可提前协商（可编辑默认）",
+  "数量或人数": "1–2 人，具体人数可协商（可编辑默认）",
+  "人数": "1–2 人，具体人数可协商（可编辑默认）",
+  "边界": "先在线沟通，只在公共场所见面，尊重彼此边界（可编辑默认）",
+  "见面方式": "先在线沟通，只在公共场所见面，尊重彼此边界（可编辑默认）",
+};
+
+export function editableDefaultFieldTitles(session: DemandDraftSession | null | undefined) {
+  if (!session) return [];
+  return Object.entries(session.knownFields || {})
+    .filter(([, value]) => clean(value).includes("可编辑默认"))
+    .map(([title]) => title);
+}
+
+export function editableDefaultDraftPatch(
+  session: DemandDraftSession | null | undefined,
+): Partial<DemandDraftSession> | null {
+  if (!session || session.status === "cardGenerated") return null;
+  const knownFields = { ...(session.knownFields || {}) };
+  const defaulted: string[] = [];
+  for (const field of session.missingFields || []) {
+    if (clean(knownFields[field])) continue;
+    const defaultValue = editableDefaultValues[field];
+    if (!defaultValue) continue;
+    knownFields[field] = defaultValue;
+    defaulted.push(field);
+  }
+  if (!defaulted.length) return null;
+  const missingFields = (session.missingFields || [])
+    .filter((field) => !clean(knownFields[field]));
+  const canGenerateCard = missingFields.length === 0;
+  return {
+    knownFields,
+    missingFields,
+    canGenerateCard,
+    status: canGenerateCard ? "readyToConfirm" : "collecting",
+    lastQuestion: canGenerateCard
+      ? `已用可编辑默认值补全${defaulted.join("、")}；请核对后决定是否生成需求卡。`
+      : `${missingFields[0]}是这次需求的核心信息，你希望是什么样？`,
+  };
+}
+
 export function reconcileAgentReplyWithDraft(
   content: string | null | undefined,
   session: DemandDraftSession | null | undefined,
@@ -90,11 +141,15 @@ export function reconcileAgentReplyWithDraft(
   }
 
   if (session.canGenerateCard && !session.userConfirmedGenerate && session.status !== "cardGenerated") {
+    const defaultedFields = editableDefaultFieldTitles(session);
     const prefix = /还需要|还差|补充|继续追问|不完整/.test(rawPrefix)
       ? "我已经把你刚才说的重点整理好了。"
       : rawPrefix;
     return [
       prefix,
+      defaultedFields.length
+        ? `${defaultedFields.join("、")}已先使用卡片中明确标出的可编辑默认值，你随时可以修改。`
+        : "",
       "现在的信息已经足够整理成一张未发布的需求卡。要我现在生成吗？",
     ].filter(Boolean).join("\n\n");
   }
@@ -420,7 +475,10 @@ export function agentTurnNotice(detail: {
     return "需求卡已生成但尚未发布；你可以继续修改，或准备发布确认。";
   }
   if (draft.canGenerateCard) {
-    return "需求信息已经整理好；只有你明确确认后才会生成需求卡。";
+    const defaultedFields = editableDefaultFieldTitles(draft);
+    return defaultedFields.length
+      ? `${defaultedFields.join("、")}已使用可编辑默认值；核对后由你确认是否生成需求卡。`
+      : "需求信息已经整理好；只有你明确确认后才会生成需求卡。";
   }
   return draft.missingFields.length
     ? `草稿已保存；小福接下来只会确认一个关键点：${draft.missingFields[0]}。`
