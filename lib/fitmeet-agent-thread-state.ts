@@ -255,14 +255,28 @@ export function reconcileDraftWithAssistantSummary(
   return { category, knownFields };
 }
 
-export function preferredAgentThread<T extends { id: string; messageCount?: number; preview?: string | null }>(
+export function preferredAgentThread<T extends { id: string }>(
   threads: T[],
   requestedId: string | null | undefined,
 ) {
   return (requestedId ? threads.find((thread) => thread.id === requestedId) : undefined)
-    ?? threads.find((thread) => Number(thread.messageCount || 0) > 0 || Boolean(clean(thread.preview)))
     ?? threads[0]
     ?? null;
+}
+
+export function demandForAgentThread<
+  T extends { id: string; sourceConversationId?: string | null },
+>(
+  demands: T[],
+  threadId: string | null | undefined,
+  requestedDemandId?: string | null,
+) {
+  if (!threadId) return null;
+  const scoped = demands.filter((demand) => demand.sourceConversationId === threadId);
+  if (requestedDemandId) {
+    return scoped.find((demand) => demand.id === requestedDemandId) ?? null;
+  }
+  return scoped[0] ?? null;
 }
 
 export function agentDraftCanRenderCard(session: DemandDraftSession | null | undefined) {

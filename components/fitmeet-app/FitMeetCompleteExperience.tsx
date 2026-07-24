@@ -29,6 +29,7 @@ import {
   agentReplySuggestions,
   agentTurnNotice,
   canonicalAgentDraftCardPatch,
+  demandForAgentThread,
   demandLifecyclePrompt,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
@@ -241,6 +242,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
   const conversationSyncing = useRef(false);
   const activeAgentThreadIdRef = useRef<string | null>(null);
+  const agentThreadLoadRequestRef = useRef(0);
   const agentThreadSwitchingRef = useRef(false);
   const api = session.api;
   const liveApi = session.state.status === "authenticated";
@@ -292,7 +294,10 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   }, [session.state.session?.user.id]);
 
   const loadAgentThread = useCallback(async (threadId: string, presentDraft = false) => {
+    const requestId = ++agentThreadLoadRequestRef.current;
+    activeAgentThreadIdRef.current = threadId;
     let detail = await api.getAgentThread(threadId);
+    if (requestId !== agentThreadLoadRequestRef.current) return detail;
     const latestAssistant = [...detail.entries]
       .sort((left, right) => right.sequence - left.sequence)
       .find((entry) => entry.kind === "message" && entry.role === "assistant" && entry.content);
@@ -300,6 +305,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (summaryPatch && detail.activeDraft) {
       await api.updateDemandDraftSession(detail.activeDraft.id, summaryPatch);
       detail = await api.getAgentThread(threadId);
+      if (requestId !== agentThreadLoadRequestRef.current) return detail;
     }
     if (detail.activeDraft?.status === "cardGenerated") {
       const canonical = canonicalAgentDraftCardPatch(detail.activeDraft);
@@ -307,8 +313,10 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       if (fieldsChanged || canonical.category !== detail.activeDraft.category) {
         await api.updateDemandDraftSession(detail.activeDraft.id, canonical);
         detail = await api.getAgentThread(threadId);
+        if (requestId !== agentThreadLoadRequestRef.current) return detail;
       }
     }
+    if (requestId !== agentThreadLoadRequestRef.current || activeAgentThreadIdRef.current !== threadId) return detail;
     applyAgentDetail(detail, presentDraft);
     return detail;
   }, [api, applyAgentDetail]);
@@ -338,11 +346,27 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (openDetail) setOverlay("demand");
   }, [api, notice]);
 
+  const openDemandRecord = useCallback(async (record: FitMeetDemand, openDetail = false) => {
+    if (record.sourceConversationId && record.sourceConversationId !== activeAgentThreadIdRef.current) {
+      await loadAgentThread(record.sourceConversationId, true);
+    }
+    await activateDemand(record, openDetail);
+  }, [activateDemand, loadAgentThread]);
+
+  const openAgentThread = useCallback(async (threadId: string) => {
+    const detail = await loadAgentThread(threadId, true);
+    if (!detail.activeDraft) {
+      const linkedDemand = demandForAgentThread(demands, threadId);
+      if (linkedDemand) await activateDemand(linkedDemand);
+    }
+  }, [activateDemand, demands, loadAgentThread]);
+
   const startNewDemand = useCallback(async () => {
     agentThreadSwitchingRef.current = true;
     try {
       const created = await api.createAgentThread();
       activeAgentThreadIdRef.current = created.thread.id;
+      applyAgentDetail({ ...created, activeDraft: null, toolManifest: [] }, true);
       setLiveDemand(null);
       setHasDemand(false);
       setCandidates([]);
@@ -351,13 +375,13 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       await loadAgentThread(created.thread.id, true);
       setOverlay(null);
       setActiveTab("home");
-      notice("已开始一条新需求；之前的需求和匹配记录仍保留在账号中。");
+      notice("已开始一条新对话；旧需求仍保留在“全部需求”中，不会带入这里。");
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : "新的需求暂时无法创建。");
     } finally {
       agentThreadSwitchingRef.current = false;
     }
-  }, [api, loadAgentThread, notice]);
+  }, [api, applyAgentDetail, loadAgentThread, notice]);
 
   const ensureAgentThread = useCallback(async () => {
     if (activeAgentThread && activeAgentThread.id === activeAgentThreadIdRef.current) return activeAgentThread;
@@ -461,6 +485,7 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       if (unreadResult.status === "fulfilled") setUnreadCount(unreadResult.value.unreadCount ?? 0);
       const nextThreads = threadsResult.status === "fulfilled" ? threadsResult.value.items ?? threadsResult.value.data ?? [] : [];
       setAgentThreads(nextThreads);
+      let restoredThreadId: string | null = null;
       let hasRemoteDraft = false;
       try {
         const userId = session.state.session?.user.id;
@@ -471,13 +496,15 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
           ? null
           : preferredAgentThread(nextThreads, activeAgentThreadIdRef.current || rememberedThreadId);
         if (requestedThread) {
-          const detail = await loadAgentThread(requestedThread.id);
+          const detail = await loadAgentThread(requestedThread.id, true);
+          restoredThreadId = detail.thread.id;
           hasRemoteDraft = Boolean(detail.activeDraft);
-          if (hasRemoteDraft) applyAgentDetail(detail, true);
         } else if (threadsResult.status === "fulfilled" && !agentThreadSwitchingRef.current) {
           const created = await api.createAgentThread();
           activeAgentThreadIdRef.current = created.thread.id;
-          await loadAgentThread(created.thread.id);
+          applyAgentDetail({ ...created, activeDraft: null, toolManifest: [] }, true);
+          const detail = await loadAgentThread(created.thread.id, true);
+          restoredThreadId = detail.thread.id;
         }
       } catch (reason) {
         notice(reason instanceof Error ? reason.message : "小福历史暂时无法恢复。");
@@ -485,8 +512,10 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
       const myInvitations = invitationsResult.status === "fulfilled" ? invitationsResult.value : [];
       const acceptedInvitation = myInvitations.find((invitation) => invitation.status === "accepted" && (invitation.meetId || invitation.acceptedMeetId));
       if (acceptedInvitation) setMeet({ id: Number(acceptedInvitation.meetId || acceptedInvitation.acceptedMeetId), status: "scheduled" });
-      const latest = demandsResult.status === "fulfilled" ? demandsResult.value.data[0] : undefined;
-      if (latest && !hasRemoteDraft) await activateDemand(latest);
+      const restoredDemand = demandsResult.status === "fulfilled"
+        ? demandForAgentThread(demandsResult.value.data, restoredThreadId)
+        : null;
+      if (restoredDemand && !hasRemoteDraft) await activateDemand(restoredDemand);
       if (results.every((result) => result.status === "rejected")) notice("未能同步你的 FitMeet 数据，请检查网络后重试。");
     })().catch((reason) => notice(reason instanceof Error ? reason.message : "未能同步你的 FitMeet 数据。"));
   }, [activateDemand, api, applyAgentDetail, liveApi, loadAgentThread, notice, session.state.session?.user.id]);
@@ -1188,10 +1217,12 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
     if (socialApplicationsResult.status === "fulfilled") setOwnerSocialApplications(socialApplicationsResult.value);
     if (taskApplicationsResult.status === "fulfilled") setOwnerTaskApplications(taskApplicationsResult.value);
     if (demandsResult.status === "fulfilled") setDemands(demandsResult.value.data);
-    const latest = demandsResult.status === "fulfilled" ? demandsResult.value.data.find((item) => item.id === liveDemand?.id) ?? demandsResult.value.data[0] : undefined;
-    if (latest) await activateDemand(latest);
     const threadIdToRefresh = activeAgentThreadIdRef.current;
     if (threadIdToRefresh && !agentThreadSwitchingRef.current) await loadAgentThread(threadIdToRefresh);
+    const currentDemand = demandsResult.status === "fulfilled"
+      ? demandForAgentThread(demandsResult.value.data, activeAgentThreadIdRef.current, liveDemand?.id)
+      : null;
+    if (currentDemand) await activateDemand(currentDemand);
     await syncOpenConversation();
     if (results.every((result) => result.status === "rejected")) throw new Error("实时数据暂时无法同步。");
   }, [activateDemand, api, liveApi, liveDemand?.id, loadAgentThread, syncOpenConversation]);
@@ -1303,14 +1334,14 @@ export function FitMeetCompleteExperience({ initialSurface = "main" }: { initial
   </section>
 
   {overlay === "candidate" && selectedCandidate ? <CandidateProfileExperience api={api} candidate={selectedCandidate} candidates={activeCandidates} relationship={relationship} inviteStatus={selectedCandidateInviteStatus} onClose={() => setOverlay(null)} onSelect={(id) => { setSelectedCandidateId(id); setInviteStatus("none"); }} onDismiss={dismissCandidate} onSave={() => recordCandidate(selectedCandidate.id, "saved")} onFriend={() => void requestFriendship()} onInvite={createInvite} onConversation={openDemandConversation} onReport={async () => { await api.reportSafety({ targetType: "user", targetId: selectedCandidate.candidateUserId, targetUserId: selectedCandidate.candidateUserId, reason: "inappropriate_behavior", description: "网页候选人资料举报" }); notice("举报已提交安全审核；不会自动联系对方。"); }} onBlock={async () => { await blockAndRemember({ id: selectedCandidate.candidateUserId, name: selectedCandidate.name, avatar: selectedCandidate.avatar }); setRelationship("blocked"); }} /> : null}
-  {overlay === "demandList" ? <DemandListSheet demands={demands} activeDemandId={liveDemand?.id} onClose={() => setOverlay(null)} onSelect={(record) => void activateDemand(record, true)} onCreate={() => void startNewDemand()} /> : null}
+  {overlay === "demandList" ? <DemandListSheet demands={demands} activeDemandId={liveDemand?.id} onClose={() => setOverlay(null)} onSelect={(record) => void openDemandRecord(record, true)} onCreate={() => void startNewDemand()} /> : null}
   {overlay === "demand" && hasDemand ? <DemandSheet demand={demand} candidateCount={activeCandidates.length} onClose={() => setOverlay(null)} onEdit={() => setOverlay("demandEdit")} onPublish={() => void publishDemand()} onHide={() => void changeDemandStatus("hidden")} onCancel={() => void changeDemandStatus("cancelled")} onCandidates={() => setOverlay("candidate")} onConversation={openDemandConversation} /> : null}
   {overlay === "demandEdit" ? <DemandEditSheet demand={demand} onClose={() => setOverlay(null)} onSave={(next) => void saveDemandDraft(next)} /> : null}
   {overlay === "invitation" && selectedCandidate ? <InviteSheet candidate={selectedCandidate} demand={demand} onClose={() => { setInviteStatus("none"); setOverlay(null); }} onSend={(message) => void sendInvite(message)} /> : null}
   {overlay === "composer" ? <ComposeSheet value={postText} images={postImages} publishing={postPublishing} onChange={setPostText} onFiles={(files) => void selectPostImages(files)} onRemoveImage={(id) => setPostImages((items) => items.filter((item) => item.id !== id))} onClose={() => setOverlay(null)} onPublish={() => void publishPost()} /> : null}
   {overlay === "conversation" && selectedConversation ? <ConversationSheet conversation={selectedConversation} unlocked={!selectedConversationClosed} closed={selectedConversationClosed} items={conversation} input={conversationInput} onInput={setConversationInput} onSend={() => void sendConversation()} onMute={() => void toggleConversationMute()} onRecall={(id) => void recallConversationMessage(id)} onReport={(id) => void reportConversationMessage(id)} onBlock={() => { const targetId = Number(selectedConversation.userId ?? selectedConversation.peer?.id); if (!targetId) return notice("当前会话没有可验证的对方账号，无法拉黑。"); void blockAndRemember({ id: targetId, name: selectedConversation.displayName || selectedConversation.username || selectedConversation.peer?.name, avatar: selectedConversation.avatar || selectedConversation.peer?.avatar }).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "拉黑操作未能完成。")); }} onClose={() => setOverlay(null)} /> : null}
   {overlay === "memory" ? <MemorySheet memories={memories} onClose={() => setOverlay(null)} onSave={saveMemory} onDelete={deleteMemory} /> : null}
-  {overlay === "history" ? <HistorySheet threads={agentThreads} activeThreadId={activeAgentThread?.id} onClose={() => setOverlay(null)} onSelect={(id) => { void loadAgentThread(id, true).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "对话记录暂时无法打开。")); }} onNew={() => void startNewDemand()} /> : null}
+  {overlay === "history" ? <HistorySheet threads={agentThreads} activeThreadId={activeAgentThread?.id} onClose={() => setOverlay(null)} onSelect={(id) => { void openAgentThread(id).then(() => setOverlay(null)).catch((reason) => notice(reason instanceof Error ? reason.message : "对话记录暂时无法打开。")); }} onNew={() => void startNewDemand()} /> : null}
   {overlay === "toolApproval" && selectedToolProposal ? <ToolApprovalSheet key={selectedToolProposal.id} proposal={selectedToolProposal} onClose={() => { setOverlay(null); setSelectedToolProposal(null); }} onResolve={(decision, message) => void resolveToolProposal(decision, message)} /> : null}
   {overlay === "editProfile" ? <EditProfileSheet profile={profile} onClose={() => setOverlay(null)} onSave={saveProfile} /> : null}
   {overlay === "privacy" ? <PrivacySheet profile={profile} onClose={() => setOverlay(null)} onSave={saveProfile} /> : null}

@@ -289,6 +289,7 @@ export type PublicUserProfile = {
 
 export type FitMeetDemand = {
   id: string;
+  sourceConversationId?: string | null;
   type: string;
   title: string;
   summary: string;

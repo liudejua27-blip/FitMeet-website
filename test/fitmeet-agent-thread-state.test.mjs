@@ -7,6 +7,7 @@ import {
   agentTurnNotice,
   canonicalAgentDraftCardPatch,
   deduplicateAgentCardFields,
+  demandForAgentThread,
   demandLifecyclePrompt,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
@@ -201,12 +202,29 @@ test("restores the explicitly selected thread instead of jumping to the latest o
   assert.equal(preferredAgentThread(threads, "missing")?.id, "latest");
 });
 
-test("skips an empty newest thread when no explicit thread was remembered", () => {
+test("keeps the newest empty thread when no explicit thread was remembered", () => {
   const threads = [
     { id: "empty", messageCount: 0, preview: "" },
     { id: "meaningful", messageCount: 4, preview: "Citywalk" },
   ];
-  assert.equal(preferredAgentThread(threads, null)?.id, "meaningful");
+  assert.equal(preferredAgentThread(threads, null)?.id, "empty");
+});
+
+test("does not attach an old demand to a new empty Agent thread", () => {
+  const demands = [
+    { id: "demand-old", sourceConversationId: "thread-old" },
+    { id: "demand-older", sourceConversationId: "thread-older" },
+  ];
+  assert.equal(demandForAgentThread(demands, "thread-new"), null);
+});
+
+test("restores only the demand created by the active Agent thread", () => {
+  const demands = [
+    { id: "demand-latest", sourceConversationId: "thread-other" },
+    { id: "demand-current", sourceConversationId: "thread-current" },
+  ];
+  assert.equal(demandForAgentThread(demands, "thread-current")?.id, "demand-current");
+  assert.equal(demandForAgentThread(demands, "thread-current", "demand-latest"), null);
 });
 
 test("aligns card fields with explicit facts from the same server assistant reply", () => {
