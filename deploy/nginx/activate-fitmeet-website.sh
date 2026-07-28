@@ -24,6 +24,14 @@ systemctl enable --now nginx
 systemctl reload nginx
 
 env PATH="${PATH}:/usr/local/bin" pm2 startup systemd -u deploy --hp /home/deploy
-systemctl enable --now pm2-deploy
+# The website was initially started manually by the deploy user.  Stop that
+# daemon before starting its systemd owner, otherwise Type=forking cannot
+# observe the expected PM2 PID and systemd marks a healthy process as failed.
+runuser -u deploy -- env PATH="${PATH}:/usr/local/bin" PM2_HOME=/home/deploy/.pm2 pm2 kill || true
+systemctl daemon-reload
+systemctl reset-failed pm2-deploy
+systemctl enable pm2-deploy
+systemctl start pm2-deploy
+systemctl is-active --quiet pm2-deploy
 
 echo "FitMeet website HTTPS is active. Verify https://fitmeet.cn/nginx-health"
