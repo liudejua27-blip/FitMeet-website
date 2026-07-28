@@ -13,7 +13,7 @@ const nextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
-      "connect-src 'self' https://api.fitmeet.cn wss://api.fitmeet.cn https://api.ourfitmeet.cn wss://api.ourfitmeet.cn",
+      "connect-src 'self' https://api.fitmeet.cn wss://api.fitmeet.cn",
       "media-src 'self' blob:",
       "worker-src 'self' blob:",
       "manifest-src 'self'",
@@ -24,7 +24,9 @@ const nextConfig = {
       source: "/(.*)",
       headers: [
         { key: "Content-Security-Policy", value: contentSecurityPolicy },
-        { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+        // api.fitmeet.cn does not yet have its own TLS certificate, so do not
+        // instruct browsers to preload HTTPS for every subdomain.
+        { key: "Strict-Transport-Security", value: "max-age=31536000" },
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "X-Frame-Options", value: "DENY" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
