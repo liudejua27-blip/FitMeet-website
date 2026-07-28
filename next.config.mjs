@@ -13,7 +13,7 @@ const nextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
-      "connect-src 'self' https://api.ourfitmeet.cn wss://api.ourfitmeet.cn",
+      "connect-src 'self' https://api.fitmeet.cn wss://api.fitmeet.cn https://api.ourfitmeet.cn wss://api.ourfitmeet.cn",
       "media-src 'self' blob:",
       "worker-src 'self' blob:",
       "manifest-src 'self'",

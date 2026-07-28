@@ -1,4 +1,4 @@
-const rawSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://fitmeet.app";
+const rawSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://fitmeet.cn";
 
 export const configuredSiteUrl = rawSiteUrl.replace(/\/$/, "");
 

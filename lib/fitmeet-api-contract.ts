@@ -6,7 +6,7 @@
  * mini-program client; this module deliberately does not invent web-only
  * endpoints.
  */
-export const FITMEET_API_BASE_URL = process.env.NEXT_PUBLIC_FITMEET_API_BASE_URL ?? "https://api.ourfitmeet.cn/api";
+export const FITMEET_API_BASE_URL = process.env.NEXT_PUBLIC_FITMEET_API_BASE_URL ?? "https://api.fitmeet.cn/api";
 export const FITMEET_REALTIME_BASE_URL = FITMEET_API_BASE_URL.replace(/\/api\/?$/, "");
 
 export const fitMeetPaths = {

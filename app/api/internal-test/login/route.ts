@@ -13,7 +13,7 @@ type InternalTester = {
   label?: string;
 };
 
-const defaultApiBase = "https://api.ourfitmeet.cn/api";
+const defaultApiBase = "https://api.fitmeet.cn/api";
 const refreshCookie = "fitmeet_internal_refresh";
 const attemptWindowMs = 10 * 60 * 1000;
 const maxAttempts = 8;

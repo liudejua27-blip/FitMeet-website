@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const refreshCookie = "fitmeet_internal_refresh";
-const defaultApiBase = "https://api.ourfitmeet.cn/api";
+const defaultApiBase = "https://api.fitmeet.cn/api";
 
 function apiBase() {
   return (process.env.FITMEET_API_BASE_URL || process.env.NEXT_PUBLIC_FITMEET_API_BASE_URL || defaultApiBase).replace(/\/$/, "");
