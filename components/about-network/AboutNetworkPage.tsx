@@ -7,6 +7,7 @@ import { FiArrowDown, FiArrowUpRight } from "react-icons/fi";
 import { SiteNavigation } from "@/components/site-shell/SiteNavigation";
 import { SiteFooter } from "@/components/site-shell/SiteFooter";
 import { aboutBeliefs, aboutHorizon } from "@/lib/about-network-content";
+import { siteConfig } from "@/lib/site-config";
 import { useAboutNetworkMotion } from "./useAboutNetworkMotion";
 import styles from "./about-network.module.css";
 
@@ -159,7 +160,7 @@ function AboutHandoff() {
 function CompanyProof() {
   return (
     <section className={styles.companyProof} aria-label="FitMeet 企业信息">
-      <header><span>公司 / 当前状态</span><h2>只公开已经确认的事</h2><p>FitMeet 当前专注于苹果端应用与企业宣传官网公司主体、团队规模与办公地点将在确认可公开后补充不用虚构信息制造成熟感</p></header>
+      <header><span>公司 / 当前状态</span><h2>只公开已经确认的事</h2><p>FitMeet 由 {siteConfig.companyName} 运营，当前专注于苹果端应用与企业宣传官网；团队规模与办公地点将在确认可公开后补充，不虚构信息制造成熟感。</p></header>
       <div>
         <article><span>现在</span><strong>辅助型社交助手</strong><p>帮助整理需求、条件与计划不替用户邀请、承诺或建立关系</p></article>
         <article><span>合作</span><strong>真实场景合作</strong><p>面向运动空间、旅行户外、青年品牌、媒体与安全研究交流</p></article>

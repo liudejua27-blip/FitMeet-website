@@ -12,7 +12,10 @@ const footerLinks = [
 export function SiteFooter() {
   return (
     <footer className={styles.footer} data-site-footer>
-      <span>© {siteConfig.copyrightYear} FitMeet</span>
+      <div className={styles.operator}>
+        <span>© {siteConfig.copyrightYear} {siteConfig.companyName} · {siteConfig.name}</span>
+        <a href={`mailto:${siteConfig.contactEmail}`}>{siteConfig.contactEmail}</a>
+      </div>
       <div className={styles.legalCenter}>
         <nav aria-label="页脚导航">
           {footerLinks.map((link) => <Link href={link.href} key={link.href}>{link.label}</Link>)}
