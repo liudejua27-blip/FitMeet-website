@@ -25,10 +25,10 @@
 - About 已增加当前阶段、合作方向与 Contact 企业信息区；未虚构公司主体、团队规模和办公地点。
 - Agent 已增加 Safety 与 App 出口；Safety 已增加 Guidelines、Support 与 Contact 出口。
 - Agent 与 Safety 首屏图片改用 Next Image 优化路径，并提升首屏浅色正文对比度。
-- 已核对活跃长页面资源：首屏 PNG 由 Next Image 优化，明确保留 `unoptimized` 的章节素材均为约 500 KB 或更小的桌面 JPG；47 MB enterprise 素材库只服务已归档旧首页，不进入活跃页面引用。
+- 已核对活跃长页面资源：首屏 PNG 由 Next Image 优化，明确保留 `unoptimized` 的章节素材均为约 500 KB 或更小的桌面 JPG；enterprise 素材库不进入活跃页面引用，继续作为企业官网原始素材保留。
 - 新增 `sitemap.ts`、`robots.ts`、canonical、Open Graph/Twitter 图片配置与 `.env.example`。
 - `metadataBase` 不再回退到 `localhost`；默认使用仓库已登记的 `https://fitmeet.app`，正式部署仍应显式设置 `NEXT_PUBLIC_SITE_URL`。
-- 旧 `ArrivalAtlasHomepage` 已移出正式组件目录，归档到 `archive/legacy-home/`；正式首页来源已唯一化。
+- 旧 `ArrivalAtlasHomepage` 已从正式组件目录和工作树清理；历史实现仍可通过 Git 历史追溯，正式首页来源已唯一化。
 
 ### 仍依赖外部确认
 
@@ -119,7 +119,7 @@
 - 可合作方向：运动空间、城市活动、旅行与户外、青年品牌、社区安全。
 - 明确回复预期，不使用无法兑现的“24 小时回复”等承诺。
 
-当前仓库中旧的 `ArrivalAtlasHomepage` 仍保留合作章节和 `mailto:`，但当前 `/` 已切换到 `SocialWorldHomepage`，这些内容实际上没有出现在用户路径中。应把有价值的合作信息迁移到正式可访问页面，而不是继续依赖未使用的旧首页组件。
+整改前，旧 `ArrivalAtlasHomepage` 曾保留合作章节和 `mailto:`，但 `/` 已切换到 `SocialWorldHomepage`，这些内容没有出现在用户路径中。本轮已将有价值的合作信息迁移到正式可访问页面，并从工作树清理旧首页实现。
 
 ### P0：品牌化 404
 
@@ -498,15 +498,15 @@
 
 全局 `metadataBase` 在未配置环境变量时回退到 `http://localhost:3000`，发布流程必须保证正式环境设置正确。
 
-### 5.10 旧首页代码形成维护歧义
+### 5.10 旧首页代码形成维护歧义（已整改）
 
-当前 `/` 使用 `SocialWorldHomepage`，但仓库仍保留完整的 `ArrivalAtlasHomepage`、对应 CSS、文案与图片映射。两套首页方向并存会造成：
+整改前，`/` 已使用 `SocialWorldHomepage`，仓库却仍保留完整的 `ArrivalAtlasHomepage`、对应 CSS、文案与图片映射。两套首页方向并存会造成：
 
 - 后续维护者不知道哪一套是正式版本。
 - 旧版已有的合作 CTA、表单和企业章节不会被用户看到。
 - 修改可能落到未使用组件上。
 
-建议确认正式首页方向后，将旧版本归档到明确目录或删除无用实现，并把仍有价值的内容迁移到正式页面。
+正式首页方向现已确认；旧实现已从工作树删除，仍有价值的内容已迁移到正式页面，历史版本可通过 Git 追溯。
 
 ## 6. 建议实施顺序
 
