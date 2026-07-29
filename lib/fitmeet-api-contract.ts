@@ -285,6 +285,11 @@ export type PublicUserProfile = {
   avatar?: string | null;
   city?: string | null;
   status?: string;
+  bio?: string | null;
+  interests?: string[];
+  verificationStatus?: string | null;
+  relationship?: RelationshipState;
+  connectionRequest?: FitMeetConnectionRequest | null;
 };
 
 export type FitMeetDemand = {
@@ -509,6 +514,8 @@ export type ConversationMessage = {
   status?: string;
   lifecycleStatus?: string;
   recalledAt?: string | null;
+  clientMessageId?: string | null;
+  localStatus?: "sending" | "failed";
 };
 
 export type DemandDraftSession = {

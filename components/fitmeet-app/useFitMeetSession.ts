@@ -44,7 +44,8 @@ export function useFitMeetSession() {
   }, [api, loadAuthenticatedState]);
 
   useEffect(() => {
-    void refresh().catch(() => {
+    const timeout = new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("SESSION_CHECK_TIMEOUT")), 4500));
+    void Promise.race([refresh(), timeout]).catch(() => {
       storedRef.current = null;
       // Remove credentials left by earlier website versions. Refresh tokens
       // now live only in an HttpOnly cookie and access tokens stay in memory.
