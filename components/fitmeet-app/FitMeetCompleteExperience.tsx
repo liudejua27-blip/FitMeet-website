@@ -196,10 +196,6 @@ function likedMomentsKey(userId: number) {
   return `fitmeet:web-liked-moments:v1:${userId}`;
 }
 
-function blockedUsersKey(userId: number) {
-  return `fitmeet:web-blocked-users:v1:${userId}`;
-}
-
 function closedConversationsKey(userId: number) {
   return `fitmeet:web-closed-conversations:v1:${userId}`;
 }
@@ -430,6 +426,8 @@ export function FitMeetCompleteExperience({
   const [outgoingConnections, setOutgoingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUserRecord[]>([]);
+  const [blockedUsersLoading, setBlockedUsersLoading] = useState(false);
+  const [blockedUsersError, setBlockedUsersError] = useState(false);
   const [closedConversationIds, setClosedConversationIds] = useState<string[]>([]);
   const [friends, setFriends] = useState<PublicUserProfile[]>([]);
   const [publicUser, setPublicUser] = useState<PublicUserProfile | null>(null);
@@ -471,6 +469,23 @@ export function FitMeetCompleteExperience({
     selectedConversation && closedConversationIds.includes(selectedConversation.id),
   );
   const notice = useCallback((message: string) => setToast(message), []);
+  const refreshBlockedUsers = useCallback(async () => {
+    if (session.state.status !== 'authenticated') {
+      setBlockedUsers([]);
+      setBlockedUsersError(false);
+      return;
+    }
+    setBlockedUsersLoading(true);
+    setBlockedUsersError(false);
+    try {
+      setBlockedUsers(await api.listBlockedUsers());
+    } catch (reason) {
+      setBlockedUsersError(true);
+      throw reason;
+    } finally {
+      setBlockedUsersLoading(false);
+    }
+  }, [api, session.state.status]);
   const deepLinkedUserId = initialExperience === 'user' ? Number(initialEntityId) || 0 : 0;
   const deepLinkedPost =
     initialExperience === 'post'
@@ -702,11 +717,6 @@ export function FitMeetCompleteExperience({
       setLikedPostIds(
         readStoredArray<number>(likedMomentsKey(userId)).filter((id) => Number.isInteger(id)),
       );
-      setBlockedUsers(
-        readStoredArray<BlockedUserRecord>(blockedUsersKey(userId)).filter(
-          (item) => Number.isInteger(item?.id) && typeof item?.name === 'string',
-        ),
-      );
       setClosedConversationIds(
         readStoredArray<string>(closedConversationsKey(userId)).filter(
           (id) => typeof id === 'string' && id,
@@ -714,6 +724,11 @@ export function FitMeetCompleteExperience({
       );
     }
   }, [session.state.session?.user.id, session.state.status]);
+
+  useEffect(() => {
+    if (session.state.status !== 'authenticated') return;
+    void refreshBlockedUsers().catch(() => undefined);
+  }, [refreshBlockedUsers, session.state.session?.user.id, session.state.status]);
 
   const updateNotificationPreference = async (enabled: boolean) => {
     if (enabled && typeof window !== 'undefined' && 'Notification' in window) {
@@ -1561,13 +1576,10 @@ export function FitMeetCompleteExperience({
   const rememberBlockedUser = useCallback(
     (record: BlockedUserRecord) => {
       setBlockedUsers((current) => {
-        const next = [record, ...current.filter((item) => item.id !== record.id)];
-        const userId = session.state.session?.user.id;
-        if (userId) writeStoredArray(blockedUsersKey(userId), next);
-        return next;
+        return [record, ...current.filter((item) => item.id !== record.id)];
       });
     },
-    [session.state.session?.user.id],
+    [],
   );
 
   const blockAndRemember = async (target: {
@@ -1582,6 +1594,7 @@ export function FitMeetCompleteExperience({
       avatar: target.avatar,
       blockedAt: new Date().toISOString(),
     });
+    void refreshBlockedUsers().catch(() => undefined);
     const affectedConversationIds = conversations
       .filter((item) => conversationPeerId(item) === Number(target.id))
       .map((item) => item.id);
@@ -1594,18 +1607,13 @@ export function FitMeetCompleteExperience({
     setCandidates((items) =>
       items.filter((item) => Number(item.candidateUserId) !== Number(target.id)),
     );
-    notice('已拉黑；服务端会停止推荐和后续私信，当前设备也已记录。');
+    notice('已拉黑；服务端会停止推荐和后续私信。');
   };
 
   const unblockKnownUser = async (target: BlockedUserRecord) => {
     try {
       await api.unblockUser(target.id);
-      setBlockedUsers((current) => {
-        const next = current.filter((item) => item.id !== target.id);
-        const userId = session.state.session?.user.id;
-        if (userId) writeStoredArray(blockedUsersKey(userId), next);
-        return next;
-      });
+      setBlockedUsers((current) => current.filter((item) => item.id !== target.id));
       notice(
         `已解除对 ${target.name} 的拉黑；旧会话不会自动恢复，需要重新匹配或建立关系后再聊天。`,
       );
@@ -2184,12 +2192,7 @@ export function FitMeetCompleteExperience({
   const unblockProfileUser = async (user: PublicUserProfile) => {
     try {
       await api.unblockUser(user.id);
-      setBlockedUsers((current) => {
-        const next = current.filter((item) => Number(item.id) !== Number(user.id));
-        const currentUserId = session.state.session?.user.id;
-        if (currentUserId) writeStoredArray(blockedUsersKey(currentUserId), next);
-        return next;
-      });
+      setBlockedUsers((current) => current.filter((item) => Number(item.id) !== Number(user.id)));
       setPublicUser((current) =>
         current && Number(current.id) === Number(user.id)
           ? { ...current, relationship: 'none' }
@@ -2552,6 +2555,8 @@ export function FitMeetCompleteExperience({
               }
               relationshipCount={incomingConnections.length + outgoingConnections.length}
               blockedUsers={blockedUsers}
+              blockedUsersLoading={blockedUsersLoading}
+              blockedUsersError={blockedUsersError}
               onPhotosChange={setProfilePhotos}
               onNotice={notice}
               onEdit={() => setOverlay('editProfile')}
@@ -2573,6 +2578,7 @@ export function FitMeetCompleteExperience({
                 }
               }}
               onUnblockUser={unblockKnownUser}
+              onRefreshBlockedUsers={refreshBlockedUsers}
             />
           ) : null}
         </div>

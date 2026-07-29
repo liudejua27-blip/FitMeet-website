@@ -123,6 +123,8 @@ test('feed, notification and safety calls stay separate and server-authoritative
     await api.createFeedComment(7, '愿意参加');
     await api.reportFeedComment(7, 8, 'harassment');
     await api.acknowledgeAgentInboxEvents(['event-a', 'event-b']);
+    await api.listSafetyReports();
+    await api.listBlockedUsers();
     await api.reportSafety({
       targetUserId: 42,
       targetType: 'user',
@@ -142,6 +144,8 @@ test('feed, notification and safety calls stay separate and server-authoritative
       ['POST', '/feed/posts/7/comments'],
       ['POST', '/feed/posts/7/comments/8/reports'],
       ['POST', '/agent-inbox/events/ack'],
+      ['GET', '/safety/reports'],
+      ['GET', '/safety/blocks'],
       ['POST', '/safety/reports'],
       ['POST', '/safety/blocks/42'],
       ['DELETE', '/safety/blocks/42'],
@@ -153,13 +157,50 @@ test('feed, notification and safety calls stay separate and server-authoritative
     description: '网页端用户举报动态评论',
   });
   assert.deepEqual(body(calls[4]), { ids: ['event-a', 'event-b'] });
-  assert.deepEqual(body(calls[5]), {
+  assert.deepEqual(body(calls[7]), {
     targetUserId: 42,
     targetType: 'user',
     targetId: 42,
     reason: 'harassment',
     description: '多次骚扰',
   });
+});
+
+test('server block list is normalized for shared Web profile state', async () => {
+  let blockedUsers;
+  const calls = await recordRequests(
+    async (api) => {
+      blockedUsers = await api.listBlockedUsers();
+    },
+    () =>
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              blockedUserId: 42,
+              user: { id: 42, name: '林川', avatar: null, city: '青岛', status: 'active' },
+              reason: 'user_block',
+              createdAt: '2026-07-29T01:00:00.000Z',
+            },
+          ],
+          total: 1,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+  );
+
+  assert.deepEqual(blockedUsers, [
+    {
+      id: 42,
+      name: '林川',
+      avatar: null,
+      city: '青岛',
+      reason: 'user_block',
+      blockedAt: '2026-07-29T01:00:00.000Z',
+    },
+  ]);
+  assert.equal(calls[0].url, `${baseUrl}/safety/blocks`);
+  assertAuthorized(calls[0]);
 });
 
 test('API errors expose authoritative status, code and details instead of fake success', async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiAward, FiBell, FiBriefcase, FiCamera, FiCheck, FiChevronRight, FiDownload, FiEdit3, FiEye, FiImage, FiLock, FiLogOut, FiPlus, FiSettings, FiShield, FiSliders, FiTrash2, FiUpload, FiUsers, FiX } from "react-icons/fi";
+import { FiAward, FiBell, FiBriefcase, FiCamera, FiCheck, FiChevronRight, FiDownload, FiEdit3, FiEye, FiImage, FiLock, FiLogOut, FiPlus, FiRefreshCw, FiSettings, FiShield, FiSliders, FiTrash2, FiUpload, FiUsers, FiX } from "react-icons/fi";
 import type { BlockedUserRecord, FeedPost, FitMeetProfilePhoto, PublicUserProfile, SocialProfile, UserAdvantage, UserVerification } from "@/lib/fitmeet-api-contract";
 import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
 import { useAccessibleDialog } from "./useAccessibleDialog";
@@ -18,7 +18,7 @@ function ProfilePanelShell({ title, children, onClose }: { title: string; childr
   return <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}><section ref={dialogRef} tabIndex={-1} className={`${styles.sheet} ${styles.profilePanelSheet}`} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}><div className={styles.sheetHandle} /><header><h2>{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><FiX /></button></header>{children}</section></div>;
 }
 
-export function ProfileExperience({ api, userId, profile, photos, notificationEnabled, postCount, relationshipCount, blockedUsers, onPhotosChange, onNotice, onEdit, onPrivacy, onNotification, onRelationships, onReboard, onSafety, onMoments, onLogout, onBlockUser, onUnblockUser }: {
+export function ProfileExperience({ api, userId, profile, photos, notificationEnabled, postCount, relationshipCount, blockedUsers, blockedUsersLoading, blockedUsersError, onPhotosChange, onNotice, onEdit, onPrivacy, onNotification, onRelationships, onReboard, onSafety, onMoments, onLogout, onBlockUser, onUnblockUser, onRefreshBlockedUsers }: {
   api: FitMeetApiClient;
   userId: number;
   profile: SocialProfile;
@@ -27,6 +27,8 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   postCount: number;
   relationshipCount: number;
   blockedUsers: BlockedUserRecord[];
+  blockedUsersLoading: boolean;
+  blockedUsersError: boolean;
   onPhotosChange: (photos: FitMeetProfilePhoto[]) => void;
   onNotice: (message: string) => void;
   onEdit: () => void;
@@ -39,6 +41,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   onLogout: () => void;
   onBlockUser: (user: PublicUserProfile) => Promise<void>;
   onUnblockUser: (user: BlockedUserRecord) => Promise<void>;
+  onRefreshBlockedUsers: () => Promise<void>;
 }) {
   const [panel, setPanel] = useState<ProfilePanel>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -237,9 +240,9 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
     {panel === "friends" ? <ProfilePanelShell title="好友列表" onClose={() => setPanel(null)}><p className={styles.sheetLead}>这里只展示双方已确认的关系。解除好友与拉黑是两个独立动作。</p><div className={styles.profileDataList}>{friends.length ? friends.map((friend) => <article key={friend.id}>{friend.avatar ? <img src={friend.avatar} alt={`${friend.name}头像`} /> : <span>{friend.name.slice(0, 1)}</span>}<div><strong>{friend.name}</strong><small>{pendingBlockUserId === friend.id ? "再次点击盾牌确认拉黑" : friend.city || "城市未公开"}</small></div><aside className={styles.profileRecordActions}><button type="button" aria-label="解除好友" onClick={() => void removeFriend(friend)}><FiTrash2 /></button><button type="button" aria-label={pendingBlockUserId === friend.id ? "确认拉黑用户" : "拉黑用户"} onClick={() => { if (pendingBlockUserId === friend.id) { void onBlockUser(friend); setPendingBlockUserId(null); } else setPendingBlockUserId(friend.id); }}><FiShield /></button></aside></article>) : <p className={styles.emptyState}>还没有双方确认的好友。</p>}</div></ProfilePanelShell> : null}
 
-    {panel === "settings" ? <ProfilePanelShell title="更多设置" onClose={() => setPanel(null)}><label className={styles.switchRow}><span><strong>前台实时通知</strong><small>私信、互动和邀请在网页打开时实时更新</small></span><input type="checkbox" checked={notificationEnabled} onChange={(event) => onNotification(event.target.checked)} /><i /></label><div className={styles.settingsActions}><button type="button" onClick={onPrivacy}><FiEye /> 隐私与资料可见范围</button><button type="button" onClick={onRelationships}><FiUsers /> 好友与申请</button><button type="button" onClick={() => setPanel("blocklist")}><FiShield /> 黑名单</button><button type="button" onClick={onSafety}><FiLock /> 账号安全</button><button type="button" onClick={onReboard}><FiSliders /> 重新完善资料</button><button type="button" onClick={() => setPanel("closure")}><FiTrash2 /> 数据导出与注销账号</button><button type="button" onClick={onLogout}><FiLogOut /> 退出登录</button></div><p className={styles.sheetSafety}><FiShield /> 网页关闭后不宣称有后台推送；消息仍会保存在服务端。</p></ProfilePanelShell> : null}
+    {panel === "settings" ? <ProfilePanelShell title="更多设置" onClose={() => setPanel(null)}><label className={styles.switchRow}><span><strong>前台实时通知</strong><small>私信、互动和邀请在网页打开时实时更新</small></span><input type="checkbox" checked={notificationEnabled} onChange={(event) => onNotification(event.target.checked)} /><i /></label><div className={styles.settingsActions}><button type="button" onClick={onPrivacy}><FiEye /> 隐私与资料可见范围</button><button type="button" onClick={onRelationships}><FiUsers /> 好友与申请</button><button type="button" onClick={() => { setPanel("blocklist"); void onRefreshBlockedUsers().catch(() => undefined); }}><FiShield /> 黑名单</button><button type="button" onClick={onSafety}><FiLock /> 账号安全</button><button type="button" onClick={onReboard}><FiSliders /> 重新完善资料</button><button type="button" onClick={() => setPanel("closure")}><FiTrash2 /> 数据导出与注销账号</button><button type="button" onClick={onLogout}><FiLogOut /> 退出登录</button></div><p className={styles.sheetSafety}><FiShield /> 网页关闭后不宣称有后台推送；消息仍会保存在服务端。</p></ProfilePanelShell> : null}
 
-    {panel === "blocklist" ? <ProfilePanelShell title="黑名单" onClose={() => setPanel(null)}>{blockedUsers.length ? <div className={styles.profileDataList}>{blockedUsers.map((user) => <article key={user.id}>{user.avatar ? <img src={user.avatar} alt={`${user.name}头像`} /> : <span>{user.name.slice(0, 1)}</span>}<div><strong>{user.name}</strong><small>{new Date(user.blockedAt).toLocaleDateString("zh-CN")} · 当前设备已确认</small></div><button type="button" aria-label={`解除拉黑 ${user.name}`} onClick={() => void onUnblockUser(user)}><FiX /></button></article>)}</div> : <section className={styles.blocklistEmpty}><FiShield /><strong>当前设备没有已确认记录</strong><p>拉黑成功后，对方会从推荐和私信入口中隐藏。</p></section>}<div className={styles.detailRows}><div><span>服务端</span><b>实际限制关系</b></div><div><span>当前设备</span><b>记录已确认对象</b></div></div><p className={styles.sheetSafety}><FiShield /> MobileAPI 暂无黑名单列表接口，因此这里只展示本设备确认过的记录；解除操作仍会写入服务端。</p></ProfilePanelShell> : null}
+    {panel === "blocklist" ? <ProfilePanelShell title="黑名单" onClose={() => setPanel(null)}>{blockedUsersLoading && !blockedUsers.length ? <section className={styles.blocklistEmpty}><FiRefreshCw /><strong>正在读取黑名单</strong><p>从 FitMeet 服务端恢复已生效的拉黑关系。</p></section> : blockedUsersError ? <section className={styles.blocklistEmpty}><FiShield /><strong>黑名单暂时无法读取</strong><p>当前不会把空列表当成真实状态。</p><button type="button" onClick={() => void onRefreshBlockedUsers().catch(() => undefined)}><FiRefreshCw /> 重新加载</button></section> : blockedUsers.length ? <div className={styles.profileDataList}>{blockedUsers.map((user) => <article key={user.id}>{user.avatar ? <img src={user.avatar} alt={`${user.name}头像`} /> : <span>{user.name.slice(0, 1)}</span>}<div><strong>{user.name}</strong><small>{new Date(user.blockedAt).toLocaleDateString("zh-CN")} · 服务端已确认</small></div><button type="button" aria-label={`解除拉黑 ${user.name}`} onClick={() => void onUnblockUser(user)}><FiX /></button></article>)}</div> : <section className={styles.blocklistEmpty}><FiShield /><strong>暂无生效中的拉黑关系</strong><p>这里不会插入本地记录或模拟用户。</p></section>}<div className={styles.detailRows}><div><span>状态来源</span><b>FitMeet 服务端</b></div><div><span>解除后</span><b>旧关系与会话不恢复</b></div></div><p className={styles.sheetSafety}><FiShield /> 拉黑和解除都以服务端回执为准，并在 Web 与 iOS 之间保持一致。</p></ProfilePanelShell> : null}
 
     {panel === "closure" ? <ProfilePanelShell title="数据与账号" onClose={() => setPanel(null)}><p className={styles.sheetLead}>注销是高风险操作。你可以先从后端导出账号数据；注销必须输入完整确认文字。</p><button type="button" className={styles.secondaryButton} disabled={accountBusy} onClick={() => void exportAccount()}><FiDownload /> {accountBusy ? "处理中…" : "导出我的数据"}</button><div className={styles.closurePanel}><strong>注销前请确认</strong><p>照片、动态和资料将不再公开；私信和互动会停止，必要安全审计按平台规则保留。</p><label><span>输入“注销账号”继续</span><input value={closureText} onChange={(event) => setClosureText(event.target.value)} placeholder="注销账号" /></label><button type="button" className={styles.dangerButton} disabled={closureText.trim() !== "注销账号" || accountBusy} onClick={() => void closeAccount()}>{accountBusy ? "正在提交…" : "确认注销账号"}</button></div></ProfilePanelShell> : null}
   </div>;

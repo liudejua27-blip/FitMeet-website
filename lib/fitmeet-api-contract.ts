@@ -127,6 +127,7 @@ export const fitMeetPaths = {
   },
   safety: {
     reports: "/safety/reports",
+    blocks: "/safety/blocks",
     block: (id: number) => `/safety/blocks/${id}`,
   },
 } as const;
@@ -393,7 +394,35 @@ export type BlockedUserRecord = {
   id: number;
   name: string;
   avatar?: string | null;
+  city?: string | null;
+  reason?: string | null;
   blockedAt: string;
+};
+
+export type SafetyBlockListResponse = {
+  items: Array<{
+    blockedUserId: number;
+    user: PublicUserProfile;
+    reason?: string | null;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+  }>;
+  total?: number;
+};
+
+export type SafetyReportRecord = {
+  id: number;
+  targetType?: string | null;
+  targetId?: string | null;
+  reason?: string | null;
+  status: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type SafetyReportListResponse = {
+  items: SafetyReportRecord[];
+  total?: number;
 };
 
 export type FitMeetAgentMemory = {

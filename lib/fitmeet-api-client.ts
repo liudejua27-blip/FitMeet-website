@@ -38,6 +38,8 @@ import {
   type OnboardingStatus,
   type RawAuthSession,
   type RequestOptions,
+  type SafetyBlockListResponse,
+  type SafetyReportListResponse,
   type SafetyReportPayload,
   type SocialProfile,
 } from './fitmeet-api-contract.ts';
@@ -924,6 +926,27 @@ export class FitMeetApiClient {
       body: payload,
       idempotencyKey: `web-safety-report-${crypto.randomUUID()}`,
     });
+  }
+  async listSafetyReports() {
+    const payload = await this.request<SafetyReportListResponse>({
+      method: 'GET',
+      path: fitMeetPaths.safety.reports,
+    });
+    return payload.items ?? [];
+  }
+  async listBlockedUsers() {
+    const payload = await this.request<SafetyBlockListResponse>({
+      method: 'GET',
+      path: fitMeetPaths.safety.blocks,
+    });
+    return (payload.items ?? []).map((record) => ({
+      id: record.blockedUserId,
+      name: record.user.name || 'FitMeet 用户',
+      avatar: record.user.avatar,
+      city: record.user.city,
+      reason: record.reason,
+      blockedAt: record.createdAt || record.updatedAt || '',
+    }));
   }
   blockUser(id: number) {
     return this.request({
