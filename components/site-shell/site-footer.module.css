@@ -16,7 +16,7 @@
 }
 .legalCenter { display: grid; justify-items: center; gap: 12px; padding-block: 18px; }
 .operator { display: grid; justify-items: start; gap: 7px; }
-.footer nav { display: flex; align-items: center; justify-content: center; gap: clamp(18px, 2.2vw, 34px); }
+.footer nav { display: flex; max-width: 680px; flex-wrap: wrap; align-items: center; justify-content: center; column-gap: clamp(18px, 2.2vw, 34px); row-gap: 10px; }
 .footer a { color: rgba(255,255,255,.66); transition: color 180ms ease; }
 .footer a:hover, .footer a:focus-visible { color: #fff; }
 .toTop { display: inline-flex; align-items: center; justify-self: end; gap: 9px; }

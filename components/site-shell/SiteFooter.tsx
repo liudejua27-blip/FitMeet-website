@@ -5,7 +5,9 @@ import styles from "./site-footer.module.css";
 const footerLinks = [
   { href: "/community-guidelines", label: "社区准则" },
   { href: "/privacy", label: "隐私政策" },
+  { href: "/privacy/third-parties", label: "第三方信息清单" },
   { href: "/terms", label: "服务条款" },
+  { href: "/legal/versions", label: "法律版本" },
   { href: "/contact", label: "联系" },
 ] as const;
 
@@ -13,7 +15,7 @@ export function SiteFooter() {
   return (
     <footer className={styles.footer} data-site-footer>
       <div className={styles.operator}>
-        <span>© {siteConfig.copyrightYear} {siteConfig.companyName} · {siteConfig.name}</span>
+        <span>© {siteConfig.copyrightYear} {siteConfig.legalEntityName} · {siteConfig.name}</span>
         <a href={`mailto:${siteConfig.contactEmail}`}>{siteConfig.contactEmail}</a>
       </div>
       <div className={styles.legalCenter}>
