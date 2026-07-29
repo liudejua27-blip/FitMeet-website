@@ -13,9 +13,15 @@ export type LiveCandidate = CandidateViewModel & {
   safetyState?: string;
   verificationStatus?: string;
   profileCompleteness?: number | null;
+  dataQuality?: string;
   lastActiveText?: string | null;
   explanationSignals?: string[];
+  missingSignals?: string[];
   boundaryNotes?: string[];
+  confidenceLevel?: string;
+  safeFirstStep?: string;
+  nextActionSuggestion?: string;
+  requiresConfirmation?: boolean;
 };
 
 export function demandStatus(status: string, candidateCount = 0): DemandViewModel["status"] {
@@ -92,9 +98,15 @@ export function displayCandidate(value: FitMeetDemandCandidate): LiveCandidate {
     safetyState: value.safetyState,
     verificationStatus: value.verificationStatus,
     profileCompleteness: value.profileCompleteness,
+    dataQuality: value.dataQuality,
     lastActiveText: value.lastActiveText,
     explanationSignals: value.lifeGraphExplanation?.usedSignals ?? [],
+    missingSignals: value.lifeGraphExplanation?.missingSignals ?? [],
     boundaryNotes: value.lifeGraphExplanation?.boundaryNotes ?? [],
+    confidenceLevel: value.lifeGraphExplanation?.confidenceLevel,
+    safeFirstStep: value.candidateExplanation?.safeFirstStep,
+    nextActionSuggestion: value.candidateExplanation?.nextActionSuggestion,
+    requiresConfirmation: value.candidateExplanation?.requiresConfirmation,
     name: value.displayName || value.nickname || "FitMeet 用户",
     age: value.age ?? 0,
     city: value.city || "同城",

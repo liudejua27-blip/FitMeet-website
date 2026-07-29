@@ -33,7 +33,7 @@ type SearchItem = {
 };
 
 function MessageAvatar({ conversation }: { conversation: FitMeetConversation }) {
-  const name = conversation.displayName || conversation.username || 'FitMeet 用户';
+  const name = conversation.title || conversation.displayName || conversation.username || 'FitMeet 用户';
   const url = conversation.avatar || conversation.peer?.avatar;
   return url ? (
     <img className={styles.messageAvatar} src={url} alt={`${name}头像`} />
@@ -119,7 +119,7 @@ export function MessagesExperience({
       ...conversations.map((item) => ({
         id: `conversation-${item.id}`,
         category: 'private' as const,
-        title: item.displayName || item.username || 'FitMeet 用户',
+        title: item.title || item.displayName || item.username || 'FitMeet 用户',
         subtitle: item.lastMessage || '会话已开放',
         unread: item.unread || 0,
         action: () => onConversation(item.id),
@@ -226,7 +226,7 @@ export function MessagesExperience({
       <header className={styles.messageHeader}>
         <div>
           <h1>消息</h1>
-          <p>{totalUnread ? `${totalUnread} 条未读` : '私信、互动和通知'}</p>
+          <p>{totalUnread ? `${totalUnread} 条未读` : '会话、互动和通知'}</p>
         </div>
         <button
           type="button"
@@ -238,7 +238,7 @@ export function MessagesExperience({
         </button>
       </header>
       <button type="button" className={styles.searchButton} onClick={() => setSearchOpen(true)}>
-        <FiSearch /> 搜索私信、约练或系统通知
+        <FiSearch /> 搜索会话、组局或系统通知
       </button>
       <section className={styles.messageOverview}>
         <span>
@@ -247,7 +247,7 @@ export function MessagesExperience({
         </span>
         <span>
           <strong>{conversations.length}</strong>
-          <small>私信</small>
+          <small>会话</small>
         </span>
         <span>
           <strong>{interactionCount}</strong>
@@ -263,13 +263,14 @@ export function MessagesExperience({
           <button
             type="button"
             key={item}
+            aria-pressed={category === item}
             className={category === item ? styles.messageCategoryActive : ''}
             onClick={() => setCategory(item)}
           >
             {item === 'all'
               ? '全部'
               : item === 'private'
-                ? '私信'
+                ? '会话'
                 : item === 'interaction'
                   ? '互动'
                   : '系统'}
@@ -427,7 +428,7 @@ export function MessagesExperience({
       {showPrivate ? (
         <>
           <div className={styles.messageListHeader}>
-            <h2 className={styles.listTitle}>私信</h2>
+            <h2 className={styles.listTitle}>会话</h2>
             <small>{conversations.length}</small>
           </div>
           {conversations.length ? (
@@ -440,7 +441,7 @@ export function MessagesExperience({
               >
                 <MessageAvatar conversation={item} />
                 <span>
-                  <strong>{item.displayName || item.username || 'FitMeet 用户'}</strong>
+                  <strong>{item.title || item.displayName || item.username || 'FitMeet 用户'}</strong>
                   <small>{item.lastMessage || '会话已开放'}</small>
                 </span>
                 {item.unread ? (
@@ -457,7 +458,7 @@ export function MessagesExperience({
             ))
           ) : (
             <p className={styles.emptyState}>
-              还没有已开放的会话。双方确认邀请或关系后，会话会自动出现在这里。
+              还没有已开放的会话。好友关系、活动邀请或组局成员资格确认后，会话会出现在这里。
             </p>
           )}
         </>
@@ -504,6 +505,7 @@ export function MessagesExperience({
                 <button
                   type="button"
                   key={item}
+                  aria-pressed={category === item}
                   className={category === item ? styles.messageCategoryActive : ''}
                   onClick={() => setCategory(item)}
                 >

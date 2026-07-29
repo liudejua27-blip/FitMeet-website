@@ -18,7 +18,7 @@ function ProfilePanelShell({ title, children, onClose }: { title: string; childr
   return <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}><section ref={dialogRef} tabIndex={-1} className={`${styles.sheet} ${styles.profilePanelSheet}`} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}><div className={styles.sheetHandle} /><header><h2>{title}</h2><button type="button" aria-label="关闭" onClick={onClose}><FiX /></button></header>{children}</section></div>;
 }
 
-export function ProfileExperience({ api, userId, profile, photos, notificationEnabled, postCount, relationshipCount, blockedUsers, blockedUsersLoading, blockedUsersError, onPhotosChange, onNotice, onEdit, onPrivacy, onNotification, onRelationships, onReboard, onSafety, onMoments, onLogout, onBlockUser, onUnblockUser, onRefreshBlockedUsers }: {
+export function ProfileExperience({ api, userId, profile, photos, notificationEnabled, postCount, relationshipCount, blockedUsers, blockedUsersLoading, blockedUsersError, onPhotosChange, onNotice, onEdit, onPrivacy, onNotification, onRelationships, onGroups, onReboard, onSafety, onMoments, onLogout, onBlockUser, onUnblockUser, onRefreshBlockedUsers }: {
   api: FitMeetApiClient;
   userId: number;
   profile: SocialProfile;
@@ -35,6 +35,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   onPrivacy: () => void;
   onNotification: (value: boolean) => void;
   onRelationships: () => void;
+  onGroups: () => void;
   onReboard: () => void;
   onSafety: () => void;
   onMoments: () => void;
@@ -228,7 +229,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
     <section className={styles.profileQuickGrid}><button type="button" onClick={onEdit}><FiEdit3 /><strong>编辑资料</strong><small>昵称城市</small></button><button type="button" onClick={() => setPanel("photos")}><FiCamera /><strong>照片管理</strong><small>封面形象</small></button><button type="button" onClick={() => setPanel("advantages")}><FiBriefcase /><strong>我的优势</strong><small>{advantages.length} 项能力</small></button><button type="button" onClick={() => setPanel("verifications")}><FiAward /><strong>认证中心</strong><small>{verifications.length} 项记录</small></button></section>
 
-    <section className={styles.profileRows}><button type="button" onClick={() => setPanel("friends")}><span><FiUsers /></span><strong>好友列表</strong><small>{friends.length ? `${friends.length} 位好友` : "暂无好友"}</small><FiChevronRight /></button><button type="button" onClick={onRelationships}><span><FiUsers /></span><strong>关系申请</strong><small>{relationshipCount ? `${relationshipCount} 个待处理` : "暂无待处理"}</small><FiChevronRight /></button><button type="button" onClick={onPrivacy}><span><FiSliders /></span><strong>偏好边界</strong><small>{profile.distanceKm}km · 模糊位置</small><FiChevronRight /></button><button type="button" onClick={() => setPanel("settings")}><span><FiBell /></span><strong>更多设置</strong><small>通知 / 安全 / 建档</small><FiChevronRight /></button></section>
+    <section className={styles.profileRows}><button type="button" onClick={() => setPanel("friends")}><span><FiUsers /></span><strong>好友列表</strong><small>{friends.length ? `${friends.length} 位好友` : "暂无好友"}</small><FiChevronRight /></button><button type="button" onClick={onRelationships}><span><FiUsers /></span><strong>关系申请</strong><small>{relationshipCount ? `${relationshipCount} 个待处理` : "暂无待处理"}</small><FiChevronRight /></button><button type="button" onClick={onGroups}><span><FiUsers /></span><strong>我的组局</strong><small>成员 / 候补 / 群聊</small><FiChevronRight /></button><button type="button" onClick={onPrivacy}><span><FiSliders /></span><strong>偏好边界</strong><small>{profile.distanceKm}km · 模糊位置</small><FiChevronRight /></button><button type="button" onClick={() => setPanel("settings")}><span><FiBell /></span><strong>更多设置</strong><small>通知 / 安全 / 建档</small><FiChevronRight /></button></section>
 
     {panel === "preview" ? <ProfilePanelShell title="资料预览" onClose={() => setPanel(null)}><section className={styles.profilePreviewCard}><div className={styles.profilePreviewCover}><ProfileImage photo={cover} name={profile.nickname} /><span><FiEye /> 仅展示模糊位置</span><b><FiImage /> {orderedPhotos.length}</b></div><div className={styles.profilePreviewIdentity}><ProfileImage photo={cover} name={profile.nickname} /><div><h3>{profile.nickname || "FitMeet 用户"}</h3><p>{profile.city || "城市待填写"} · 身份状态已同步</p></div></div><dl><div><dt>兴趣爱好</dt><dd>{profile.interests.join("、") || "待完善"}</dd></div><div><dt>资料可见范围</dt><dd>{profile.distanceKm}km · 仅模糊展示</dd></div><div><dt>个人介绍</dt><dd>{profile.bio || "待完善"}</dd></div></dl></section><p className={styles.sheetSafety}><FiShield /> 不公开精确位置、联系方式和敏感信息。</p><div className={styles.stackActions}><button type="button" className={styles.secondaryButton} onClick={onEdit}><FiEdit3 /> 编辑资料</button><button type="button" className={styles.primaryButton} onClick={() => setPanel("photos")}><FiCamera /> 照片管理</button></div></ProfilePanelShell> : null}
 

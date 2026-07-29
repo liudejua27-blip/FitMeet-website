@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   FiAlertTriangle,
@@ -9,6 +10,7 @@ import {
   FiBookmark,
   FiCalendar,
   FiCheck,
+  FiCheckCircle,
   FiChevronRight,
   FiClock,
   FiEdit3,
@@ -17,12 +19,14 @@ import {
   FiFlag,
   FiHeart,
   FiImage,
+  FiInfo,
   FiLock,
   FiMapPin,
   FiMessageCircle,
   FiMic,
   FiMoreHorizontal,
   FiPlus,
+  FiRefreshCw,
   FiSearch,
   FiSend,
   FiSettings,
@@ -33,9 +37,16 @@ import {
   FiUserPlus,
   FiUsers,
   FiX,
+  FiXCircle,
 } from 'react-icons/fi';
 import type {
   AgentInboxEvent,
+  AgentInboxEventPage,
+  AgentInboxScope,
+  AgentMemoryControl,
+  AgentMemoryUsageEvent,
+  AgentMemoryUsagePage,
+  AgentMemoryUseScope,
   AgentThread,
   AgentThreadDetail,
   AgentThreadEntry,
@@ -48,9 +59,11 @@ import type {
   FitMeetConversation,
   FitMeetConversationMessage,
   FitMeetDemand,
+  FitMeetGroupJoinMode,
   FitMeetIntentApplication,
   FitMeetProfilePhoto,
   FitMeetPublicIntent,
+  FitMeetSearchResult,
   MeetInvitation,
   OnboardingPayload,
   PublicUserProfile,
@@ -93,7 +106,39 @@ import {
   repairDraftAfterLifecycleTurn,
   type DemandLifecycleAction,
 } from '@/lib/fitmeet-agent-thread-state';
-import { FitMeetApiError } from '@/lib/fitmeet-api-client';
+import { FitMeetApiClient, FitMeetApiError } from '@/lib/fitmeet-api-client';
+import {
+  agentToolDisclosure,
+  agentToolResultLink,
+  feedbackToneForMessage,
+  parseConversationDrafts,
+  updateConversationDraft,
+  visibleAgentArguments,
+  type ConversationDrafts,
+  type FitMeetActionResult,
+  type FitMeetFeedbackTone,
+} from '@/lib/fitmeet-interaction-state';
+import {
+  agentMemoryUseScopeOptions,
+  defaultMemoryUseScope,
+  memoryCanChangeScope,
+  memoryEvidenceText,
+  mergeMemoryUsageEvents,
+  memoryTypeLabel,
+  memoryUsageContextLabel,
+  memoryUsagePath,
+  memoryUsagePurposeLabel,
+  memoryUseScopePresentation,
+} from '@/lib/fitmeet-memory-state';
+import {
+  inboxEventDestination,
+  memoryBoundaryNotice,
+  memoryConfidenceLabel,
+  memoryDecisionActions,
+  memorySensitivityPresentation,
+  memorySourceLabel,
+  memoryStatusLabel,
+} from '@/lib/fitmeet-product-trust';
 import {
   dedupeInboxEvents,
   failOptimisticMessage,
@@ -146,6 +191,13 @@ type Overlay =
   | null;
 type ChatLine = { id: string | number; role: 'assistant' | 'user'; text: string };
 type MomentDraftImage = { id: string; file: File; preview: string };
+type ToastAction = { label: string; onSelect: () => void };
+type ToastState = {
+  id: number;
+  message: string;
+  tone: FitMeetFeedbackTone;
+  action?: ToastAction;
+};
 
 const initialChat: ChatLine[] = [
   {
@@ -200,6 +252,10 @@ function closedConversationsKey(userId: number) {
   return `fitmeet:web-closed-conversations:v1:${userId}`;
 }
 
+function conversationDraftsKey(userId: number) {
+  return `fitmeet:web-conversation-drafts:v1:${userId}`;
+}
+
 function activeAgentThreadKey(userId: number) {
   return `fitmeet:web-active-agent-thread:v1:${userId}`;
 }
@@ -216,6 +272,14 @@ function readStoredArray<T>(key: string): T[] {
 
 function writeStoredArray(key: string, value: unknown[]) {
   if (typeof window !== 'undefined') window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function FeedbackIcon({ tone }: { tone: FitMeetFeedbackTone }) {
+  if (tone === 'success') return <FiCheckCircle />;
+  if (tone === 'error') return <FiXCircle />;
+  if (tone === 'warning') return <FiAlertTriangle />;
+  if (tone === 'pending') return <FiRefreshCw />;
+  return <FiInfo />;
 }
 
 function displayConversationMessage(
@@ -237,6 +301,8 @@ function displayConversationMessage(
       : message.text || message.body?.text || '',
     createdAt: message.createdAt,
     senderId: message.senderId,
+    senderName: message.senderName,
+    senderAvatar: message.senderAvatar,
     readByOther: message.readByOther,
     status: message.status,
     lifecycleStatus: message.lifecycleStatus,
@@ -247,6 +313,10 @@ function displayConversationMessage(
 
 function conversationPeerId(conversation: FitMeetConversation | null | undefined) {
   return Number(conversation?.userId ?? conversation?.peer?.id) || null;
+}
+
+function isGroupConversation(conversation: FitMeetConversation | null | undefined) {
+  return conversation?.isGroup === true || conversation?.contextType === 'group';
 }
 
 function agentEntriesForDetail(detail: AgentThreadDetail) {
@@ -327,10 +397,12 @@ function Sheet({
   title,
   children,
   onClose,
+  closeDisabled = false,
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  closeDisabled?: boolean;
 }) {
   const dialogRef = useAccessibleDialog(true, onClose);
   return (
@@ -347,7 +419,7 @@ function Sheet({
         <div className={styles.sheetHandle} />
         <header>
           <h2>{title}</h2>
-          <button type="button" aria-label="关闭" onClick={onClose}>
+          <button type="button" aria-label="关闭" disabled={closeDisabled} onClick={onClose}>
             <FiX />
           </button>
         </header>
@@ -357,26 +429,71 @@ function Sheet({
   );
 }
 
-export function FitMeetCompleteExperience({
-  initialSurface = 'main',
-  initialDestination = 'home',
-  initialThreadId,
-  initialExperience,
-  initialEntityId,
-}: {
+type FitMeetCompleteExperienceProps = {
   initialSurface?: 'main' | 'onboarding';
   initialDestination?: TabId;
   initialThreadId?: string;
   initialExperience?: SocialExperienceMode;
   initialEntityId?: string;
-}) {
-  const router = useRouter();
+};
+
+type FitMeetSessionController = ReturnType<typeof useFitMeetSession>;
+
+export function FitMeetCompleteExperience(props: FitMeetCompleteExperienceProps) {
   const session = useFitMeetSession();
+  const loadingWorkbench = (
+    <main className={styles.appPage}>
+      <section className={`${styles.mobileSurface} ${styles.loadingSurface}`} aria-live="polite">
+        <FitMeetBrandIcon size={78} priority src="/brand/fitmeet-login-icon.png" />
+        <p>正在准备你的 FitMeet 工作台…</p>
+      </section>
+    </main>
+  );
+
+  if (session.state.status === 'loading') return loadingWorkbench;
+  if (session.state.status === 'anonymous')
+    return (
+      <FitMeetLogin
+        onLogin={session.login}
+        onRegister={session.register}
+        onResendEmailVerification={session.resendEmailVerification}
+        initialError={session.state.error}
+      />
+    );
+
+  const authenticatedSession = session.state.session;
+  if (!authenticatedSession) return loadingWorkbench;
+  return (
+    <FitMeetAuthenticatedExperience
+      key={String(authenticatedSession.user.id)}
+      {...props}
+      session={session}
+    />
+  );
+}
+
+function FitMeetAuthenticatedExperience({
+  initialSurface = 'main',
+  initialDestination = 'home',
+  initialThreadId,
+  initialExperience,
+  initialEntityId,
+  session,
+}: FitMeetCompleteExperienceProps & { session: FitMeetSessionController }) {
+  const router = useRouter();
+  const memoryOwnerId =
+    session.state.status === 'authenticated' && session.state.session?.user.id != null
+      ? String(session.state.session.user.id)
+      : null;
   const [surface, setSurface] = useState<'main' | 'onboarding'>(initialSurface);
   const [agentOnlyMode, setAgentOnlyMode] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>(initialDestination);
   const [overlay, setOverlay] = useState<Overlay>(null);
-  const [toast, setToast] = useState('所有涉及别人和线下活动的动作，都要经过你的明确确认。');
+  const [toast, setToast] = useState<ToastState | null>({
+    id: 0,
+    message: '所有涉及别人和线下活动的动作，都要经过你的明确确认。',
+    tone: 'info',
+  });
   const [profile, setProfile] = useState<SocialProfile>(emptyProfile);
   const [chat, setChat] = useState<ChatLine[]>(initialChat);
   const [agentEntries, setAgentEntries] = useState<AgentThreadEntry[]>([]);
@@ -384,6 +501,7 @@ export function FitMeetCompleteExperience({
   const [activeAgentThread, setActiveAgentThread] = useState<AgentThread | null>(null);
   const [activeDraftSession, setActiveDraftSession] = useState<DemandDraftSession | null>(null);
   const [selectedToolProposal, setSelectedToolProposal] = useState<AgentThreadEntry | null>(null);
+  const [toolProposalDecision, setToolProposalDecision] = useState<'approve' | 'decline' | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [agentSending, setAgentSending] = useState(false);
   const [demand, setDemand] = useState<DemandViewModel>(emptyDemandView);
@@ -405,6 +523,14 @@ export function FitMeetCompleteExperience({
     [],
   );
   const [agentInboxEvents, setAgentInboxEvents] = useState<AgentInboxEvent[]>([]);
+  const [agentInboxScope, setAgentInboxScope] = useState<AgentInboxScope>('unread');
+  const [agentInboxTotal, setAgentInboxTotal] = useState(0);
+  const [agentInboxHistoryCount, setAgentInboxHistoryCount] = useState(0);
+  const [agentInboxUnreadCount, setAgentInboxUnreadCount] = useState(0);
+  const [agentInboxLoading, setAgentInboxLoading] = useState(false);
+  const [agentInboxError, setAgentInboxError] = useState<string | null>(null);
+  const [agentInboxNextCursor, setAgentInboxNextCursor] = useState<string | null>(null);
+  const [agentInboxLoadingMore, setAgentInboxLoadingMore] = useState(false);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [feedLastPage, setFeedLastPage] = useState(1);
   const [profilePhotos, setProfilePhotos] = useState<FitMeetProfilePhoto[]>([]);
@@ -414,8 +540,13 @@ export function FitMeetCompleteExperience({
   const [postPublishing, setPostPublishing] = useState(false);
   const [discoverChannel, setDiscoverChannel] = useState<'moments' | 'social' | 'tasks'>('moments');
   const [memories, setMemories] = useState<FitMeetAgentMemory[]>([]);
+  const [memoryControl, setMemoryControl] = useState<AgentMemoryControl | null>(null);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryStateOwnerId, setMemoryStateOwnerId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [conversationInput, setConversationInput] = useState('');
+  const [conversationSending, setConversationSending] = useState(false);
   const [conversations, setConversations] = useState<FitMeetConversation[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedConversation, setSelectedConversation] = useState<FitMeetConversation | null>(
@@ -436,12 +567,23 @@ export function FitMeetCompleteExperience({
   const [deepLinkedDemandRecord, setDeepLinkedDemandRecord] = useState<FitMeetDemand | null>(null);
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
   const conversationSyncing = useRef(false);
+  const conversationDraftsRef = useRef<ConversationDrafts>({});
   const deepLinkLoadedRef = useRef<string | null>(null);
   const activeAgentThreadIdRef = useRef<string | null>(null);
   const agentThreadLoadRequestRef = useRef(0);
   const agentThreadSwitchingRef = useRef(false);
-  const api = session.api;
+  const agentInboxLoadRequestRef = useRef(0);
+  const agentInboxScopeRef = useRef<AgentInboxScope>('unread');
+  const memoryOwnerIdRef = useRef<string | null>(memoryOwnerId);
+  const memoryRefreshRequestRef = useRef(0);
+  const sessionAccessToken = session.state.session?.accessToken ?? null;
+  const api = useMemo(
+    () => new FitMeetApiClient(() => sessionAccessToken),
+    [sessionAccessToken],
+  );
   const liveApi = session.state.status === 'authenticated';
+  const memoryStateBelongsToCurrentOwner =
+    memoryOwnerId !== null && memoryStateOwnerId === memoryOwnerId;
   const selectedCandidate =
     candidates.find((candidate) => candidate.id === selectedCandidateId) ?? candidates[0];
   const publicCandidateContext = publicUser
@@ -468,7 +610,166 @@ export function FitMeetCompleteExperience({
   const selectedConversationClosed = Boolean(
     selectedConversation && closedConversationIds.includes(selectedConversation.id),
   );
-  const notice = useCallback((message: string) => setToast(message), []);
+  const notice = useCallback(
+    (message: string, tone?: FitMeetFeedbackTone, action?: ToastAction) =>
+      setToast({ id: Date.now(), message, tone: tone || feedbackToneForMessage(message), action }),
+    [],
+  );
+  const runGlobalSearch = useCallback((query: string) => api.search(query), [api]);
+  const openGlobalSearchResult = useCallback(
+    (result: FitMeetSearchResult) => router.push(result.path),
+    [router],
+  );
+  const isCurrentMemoryOwner = useCallback(
+    (ownerId: string | null) => ownerId !== null && memoryOwnerIdRef.current === ownerId,
+    [],
+  );
+
+  const refreshMemoryCenter = useCallback(async () => {
+    const requestOwnerId = memoryOwnerId;
+    const requestId = ++memoryRefreshRequestRef.current;
+    if (!requestOwnerId) {
+      setMemories([]);
+      setMemoryControl(null);
+      setMemoryLoading(false);
+      setMemoryError(null);
+      return;
+    }
+    setMemoryStateOwnerId(requestOwnerId);
+    setMemoryLoading(true);
+    setMemoryError(null);
+    try {
+      const [memoryResult, controlResult] = await Promise.allSettled([
+        api.listAgentMemories(),
+        api.getAgentMemoryControl(),
+      ]);
+      if (
+        !isCurrentMemoryOwner(requestOwnerId) ||
+        requestId !== memoryRefreshRequestRef.current
+      )
+        return;
+      if (memoryResult.status === 'fulfilled')
+        setMemories(memoryResult.value.items ?? memoryResult.value.data ?? []);
+      if (controlResult.status === 'fulfilled') setMemoryControl(controlResult.value);
+      const failure = [memoryResult, controlResult].find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (failure)
+        setMemoryError(
+          failure.reason instanceof Error
+            ? failure.reason.message
+            : '人物画像与记忆暂时无法完整同步。',
+        );
+    } catch (reason) {
+      if (
+        !isCurrentMemoryOwner(requestOwnerId) ||
+        requestId !== memoryRefreshRequestRef.current
+      )
+        return;
+      setMemoryError(reason instanceof Error ? reason.message : '人物画像与记忆暂时无法同步。');
+    } finally {
+      if (
+        isCurrentMemoryOwner(requestOwnerId) &&
+        requestId === memoryRefreshRequestRef.current
+      )
+        setMemoryLoading(false);
+    }
+  }, [api, isCurrentMemoryOwner, memoryOwnerId]);
+
+  const applyAgentInboxPage = useCallback((page: AgentInboxEventPage) => {
+    setAgentInboxEvents(page.items);
+    setAgentInboxNextCursor(page.nextCursor ?? null);
+    setAgentInboxTotal(page.total ?? page.items.length);
+    setAgentInboxHistoryCount(page.historyCount ?? page.total ?? page.items.length);
+    setAgentInboxUnreadCount(page.unreadCount ?? 0);
+  }, []);
+
+  const refreshAgentInbox = useCallback(
+    async (scope: AgentInboxScope = agentInboxScopeRef.current) => {
+      const requestId = ++agentInboxLoadRequestRef.current;
+      setAgentInboxLoading(true);
+      setAgentInboxError(null);
+      try {
+        const page = await api.getAgentInboxEvents(30, undefined, scope);
+        if (requestId !== agentInboxLoadRequestRef.current || scope !== agentInboxScopeRef.current)
+          return;
+        applyAgentInboxPage(page);
+      } catch (reason) {
+        if (requestId !== agentInboxLoadRequestRef.current || scope !== agentInboxScopeRef.current)
+          return;
+        setAgentInboxError(reason instanceof Error ? reason.message : '通知历史暂时无法同步。');
+      } finally {
+        if (requestId === agentInboxLoadRequestRef.current) setAgentInboxLoading(false);
+      }
+    },
+    [api, applyAgentInboxPage],
+  );
+
+  const selectAgentInboxScope = useCallback((scope: AgentInboxScope) => {
+    if (scope === agentInboxScopeRef.current) return;
+    agentInboxScopeRef.current = scope;
+    setAgentInboxEvents([]);
+    setAgentInboxNextCursor(null);
+    setAgentInboxTotal(0);
+    setAgentInboxError(null);
+    setAgentInboxLoading(true);
+    setAgentInboxScope(scope);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(
+      () => setToast((current) => (current?.id === toast.id ? null : current)),
+      toast.tone === 'error' ? 9_000 : toast.tone === 'warning' ? 8_000 : 6_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    memoryOwnerIdRef.current = memoryOwnerId;
+    memoryRefreshRequestRef.current += 1;
+    setMemoryStateOwnerId(memoryOwnerId);
+    setMemories([]);
+    setMemoryControl(null);
+    setMemoryLoading(false);
+    setMemoryError(null);
+    if (memoryOwnerId) void refreshMemoryCenter();
+  }, [memoryOwnerId, refreshMemoryCenter]);
+
+  useEffect(() => {
+    if (overlay === 'memory') void refreshMemoryCenter();
+  }, [overlay, refreshMemoryCenter]);
+
+  useEffect(() => {
+    const userId = session.state.session?.user.id;
+    if (!userId) {
+      conversationDraftsRef.current = {};
+      setConversationInput('');
+      return;
+    }
+    conversationDraftsRef.current = parseConversationDrafts(
+      window.localStorage.getItem(conversationDraftsKey(userId)),
+    );
+  }, [session.state.session?.user.id]);
+
+  const persistConversationDraft = useCallback(
+    (conversationId: string, value: string) => {
+      const userId = session.state.session?.user.id;
+      if (!userId || !conversationId) return;
+      const next = updateConversationDraft(conversationDraftsRef.current, conversationId, value);
+      conversationDraftsRef.current = next;
+      window.localStorage.setItem(conversationDraftsKey(userId), JSON.stringify(next));
+    },
+    [session.state.session?.user.id],
+  );
+
+  const changeConversationInput = useCallback(
+    (value: string) => {
+      setConversationInput(value);
+      if (selectedConversation?.id) persistConversationDraft(selectedConversation.id, value);
+    },
+    [persistConversationDraft, selectedConversation?.id],
+  );
   const refreshBlockedUsers = useCallback(async () => {
     if (session.state.status !== 'authenticated') {
       setBlockedUsers([]);
@@ -691,11 +992,6 @@ export function FitMeetCompleteExperience({
   }, [activeAgentThread, api, loadAgentThread]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setToast(''), 3600);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  useEffect(() => {
     if (session.state.status !== 'authenticated') return;
     if (session.state.socialProfile) setProfile(session.state.socialProfile);
     if (!session.state.onboarding?.canUseSocialActions && !agentOnlyMode) {
@@ -787,7 +1083,6 @@ export function FitMeetCompleteExperience({
       const results = await Promise.allSettled([
         api.getFeed(),
         api.listMyDemands(),
-        api.listAgentMemories(),
         api.listMeetInvitations(),
         api.listConversations(),
         api.listConnectionRequests('inbox'),
@@ -799,7 +1094,6 @@ export function FitMeetCompleteExperience({
       const [
         feedResult,
         demandsResult,
-        memoriesResult,
         invitationsResult,
         conversationsResult,
         inboxResult,
@@ -813,8 +1107,6 @@ export function FitMeetCompleteExperience({
         setFeedLastPage(feedResult.value.metadata?.lastPage ?? 1);
       }
       if (demandsResult.status === 'fulfilled') setDemands(demandsResult.value.data);
-      if (memoriesResult.status === 'fulfilled')
-        setMemories(memoriesResult.value.items ?? memoriesResult.value.data ?? []);
       if (invitationsResult.status === 'fulfilled') setInvitations(invitationsResult.value);
       if (conversationsResult.status === 'fulfilled') setConversations(conversationsResult.value);
       if (inboxResult.status === 'fulfilled') setIncomingConnections(inboxResult.value);
@@ -906,13 +1198,16 @@ export function FitMeetCompleteExperience({
 
   useEffect(() => {
     if (!liveApi) return;
+    void refreshAgentInbox(agentInboxScope);
+  }, [agentInboxScope, liveApi, refreshAgentInbox]);
+
+  useEffect(() => {
+    if (!liveApi) return;
     void Promise.all([
-      api.getAgentInboxEvents(),
       api.listMyPublicIntentApplications('owner'),
       api.listMyTaskIntentApplications('owner'),
     ])
-      .then(([events, socialOwnerApplications, taskOwnerApplications]) => {
-        setAgentInboxEvents(events.items);
+      .then(([socialOwnerApplications, taskOwnerApplications]) => {
         setOwnerSocialApplications(socialOwnerApplications);
         setOwnerTaskApplications(taskOwnerApplications);
       })
@@ -928,8 +1223,8 @@ export function FitMeetCompleteExperience({
         api.getSocialProfile(),
         api.listProfilePhotos(),
       ]);
-      session.setOnboarding(onboarding);
-      session.setSocialProfile(socialProfile);
+      session.setOnboarding(onboarding, sessionAccessToken);
+      session.setSocialProfile(socialProfile, sessionAccessToken);
       setProfile(socialProfile);
       setProfilePhotos(nextProfilePhotos);
       setAgentOnlyMode(false);
@@ -1326,20 +1621,21 @@ export function FitMeetCompleteExperience({
       let summary = nextConversations.find(
         (item) => item.id === conversationId || item.conversationId === conversationId,
       );
-      if (!summary || !conversationPeerId(summary)) {
+      if (!summary || (!isGroupConversation(summary) && !conversationPeerId(summary))) {
         nextConversations = await api.listConversations();
         setConversations(nextConversations);
         summary = nextConversations.find(
           (item) => item.id === conversationId || item.conversationId === conversationId,
         );
       }
-      if (!summary || !conversationPeerId(summary))
+      if (!summary || (!isGroupConversation(summary) && !conversationPeerId(summary)))
         throw new Error('会话缺少可验证的对方账号，请从最新消息列表重新进入。');
       const messages = await api.getConversation(conversationId);
       const currentUserId = session.state.session?.user.id;
       setConversation(
         messages.map((message) => displayConversationMessage(message, currentUserId)),
       );
+      setConversationInput(conversationDraftsRef.current[summary.id] || '');
       setSelectedConversation(summary);
       setConversations((items) =>
         items.map((item) => (item.id === summary.id ? { ...item, unread: 0 } : item)),
@@ -1373,21 +1669,27 @@ export function FitMeetCompleteExperience({
     notice('匹配已经确认；请从消息列表进入已开放的会话。');
   };
 
-  const requestFriendship = async () => {
-    if (!selectedCandidate) return;
+  const requestFriendship = async (message: string): Promise<FitMeetActionResult> => {
+    if (!selectedCandidate) return { ok: false, error: '当前没有可验证的候选人。' };
     try {
       await api.createConnectionRequest(
         selectedCandidate.candidateUserId,
-        '想先从共同的活动兴趣开始聊聊。 ',
+        message,
         liveDemand?.id || '',
       );
       recordCandidate(selectedCandidate.id, 'saved');
       setRelationship('pending');
       setOverlay(null);
       await refreshConnections();
-      notice('好友申请已发出；双方确认前不会开放连续私信。');
+      notice('好友申请已发出；双方确认前不会开放连续私信。', 'success', {
+        label: '查看申请',
+        onSelect: () => router.push('/agent/try/relationships'),
+      });
+      return { ok: true };
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '好友申请未能发出，请稍后再试。');
+      const error = reason instanceof Error ? reason.message : '好友申请未能发出，请稍后再试。';
+      notice(error, 'error');
+      return { ok: false, error };
     }
   };
 
@@ -1664,19 +1966,60 @@ export function FitMeetCompleteExperience({
   };
 
   const acknowledgeInboxEvent = async (eventId: string) => {
+    const selectedEvent = agentInboxEvents.find((item) => item.id === eventId);
+    if (selectedEvent?.acknowledgedAt) return;
     try {
       await api.acknowledgeAgentInboxEvents([eventId]);
-      setAgentInboxEvents((items) => items.filter((item) => item.id !== eventId));
+      const acknowledgedAt = new Date().toISOString();
+      setAgentInboxEvents((items) =>
+        agentInboxScope === 'unread'
+          ? items.filter((item) => item.id !== eventId)
+          : items.map((item) => (item.id === eventId ? { ...item, acknowledgedAt } : item)),
+      );
+      setAgentInboxUnreadCount((count) => Math.max(0, count - 1));
+      if (agentInboxScope === 'unread') setAgentInboxTotal((count) => Math.max(0, count - 1));
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : '通知暂时无法标记为已读。');
     }
   };
 
   const openInboxEvent = async (event: AgentInboxEvent) => {
-    const conversationId =
-      typeof event.payload?.conversationId === 'string' ? event.payload.conversationId : '';
-    if (conversationId) await openConversation(conversationId);
-    await acknowledgeInboxEvent(event.id);
+    const destination = inboxEventDestination(event);
+    try {
+      if (destination.kind === 'conversation') await openConversation(destination.id);
+      else if (destination.kind === 'user') router.push(`/agent/try/users/${destination.id}`);
+      else if (destination.kind === 'demand')
+        router.push(`/agent/try/demands/${encodeURIComponent(destination.id)}`);
+      else if (destination.kind === 'group')
+        router.push(`/agent/try/groups/${encodeURIComponent(destination.id)}`);
+      else if (destination.kind === 'post')
+        router.push(`/agent/try/discover/posts/${destination.id}`);
+      await acknowledgeInboxEvent(event.id);
+      if (destination.kind === 'none')
+        notice('通知已标记为已读；服务端没有提供可打开的目标页面。', 'info');
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : '通知目标暂时无法打开；通知仍会保留。');
+    }
+  };
+
+  const loadMoreInboxEvents = async () => {
+    if (!agentInboxNextCursor || agentInboxLoadingMore) return;
+    const requestedScope = agentInboxScope;
+    const requestedCursor = agentInboxNextCursor;
+    setAgentInboxLoadingMore(true);
+    try {
+      const page = await api.getAgentInboxEvents(30, requestedCursor, requestedScope);
+      if (requestedScope !== agentInboxScopeRef.current) return;
+      setAgentInboxEvents((items) => dedupeInboxEvents([...items, ...page.items]));
+      setAgentInboxNextCursor(page.nextCursor ?? null);
+      setAgentInboxTotal(page.total ?? agentInboxTotal);
+      setAgentInboxHistoryCount(page.historyCount ?? agentInboxHistoryCount);
+      setAgentInboxUnreadCount(page.unreadCount ?? agentInboxUnreadCount);
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : '更早的通知暂时无法加载。');
+    } finally {
+      setAgentInboxLoadingMore(false);
+    }
   };
 
   const resolveIntentApplication = async (
@@ -1695,12 +2038,12 @@ export function FitMeetCompleteExperience({
           api.listMyPublicIntentApplications('owner'),
           api.listMyTaskIntentApplications('owner'),
           api.listConversations(),
-          api.getAgentInboxEvents(),
+          api.getAgentInboxEvents(30, undefined, agentInboxScope),
         ]);
       setOwnerSocialApplications(socialOwnerApplications);
       setOwnerTaskApplications(taskOwnerApplications);
       setConversations(nextConversations);
-      setAgentInboxEvents(events.items);
+      applyAgentInboxPage(events);
       notice(
         decision === 'accept' ? '已接受申请；会话会以服务端实际开放状态显示。' : '已婉拒申请。',
       );
@@ -1711,7 +2054,8 @@ export function FitMeetCompleteExperience({
 
   const sendConversation = async (retry?: ConversationMessage) => {
     const text = (retry?.text || conversationInput).trim();
-    if (!text || !selectedConversation || selectedConversationClosed) return;
+    if (!text || !selectedConversation || selectedConversationClosed || conversationSending) return;
+    setConversationSending(true);
     const clientMessageId =
       retry?.clientMessageId || retry?.id || `web-message-${crypto.randomUUID()}`;
     if (retry)
@@ -1722,7 +2066,6 @@ export function FitMeetCompleteExperience({
       );
     else {
       setConversation((items) => [...items, optimisticMessage(text, clientMessageId)]);
-      setConversationInput('');
     }
     try {
       const response = await api.sendConversationMessage(
@@ -1736,6 +2079,12 @@ export function FitMeetCompleteExperience({
         currentUserId,
       );
       setConversation((items) => settleOptimisticMessage(items, clientMessageId, settled));
+      if (!retry) {
+        setConversationInput((current) => (current.trim() === text ? '' : current));
+        if ((conversationDraftsRef.current[selectedConversation.id] || '').trim() === text) {
+          persistConversationDraft(selectedConversation.id, '');
+        }
+      }
       await refreshCommunications();
     } catch (reason) {
       setConversation((items) => failOptimisticMessage(items, clientMessageId));
@@ -1748,6 +2097,8 @@ export function FitMeetCompleteExperience({
         return;
       }
       notice(reason instanceof Error ? reason.message : '消息未能发送，请稍后再试。');
+    } finally {
+      setConversationSending(false);
     }
   };
 
@@ -1822,7 +2173,7 @@ export function FitMeetCompleteExperience({
     try {
       const next = await api.updateSocialProfile(patch);
       setProfile(next);
-      session.setSocialProfile(next);
+      session.setSocialProfile(next, sessionAccessToken);
       notice('资料已更新。隐私与推荐设置已同步。');
       setOverlay(null);
     } catch (reason) {
@@ -1830,30 +2181,187 @@ export function FitMeetCompleteExperience({
     }
   };
 
-  const saveMemory = async (id: string) => {
-    const memory = memories.find((item) => item.id === id);
-    if (!memory) return;
+  const memoryForRevisionWrite = (
+    id: string,
+  ): (FitMeetAgentMemory & { revision: number }) | null => {
+    const current = memories.find((item) => item.id === id);
+    if (typeof current?.revision === 'number') return { ...current, revision: current.revision };
+    void refreshMemoryCenter();
+    notice('画像版本信息不完整，正在同步最新版本；请稍后重试。', 'warning');
+    return null;
+  };
+
+  const reconcileMemoryRevisionConflict = (reason: unknown, id: string) => {
+    if (!(reason instanceof FitMeetApiError)) return false;
+    const latest = (reason.details as { currentItem?: FitMeetAgentMemory } | undefined)?.currentItem;
+    if (reason.code !== 'MEMORY_REVISION_CONFLICT' && latest?.id !== id) return false;
+    if (latest?.id === id) {
+      setMemories((items) => items.map((item) => (item.id === id ? latest : item)));
+    } else {
+      void refreshMemoryCenter();
+    }
+    notice('这条画像已在另一端更新，已为你同步最新版本；请核对后再操作。', 'warning');
+    return true;
+  };
+
+  const saveMemory = async (
+    id: string,
+    useScope: AgentMemoryUseScope,
+    explicitSensitiveConsent: boolean,
+  ) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) return;
+    const current = memoryForRevisionWrite(id);
+    if (!current) return;
     try {
-      const saved = await api.confirmAgentMemory({
-        memoryType: memory.memoryType,
-        value: memory.value || memory.summary || '',
-        summary: memory.summary ?? undefined,
-      });
+      const saved = await api.confirmAgentMemory(
+        id,
+        current.revision,
+        useScope,
+        explicitSensitiveConsent,
+      );
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
       setMemories((items) => items.map((item) => (item.id === id ? saved : item)));
-      notice('偏好已确认保存；小福只会在推荐和措辞中参考它。');
+      notice(`画像已由你确认；使用范围为“${memoryUseScopePresentation(useScope).label}”。`);
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '偏好未能保存，请稍后再试。');
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      if (!reconcileMemoryRevisionConflict(reason, id))
+        notice(reason instanceof Error ? reason.message : '偏好未能保存，请稍后再试。');
+    }
+  };
+
+  const updateMemory = async (
+    id: string,
+    patch: { value?: string; useScope?: AgentMemoryUseScope },
+  ) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+    const current = memoryForRevisionWrite(id);
+    if (!current) return false;
+    const expandsSensitiveUse = Boolean(
+      current
+        && patch.useScope
+        && ['agent_and_matching', 'matching_only'].includes(patch.useScope)
+        && memorySensitivityPresentation(current.sensitivity).tone === 'caution',
+    );
+    try {
+      const saved = await api.updateAgentMemory(id, {
+        ...patch,
+        expectedRevision: current.revision,
+        ...(expandsSensitiveUse ? { explicitSensitiveConsent: true } : {}),
+      });
+      if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+      setMemories((items) => items.map((item) => (item.id === id ? saved : item)));
+      notice(
+        patch.useScope
+          ? `使用范围已改为“${memoryUseScopePresentation(patch.useScope).label}”。`
+          : '画像内容已由你纠正。',
+      );
+      return true;
+    } catch (reason) {
+      if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+      if (!reconcileMemoryRevisionConflict(reason, id)) {
+        notice(reason instanceof Error ? reason.message : '画像未能更新，请稍后再试。');
+      }
+      return false;
     }
   };
 
   const deleteMemory = async (id: string) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+    const current = memoryForRevisionWrite(id);
+    if (!current) return false;
     try {
-      await api.deleteAgentMemory(id);
+      await api.deleteAgentMemory(id, current.revision);
+      if (!isCurrentMemoryOwner(requestOwnerId)) return false;
       setMemories((items) => items.filter((item) => item.id !== id));
       notice('这条偏好已删除；后续不会再使用它解释推荐。');
+      return true;
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '偏好未能删除，请稍后再试。');
+      if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+      if (!reconcileMemoryRevisionConflict(reason, id))
+        notice(reason instanceof Error ? reason.message : '偏好未能删除，请稍后再试。');
+      return false;
     }
+  };
+
+  const rejectMemory = async (id: string) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) return;
+    const current = memoryForRevisionWrite(id);
+    if (!current) return;
+    try {
+      await api.rejectAgentMemory(id, current.revision);
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      setMemories((items) => items.filter((item) => item.id !== id));
+      notice('这条推断已拒绝，不会成为长期记忆。');
+    } catch (reason) {
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      if (!reconcileMemoryRevisionConflict(reason, id))
+        notice(reason instanceof Error ? reason.message : '这条推断暂时无法拒绝，请稍后再试。');
+    }
+  };
+
+  const toggleMemoryInference = async () => {
+    const requestOwnerId = memoryOwnerId;
+    if (!memoryControl || !isCurrentMemoryOwner(requestOwnerId)) return;
+    const nextEnabled = !memoryControl.inferenceEnabled;
+    try {
+      const next = await api.updateAgentMemoryControl(nextEnabled);
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      setMemoryControl(next);
+      notice(
+        nextEnabled
+          ? '小福可以再次从你的原话中提出待确认画像。'
+          : '已暂停提出新画像；已确认画像仍按各自使用范围生效。',
+      );
+    } catch (reason) {
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      notice(reason instanceof Error ? reason.message : '画像推断设置暂时无法更新。');
+    }
+  };
+
+  const suppressMemory = async (id: string) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+    const current = memoryForRevisionWrite(id);
+    if (!current) return false;
+    try {
+      const result = await api.suppressAgentMemory(id, current.revision);
+      if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+      setMemories((items) => items.filter((item) => item.id !== id));
+      setMemoryControl(result.control);
+      notice(`已删除并禁止再次推断“${memoryTypeLabel(result.item.memoryType)}”。`);
+      return true;
+    } catch (reason) {
+      if (!isCurrentMemoryOwner(requestOwnerId)) return false;
+      if (!reconcileMemoryRevisionConflict(reason, id))
+        notice(reason instanceof Error ? reason.message : '暂时无法禁止再次推断这类画像。');
+      return false;
+    }
+  };
+
+  const removeMemorySuppression = async (memoryType: string) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) return;
+    try {
+      const next = await api.removeAgentMemorySuppression(memoryType);
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      setMemoryControl(next);
+      notice(`以后可以再次提出“${memoryTypeLabel(memoryType)}”画像，仍需你确认。`);
+    } catch (reason) {
+      if (!isCurrentMemoryOwner(requestOwnerId)) return;
+      notice(reason instanceof Error ? reason.message : '暂时无法恢复这类画像提议。');
+    }
+  };
+
+  const loadMemoryUsage = async (id: string, cursor?: string) => {
+    const requestOwnerId = memoryOwnerId;
+    if (!isCurrentMemoryOwner(requestOwnerId)) throw new Error('登录账号已切换，请重新打开使用记录。');
+    const page = await api.listAgentMemoryUsage(id, cursor, 20);
+    if (!isCurrentMemoryOwner(requestOwnerId)) throw new Error('登录账号已切换，请重新打开使用记录。');
+    return page;
   };
 
   const syncOpenConversation = useCallback(async () => {
@@ -1904,7 +2412,7 @@ export function FitMeetCompleteExperience({
       api.listConnectionRequests('inbox'),
       api.listConnectionRequests('outbox'),
       api.getUnreadCount(),
-      api.getAgentInboxEvents(),
+      api.getAgentInboxEvents(30, undefined, agentInboxScope),
       api.listMyPublicIntentApplications('owner'),
       api.listMyTaskIntentApplications('owner'),
     ] as const);
@@ -1929,7 +2437,9 @@ export function FitMeetCompleteExperience({
     if (inboxResult.status === 'fulfilled') setIncomingConnections(inboxResult.value);
     if (outboxResult.status === 'fulfilled') setOutgoingConnections(outboxResult.value);
     if (unreadResult.status === 'fulfilled') setUnreadCount(unreadResult.value.unreadCount ?? 0);
-    if (eventsResult.status === 'fulfilled') setAgentInboxEvents(eventsResult.value.items);
+    if (eventsResult.status === 'fulfilled') {
+      applyAgentInboxPage(eventsResult.value);
+    }
     if (socialApplicationsResult.status === 'fulfilled')
       setOwnerSocialApplications(socialApplicationsResult.value);
     if (taskApplicationsResult.status === 'fulfilled')
@@ -1950,7 +2460,16 @@ export function FitMeetCompleteExperience({
     await syncOpenConversation();
     if (results.every((result) => result.status === 'rejected'))
       throw new Error('实时数据暂时无法同步。');
-  }, [activateDemand, api, liveApi, liveDemand?.id, loadAgentThread, syncOpenConversation]);
+  }, [
+    activateDemand,
+    agentInboxScope,
+    api,
+    applyAgentInboxPage,
+    liveApi,
+    liveDemand?.id,
+    loadAgentThread,
+    syncOpenConversation,
+  ]);
 
   const handleRealtimeEvent = useCallback(
     (event: FitMeetRealtimeEvent) => {
@@ -1971,6 +2490,10 @@ export function FitMeetCompleteExperience({
         'feed.comment.created': '你的动态收到了一条新评论。',
         'public_intent.application.created': '你的社交需求收到了一条新申请。',
         'task.application.created': '你的任务需求收到了一条新申请。',
+        'group.join.requested': '你的组局收到一条新的加入申请。',
+        'group.join.approved': '你的加入申请已通过。',
+        'group.waitlist.promoted': '你已从候补转为正式成员。',
+        'group.cancelled': '一个相关组局已取消。',
       };
       const copy = eventCopy[event.eventType];
       if (notificationEnabled && copy) {
@@ -2041,7 +2564,8 @@ export function FitMeetCompleteExperience({
   };
 
   const resolveToolProposal = async (decision: 'approve' | 'decline', message?: string) => {
-    if (!activeAgentThread || !selectedToolProposal) return;
+    if (!activeAgentThread || !selectedToolProposal || toolProposalDecision) return;
+    setToolProposalDecision(decision);
     try {
       await api.resolveAgentToolProposal(
         activeAgentThread.id,
@@ -2056,10 +2580,16 @@ export function FitMeetCompleteExperience({
         decision === 'approve'
           ? '已按你的确认提交；我会以服务端返回的实际结果更新状态。'
           : '好的，这项操作不会执行。',
+        decision === 'approve' ? 'success' : 'info',
       );
     } catch (reason) {
       await loadAgentThread(activeAgentThread.id).catch(() => undefined);
-      notice(reason instanceof Error ? reason.message : '这项操作没有成功提交；请检查后重试。');
+      notice(
+        reason instanceof Error ? reason.message : '这项操作没有成功提交；请检查后重试。',
+        'error',
+      );
+    } finally {
+      setToolProposalDecision(null);
     }
   };
 
@@ -2073,6 +2603,37 @@ export function FitMeetCompleteExperience({
   const navigateDestination = (destination: FitMeetAppDestination) => {
     setActiveTab(destination);
     router.push(destinationPath[destination]);
+  };
+
+  const createGroupFromDemand = async (
+    sourceDemand: FitMeetDemand,
+    joinMode: FitMeetGroupJoinMode,
+  ) => {
+    try {
+      const created = await api.createGroup({
+        demandId: sourceDemand.id,
+        joinMode,
+        capacityMin: Math.max(2, sourceDemand.capacityMin),
+        capacityMax: sourceDemand.capacityMax,
+      });
+      notice('组局已由服务端创建；不会自动邀请或联系任何人。', 'success');
+      router.push(`/agent/try/groups/${encodeURIComponent(created.id)}`);
+      return true;
+    } catch (reason) {
+      if (reason instanceof FitMeetApiError && reason.code === 'GROUP_ALREADY_EXISTS') {
+        const groupId =
+          reason.details && typeof reason.details === 'object' && 'groupId' in reason.details
+            ? String((reason.details as { groupId: unknown }).groupId || '')
+            : '';
+        if (groupId) {
+          notice('这条需求已经有组局，已为你打开现有记录。', 'info');
+          router.push(`/agent/try/groups/${encodeURIComponent(groupId)}`);
+          return true;
+        }
+      }
+      notice(reason instanceof Error ? reason.message : '组局未能创建，请稍后重试。', 'error');
+      return false;
+    }
   };
 
   const openThreadFromShell = async (threadId: string) => {
@@ -2144,13 +2705,22 @@ export function FitMeetCompleteExperience({
     }
   }, [api, liveApi]);
 
-  const addFriendFromProfile = async (user: PublicUserProfile, message: string) => {
+  const addFriendFromProfile = async (
+    user: PublicUserProfile,
+    message: string,
+  ): Promise<FitMeetActionResult> => {
     try {
       await api.createConnectionRequest(user.id, message, initialEntityId || '');
       await refreshConnections();
-      notice('好友申请已发送；对方接受前不会开放连续私信。');
+      notice('好友申请已发送；对方接受前不会开放连续私信。', 'success', {
+        label: '查看申请',
+        onSelect: () => router.push('/agent/try/relationships'),
+      });
+      return { ok: true };
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '好友申请未能发送。');
+      const error = reason instanceof Error ? reason.message : '好友申请未能发送。';
+      notice(error, 'error');
+      return { ok: false, error };
     }
   };
 
@@ -2206,14 +2776,23 @@ export function FitMeetCompleteExperience({
   };
 
   const acknowledgeAllEvents = async () => {
-    const ids = dedupeInboxEvents(agentInboxEvents)
-      .map((event) => event.id)
-      .filter(Boolean);
-    if (!ids.length) return;
+    if (!agentInboxUnreadCount) return;
     try {
-      await api.acknowledgeAgentInboxEvents(ids);
-      setAgentInboxEvents([]);
-      notice('通知已在统一服务端标记为已读。');
+      const result = await api.acknowledgeAllAgentInboxEvents();
+      const acknowledgedAt = new Date().toISOString();
+      if (agentInboxScope === 'unread') {
+        setAgentInboxEvents([]);
+        setAgentInboxNextCursor(null);
+        setAgentInboxTotal(0);
+      } else {
+        setAgentInboxEvents((events) =>
+          events.map((event) =>
+            event.acknowledgedAt ? event : { ...event, acknowledgedAt },
+          ),
+        );
+      }
+      setAgentInboxUnreadCount(0);
+      notice(`已同步标记 ${result.acknowledgedCount} 条服务端通知为已读。`);
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : '通知暂时无法全部标记为已读。');
     }
@@ -2253,24 +2832,6 @@ export function FitMeetCompleteExperience({
       if (record) void activateDemand(record);
     }
   }, [api, demands, initialEntityId, initialExperience, liveApi]);
-
-  if (session.state.status === 'loading')
-    return (
-      <main className={styles.appPage}>
-        <section className={`${styles.mobileSurface} ${styles.loadingSurface}`} aria-live="polite">
-          <FitMeetBrandIcon size={78} priority />
-          <p>正在准备你的 FitMeet 工作台…</p>
-        </section>
-      </main>
-    );
-  if (session.state.status === 'anonymous')
-    return (
-      <FitMeetLogin
-        onLogin={session.login}
-        onSendCode={session.sendSmsCode}
-        initialError={session.state.error}
-      />
-    );
 
   if (surface === 'onboarding')
     return (
@@ -2354,8 +2915,14 @@ export function FitMeetCompleteExperience({
         onNewThread={() => void createThreadFromShell()}
         onOpenHelp={() => setOverlay('accountSafety')}
         onOpenMemory={() => setOverlay('memory')}
+        onOpenSearchResult={openGlobalSearchResult}
         onOpenSettings={() => setOverlay('settings')}
         onOpenThread={(threadId) => void openThreadFromShell(threadId)}
+        onRetrySync={() => {
+          notice('正在重新同步账号数据；页面草稿不会被清空。', 'pending');
+          void reconcileRealtimeState();
+        }}
+        onSearch={runGlobalSearch}
       >
         <div
           className={`${styles.appScroll} ${!socialExperienceActive && activeTab === 'home' ? styles.agentWorkspaceScroll : styles.secondaryWorkspaceScroll}`}
@@ -2388,12 +2955,22 @@ export function FitMeetCompleteExperience({
               conversation={selectedConversation}
               messages={conversation}
               messageInput={conversationInput}
+              messageSending={conversationSending}
               events={dedupeInboxEvents(agentInboxEvents)}
+              eventsScope={agentInboxScope}
+              eventsTotal={agentInboxTotal}
+              eventsHistoryCount={agentInboxHistoryCount}
+              eventsUnreadCount={agentInboxUnreadCount}
+              eventsLoading={agentInboxLoading}
+              eventsError={agentInboxError}
+              eventsNextCursor={agentInboxNextCursor}
+              eventsLoadingMore={agentInboxLoadingMore}
               post={deepLinkedPost}
               demand={deepLinkedDemand}
+              groupId={initialExperience === 'group' ? initialEntityId : undefined}
               onBack={() => router.back()}
               onUser={(id) => router.push(`/agent/try/users/${id}`)}
-              onMessageInput={setConversationInput}
+              onMessageInput={changeConversationInput}
               onSend={() => void sendConversation()}
               onRetry={(item) => void sendConversation(item)}
               onRecall={(id) => void recallConversationMessage(id)}
@@ -2414,7 +2991,7 @@ export function FitMeetCompleteExperience({
                 }).then(() => router.push('/agent/try/messages'));
               }}
               onRelationshipAction={(request, action) => void resolveConnection(request, action)}
-              onAddFriend={(user, message) => void addFriendFromProfile(user, message)}
+              onAddFriend={addFriendFromProfile}
               onDeleteFriend={(user) => void deleteFriendFromProfile(user)}
               onStartConversation={(user) => void startConversationFromProfile(user)}
               onConversation={(id) => router.push(`/agent/try/messages/${encodeURIComponent(id)}`)}
@@ -2446,11 +3023,18 @@ export function FitMeetCompleteExperience({
                   )
               }
               onEvent={(event) => void openInboxEvent(event)}
+              onAcknowledgeEvent={acknowledgeInboxEvent}
               onAcknowledgeAll={() => void acknowledgeAllEvents()}
+              onEventsScope={selectAgentInboxScope}
+              onRetryEvents={() => void refreshAgentInbox(agentInboxScope)}
+              onLoadMoreEvents={() => void loadMoreInboxEvents()}
               onPostLike={(id) => void toggleLike(id)}
               postLiked={Boolean(deepLinkedPost && likedPostIds.includes(deepLinkedPost.id))}
               onOpenPost={(id) => router.push(`/agent/try/discover/posts/${id}`)}
               onOpenDemand={(id) => router.push(`/agent/try/demands/${encodeURIComponent(id)}`)}
+              onGroup={(id) => router.push(`/agent/try/groups/${encodeURIComponent(id)}`)}
+              onGroups={() => router.push('/agent/try/groups')}
+              onCreateGroup={createGroupFromDemand}
               onNotice={notice}
             />
           ) : null}
@@ -2563,6 +3147,7 @@ export function FitMeetCompleteExperience({
               onPrivacy={() => setOverlay('privacy')}
               onNotification={(value) => void updateNotificationPreference(value)}
               onRelationships={() => router.push('/agent/try/relationships')}
+              onGroups={() => router.push('/agent/try/groups')}
               onReboard={() => {
                 setAgentOnlyMode(false);
                 setSurface('onboarding');
@@ -2589,9 +3174,31 @@ export function FitMeetCompleteExperience({
           ) : null}
         </div>
         {toast ? (
-          <p className={styles.toast} role="status">
-            <FiCheck /> {toast}
-          </p>
+          <div
+            className={styles.toast}
+            data-tone={toast.tone}
+            role={toast.tone === 'error' ? 'alert' : 'status'}
+            aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
+          >
+            <FeedbackIcon tone={toast.tone} />
+            <span>{toast.message}</span>
+            {toast.action ? (
+              <button
+                type="button"
+                className={styles.toastAction}
+                onClick={() => {
+                  const action = toast.action;
+                  setToast(null);
+                  action?.onSelect();
+                }}
+              >
+                {toast.action.label} <FiChevronRight />
+              </button>
+            ) : null}
+            <button type="button" className={styles.toastClose} aria-label="关闭提示" onClick={() => setToast(null)}>
+              <FiX />
+            </button>
+          </div>
         ) : null}
       </FitMeetAgentShell>
 
@@ -2600,6 +3207,7 @@ export function FitMeetCompleteExperience({
           api={api}
           candidate={selectedCandidate}
           candidates={activeCandidates}
+          demandTitle={demand.title}
           relationship={relationship}
           inviteStatus={selectedCandidateInviteStatus}
           onClose={() => setOverlay(null)}
@@ -2609,7 +3217,7 @@ export function FitMeetCompleteExperience({
           }}
           onDismiss={dismissCandidate}
           onSave={() => recordCandidate(selectedCandidate.id, 'saved')}
-          onFriend={() => void requestFriendship()}
+          onFriend={requestFriendship}
           onInvite={createInvite}
           onConversation={openDemandConversation}
           onReport={async () => {
@@ -2691,7 +3299,8 @@ export function FitMeetCompleteExperience({
           closed={selectedConversationClosed}
           items={conversation}
           input={conversationInput}
-          onInput={setConversationInput}
+          sending={conversationSending}
+          onInput={changeConversationInput}
           onSend={() => void sendConversation()}
           onMute={() => void toggleConversationMute()}
           onRecall={(id) => void recallConversationMessage(id)}
@@ -2717,10 +3326,22 @@ export function FitMeetCompleteExperience({
       ) : null}
       {overlay === 'memory' ? (
         <MemorySheet
-          memories={memories}
+          key={memoryOwnerId ?? 'anonymous'}
+          ownerId={memoryOwnerId}
+          memories={memoryStateBelongsToCurrentOwner ? memories : []}
+          control={memoryStateBelongsToCurrentOwner ? memoryControl : null}
+          loading={Boolean(memoryOwnerId) && (!memoryStateBelongsToCurrentOwner || memoryLoading)}
+          error={memoryStateBelongsToCurrentOwner ? memoryError : null}
           onClose={() => setOverlay(null)}
           onSave={saveMemory}
+          onUpdate={updateMemory}
           onDelete={deleteMemory}
+          onReject={rejectMemory}
+          onToggleInference={toggleMemoryInference}
+          onSuppress={suppressMemory}
+          onRemoveSuppression={removeMemorySuppression}
+          onLoadUsage={loadMemoryUsage}
+          onRetry={refreshMemoryCenter}
         />
       ) : null}
       {overlay === 'history' ? (
@@ -2742,7 +3363,9 @@ export function FitMeetCompleteExperience({
         <ToolApprovalSheet
           key={selectedToolProposal.id}
           proposal={selectedToolProposal}
+          busy={toolProposalDecision}
           onClose={() => {
+            if (toolProposalDecision) return;
             setOverlay(null);
             setSelectedToolProposal(null);
           }}
@@ -3081,6 +3704,9 @@ function AgentToolTimelineCard({
   onOpenProposal: () => void;
 }) {
   const isProposal = entry.kind === 'tool_proposal';
+  const args = proposalArguments(entry);
+  const disclosure = agentToolDisclosure(entry.toolName, args);
+  const resultLink = agentToolResultLink(entry.payload || {});
   const awaitingConfirmation =
     isProposal && ['awaiting_confirmation', 'failed'].includes(entry.toolStatus || '');
   const readyForReview =
@@ -3130,6 +3756,28 @@ function AgentToolTimelineCard({
             ? '信息已整理好，但不会自动生成或发布。'
             : '小福已把这一步记录在账号级对话里。')}
       </p>
+      <details className={styles.toolDisclosure}>
+        <summary>为什么出现 · 使用了哪些资料</summary>
+        <div>
+          <p>{disclosure.why}</p>
+          <strong>本次读取</strong>
+          <ul>{disclosure.sources.map((source) => <li key={source}>{source}</li>)}</ul>
+          <small><FiShield /> {disclosure.writeScope}</small>
+        </div>
+      </details>
+      <footer className={styles.toolAuditFooter}>
+        <time dateTime={entry.updatedAt || entry.createdAt}>
+          {entry.updatedAt || entry.createdAt
+            ? new Date(entry.updatedAt || entry.createdAt).toLocaleString('zh-CN', {
+                month: 'numeric',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '刚刚更新'}
+        </time>
+        {isCompleted && resultLink ? <Link href={resultLink.href}>{resultLink.label} <FiChevronRight /></Link> : null}
+      </footer>
       {readyForReview ? (
         <button type="button" className={styles.secondaryButton} onClick={onReviewDemandCard}>
           由我生成需求卡 <FiChevronRight />
@@ -4038,10 +4686,12 @@ function proposalApprovalCopy(proposal: AgentThreadEntry) {
 
 function ToolApprovalSheet({
   proposal,
+  busy,
   onClose,
   onResolve,
 }: {
   proposal: AgentThreadEntry;
+  busy: 'approve' | 'decline' | null;
   onClose: () => void;
   onResolve: (decision: 'approve' | 'decline', message?: string) => void;
 }) {
@@ -4050,14 +4700,20 @@ function ToolApprovalSheet({
   const editable =
     proposal.toolName === 'send_invitation' || proposal.toolName === 'request_service_connection';
   const [message, setMessage] = useState(typeof args.message === 'string' ? args.message : '');
-  const displayedArguments = Object.entries(args).filter(
-    ([key]) => !['message', 'invitation_message', 'service_message'].includes(key),
-  );
+  const displayedArguments = visibleAgentArguments(args);
+  const disclosure = agentToolDisclosure(proposal.toolName, args);
   return (
-    <Sheet title={approval.title} onClose={onClose}>
+    <Sheet title={approval.title} closeDisabled={Boolean(busy)} onClose={onClose}>
+      <div aria-busy={Boolean(busy)}>
       <p className={styles.sheetLead}>
         <FiShield /> {approval.summary}
       </p>
+      <ol className={styles.actionLifecycle} aria-label="操作进度">
+        <li data-state="complete"><FiCheck /> 草稿已准备</li>
+        <li data-state={busy ? 'complete' : 'current'}>{busy ? <FiCheck /> : <span>2</span>} 等待你确认</li>
+        <li data-state={busy ? 'current' : 'upcoming'}>{busy ? <FiRefreshCw /> : <span>3</span>} {busy ? '正在执行' : '服务端执行'}</li>
+        <li data-state="upcoming"><span>4</span> 返回真实结果</li>
+      </ol>
       <article className={styles.detailCard}>
         <span>你将确认的内容</span>
         {editable ? (
@@ -4066,6 +4722,7 @@ function ToolApprovalSheet({
               className={styles.publishTextarea}
               aria-label="确认前可编辑的文案"
               value={message}
+              disabled={Boolean(busy)}
               onChange={(event) => setMessage(event.target.value)}
               placeholder="写一句你想表达的话"
             />
@@ -4074,35 +4731,43 @@ function ToolApprovalSheet({
         ) : null}
         {displayedArguments.length ? (
           <dl className={styles.detailRows}>
-            {displayedArguments.map(([key, value]) => (
-              <div key={key}>
-                <dt>{key.replace(/_/g, ' ')}</dt>
-                <dd>{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
+            {displayedArguments.map((item) => (
+              <div key={item.key}>
+                <dt>{item.label}</dt>
+                <dd>{item.value}</dd>
               </div>
             ))}
           </dl>
         ) : null}
       </article>
+      <details className={styles.approvalDisclosure} open>
+        <summary>为什么出现 · 本次会读取什么</summary>
+        <p>{disclosure.why}</p>
+        <ul>{disclosure.sources.map((source) => <li key={source}>{source}</li>)}</ul>
+        <small><FiShield /> {disclosure.writeScope}</small>
+      </details>
       <div className={styles.stackActions}>
         <button
           type="button"
-          className={styles.primaryButton}
-          disabled={editable && !message.trim()}
+          className={`${styles.primaryButton} ${busy === 'approve' ? styles.spinIcon : ''}`}
+          disabled={Boolean(busy) || (editable && !message.trim())}
           onClick={() => onResolve('approve', editable ? message.trim() : undefined)}
         >
-          <FiCheck /> 我确认执行
+          {busy === 'approve' ? <><FiRefreshCw /> 正在执行…</> : <><FiCheck /> 我确认执行</>}
         </button>
         <button
           type="button"
-          className={styles.secondaryButton}
+          className={`${styles.secondaryButton} ${busy === 'decline' ? styles.spinIcon : ''}`}
+          disabled={Boolean(busy)}
           onClick={() => onResolve('decline')}
         >
-          不执行这一步
+          {busy === 'decline' ? <><FiRefreshCw /> 正在取消…</> : '不执行这一步'}
         </button>
       </div>
       <p className={styles.sheetSafety}>
         <FiShield /> 只有服务端返回成功后，界面才会显示“已完成”；网络失败不会被当作已发送或已发布。
       </p>
+      </div>
     </Sheet>
   );
 }
@@ -4194,6 +4859,7 @@ function ConversationSheet({
   closed,
   items,
   input,
+  sending,
   onInput,
   onSend,
   onMute,
@@ -4207,6 +4873,7 @@ function ConversationSheet({
   closed: boolean;
   items: ConversationMessage[];
   input: string;
+  sending: boolean;
   onInput: (value: string) => void;
   onSend: () => void;
   onMute: () => void;
@@ -4217,7 +4884,9 @@ function ConversationSheet({
 }) {
   const [actionMessageId, setActionMessageId] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState(false);
-  const title = conversation.displayName || conversation.username || 'FitMeet 用户';
+  const groupConversation = isGroupConversation(conversation);
+  const title =
+    conversation.title || conversation.displayName || conversation.username || 'FitMeet 用户';
   const muted =
     conversation.notificationLevel === 'muted' ||
     Boolean(conversation.mutedUntil && new Date(conversation.mutedUntil).getTime() > Date.now());
@@ -4228,16 +4897,18 @@ function ConversationSheet({
           <button type="button" onClick={onMute}>
             <FiBell /> {muted ? '恢复提醒' : '静音'}
           </button>
-          <button
-            type="button"
-            className={confirmBlock ? styles.threadDangerAction : ''}
-            onClick={() => {
-              if (confirmBlock) onBlock();
-              else setConfirmBlock(true);
-            }}
-          >
-            <FiShield /> {confirmBlock ? '确认拉黑' : '拉黑'}
-          </button>
+          {!groupConversation ? (
+            <button
+              type="button"
+              className={confirmBlock ? styles.threadDangerAction : ''}
+              onClick={() => {
+                if (confirmBlock) onBlock();
+                else setConfirmBlock(true);
+              }}
+            >
+              <FiShield /> {confirmBlock ? '确认拉黑' : '拉黑'}
+            </button>
+          ) : null}
         </div>
       )}
       <p className={styles.threadNote}>
@@ -4245,7 +4916,9 @@ function ConversationSheet({
         {closed
           ? '这段旧会话已关闭；历史记录只读保留'
           : unlocked
-            ? '双方确认后开放的真实会话；当前服务端仅支持文字消息'
+            ? groupConversation
+              ? '只有正式成员可以进入；离开组局后会同步收回群聊权限'
+              : '双方确认后开放的真实会话；当前服务端仅支持文字消息'
             : '等待双方接受邀请或好友关系后，才会开启连续会话'}
       </p>
       {unlocked || closed ? (
@@ -4326,6 +4999,7 @@ function ConversationSheet({
       {unlocked ? (
         <form
           className={styles.sheetComposer}
+          aria-busy={sending}
           onSubmit={(event) => {
             event.preventDefault();
             onSend();
@@ -4333,12 +5007,13 @@ function ConversationSheet({
         >
           <input
             value={input}
+            disabled={sending}
             onChange={(event) => onInput(event.target.value)}
-            placeholder="说点什么"
+            placeholder={sending ? '正在发送…' : '说点什么'}
             aria-label="消息内容"
           />
-          <button type="submit" aria-label="发送消息" disabled={!input.trim()}>
-            <FiSend />
+          <button type="submit" aria-label={sending ? '正在发送消息' : '发送消息'} disabled={sending || !input.trim()}>
+            {sending ? <FiRefreshCw /> : <FiSend />}
           </button>
         </form>
       ) : (
@@ -4356,46 +5031,418 @@ function ConversationSheet({
   );
 }
 
+function formatMemoryDate(value?: string) {
+  if (!value) return '时间未提供';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+}
+
 function MemorySheet({
+  ownerId,
   memories,
+  control,
+  loading,
+  error,
   onClose,
   onSave,
+  onUpdate,
   onDelete,
+  onReject,
+  onToggleInference,
+  onSuppress,
+  onRemoveSuppression,
+  onLoadUsage,
+  onRetry,
 }: {
+  ownerId: string | null;
   memories: FitMeetAgentMemory[];
+  control: AgentMemoryControl | null;
+  loading: boolean;
+  error: string | null;
   onClose: () => void;
-  onSave: (id: string) => void;
-  onDelete: (id: string) => void;
+  onSave: (
+    id: string,
+    useScope: AgentMemoryUseScope,
+    explicitSensitiveConsent: boolean,
+  ) => Promise<void>;
+  onUpdate: (
+    id: string,
+    patch: { value?: string; useScope?: AgentMemoryUseScope },
+  ) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onReject: (id: string) => Promise<void>;
+  onToggleInference: () => Promise<void>;
+  onSuppress: (id: string) => Promise<boolean>;
+  onRemoveSuppression: (memoryType: string) => Promise<void>;
+  onLoadUsage: (id: string, cursor?: string) => Promise<AgentMemoryUsagePage>;
+  onRetry: () => Promise<void>;
 }) {
+  const [busyAction, setBusyAction] = useState('');
+  const [scopeDrafts, setScopeDrafts] = useState<Record<string, AgentMemoryUseScope>>({});
+  const [editingId, setEditingId] = useState('');
+  const [editValue, setEditValue] = useState('');
+  const [confirmingAction, setConfirmingAction] = useState<{
+    id: string;
+    kind: 'delete' | 'suppress';
+  } | null>(null);
+  const [expandedUsageId, setExpandedUsageId] = useState('');
+  const [usageByMemory, setUsageByMemory] = useState<
+    Record<
+      string,
+      {
+        items: AgentMemoryUsageEvent[];
+        nextCursor?: string | null;
+        loading: boolean;
+        error?: string | null;
+      }
+    >
+  >({});
+  const usageOwnerIdRef = useRef<string | null>(ownerId);
+  const usageLoadRequestRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    usageOwnerIdRef.current = ownerId;
+    usageLoadRequestRef.current = {};
+    setBusyAction('');
+    setScopeDrafts({});
+    setEditingId('');
+    setEditValue('');
+    setConfirmingAction(null);
+    setExpandedUsageId('');
+    setUsageByMemory({});
+  }, [ownerId]);
+
+  useEffect(() => {
+    setScopeDrafts((current) => {
+      const next: Record<string, AgentMemoryUseScope> = {};
+      for (const memory of memories)
+        next[memory.id] = memory.useScope ?? current[memory.id] ?? defaultMemoryUseScope(memory);
+      return next;
+    });
+  }, [memories]);
+
+  const execute = async (key: string, action: () => Promise<void>) => {
+    if (busyAction) return;
+    setBusyAction(key);
+    try {
+      await action();
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const loadUsage = async (memoryId: string, cursor?: string) => {
+    const requestOwnerId = ownerId;
+    const requestId = (usageLoadRequestRef.current[memoryId] ?? 0) + 1;
+    usageLoadRequestRef.current[memoryId] = requestId;
+    if (!requestOwnerId || usageOwnerIdRef.current !== requestOwnerId) return;
+    setUsageByMemory((current) => ({
+      ...current,
+      [memoryId]: {
+        items: cursor ? current[memoryId]?.items ?? [] : [],
+        nextCursor: current[memoryId]?.nextCursor,
+        loading: true,
+        error: null,
+      },
+    }));
+    try {
+      const page = await onLoadUsage(memoryId, cursor);
+      if (
+        usageOwnerIdRef.current !== requestOwnerId ||
+        usageLoadRequestRef.current[memoryId] !== requestId
+      )
+        return;
+      setUsageByMemory((current) => ({
+        ...current,
+        [memoryId]: {
+          items: cursor
+            ? mergeMemoryUsageEvents(current[memoryId]?.items ?? [], page.items)
+            : mergeMemoryUsageEvents([], page.items),
+          nextCursor: page.nextCursor ?? null,
+          loading: false,
+          error: null,
+        },
+      }));
+    } catch (reason) {
+      if (
+        usageOwnerIdRef.current !== requestOwnerId ||
+        usageLoadRequestRef.current[memoryId] !== requestId
+      )
+        return;
+      setUsageByMemory((current) => ({
+        ...current,
+        [memoryId]: {
+          items: current[memoryId]?.items ?? [],
+          nextCursor: current[memoryId]?.nextCursor,
+          loading: false,
+          error: reason instanceof Error ? reason.message : '使用记录暂时无法读取。',
+        },
+      }));
+    }
+  };
+
+  const toggleUsage = (memoryId: string) => {
+    if (expandedUsageId === memoryId) {
+      setExpandedUsageId('');
+      return;
+    }
+    setExpandedUsageId(memoryId);
+    if (!usageByMemory[memoryId]) void loadUsage(memoryId);
+  };
+
   return (
-    <Sheet title="人物画像" onClose={onClose}>
-      <p className={styles.sheetLead}>小福只会在你确认后保存偏好。你可以随时修改或删除。</p>
-      <section className={styles.memoryList}>
-        {memories.length ? (
-          memories.map((memory) => (
-            <article key={memory.id}>
-              <span>{memory.memoryType}</span>
-              <strong>{memory.value || memory.summary || '未填写'}</strong>
-              <p>推荐时会先解释共同点和安全边界，不会替你做决定。</p>
-              <div className={styles.inlineActions}>
-                {memory.status === 'confirmed' || memory.status === 'active' ? (
-                  <button type="button" onClick={() => void onDelete(memory.id)}>
-                    <FiTrash2 /> 删除
+    <Sheet title="人物画像与记忆" onClose={onClose}>
+      <p className={styles.sheetLead}>查看小福记住了什么、来自哪里、能用于什么，以及它过去在哪里真正被使用。待确认推断不会自动成为长期记忆。</p>
+      <section className={styles.memoryControlPanel} aria-busy={loading || busyAction === 'control'}>
+        <div>
+          <strong>允许提出新画像</strong>
+          <p>只从你的原话中提出，保存和使用范围仍由你逐条确认。</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={control?.inferenceEnabled ?? false}
+          aria-label="允许小福提出新的待确认画像"
+          disabled={!control || loading || Boolean(busyAction)}
+          onClick={() => void execute('control', onToggleInference)}
+        >
+          <span />
+          {control ? (control.inferenceEnabled ? '已开启' : '已暂停') : '同步中'}
+        </button>
+        {control?.suppressions.length ? (
+          <div className={styles.memorySuppressions}>
+            <span>禁止再次推断</span>
+            <ul>
+              {control.suppressions.map((suppression) => (
+                <li key={suppression.memoryType}>
+                  <span>{memoryTypeLabel(suppression.memoryType)}</span>
+                  <button
+                    type="button"
+                    disabled={Boolean(busyAction)}
+                    onClick={() =>
+                      void execute(`unsuppress:${suppression.memoryType}`, () =>
+                        onRemoveSuppression(suppression.memoryType),
+                      )
+                    }
+                  >
+                    允许再次提出
                   </button>
-                ) : (
-                  <button type="button" onClick={() => void onSave(memory.id)}>
-                    确认保存
-                  </button>
-                )}
-              </div>
-            </article>
-          ))
-        ) : (
-          <p className={styles.emptyState}>
-            没有已保存的偏好。你可以在对话中告诉小福什么会让你感到舒服。
-          </p>
-        )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
+      {error ? (
+        <div className={styles.memoryLoadError} role="alert">
+          <span>{error}</span>
+          <button type="button" disabled={loading} onClick={() => void onRetry()}>
+            {loading ? <FiRefreshCw /> : null} 重新同步
+          </button>
+        </div>
+      ) : null}
+      <section className={styles.memoryList}>
+        {loading && !memories.length ? (
+          <p className={styles.emptyState} role="status">正在同步你的画像与使用边界…</p>
+        ) : memories.length ? (
+          memories.map((memory) => {
+            const confirmed = ['confirmed', 'active'].includes(memory.status.toLowerCase());
+            const memoryActions = memoryDecisionActions(memory.status);
+            const sensitivity = memorySensitivityPresentation(memory.sensitivity);
+            const evidence = memoryEvidenceText(memory.evidence);
+            const scope = scopeDrafts[memory.id] ?? defaultMemoryUseScope(memory);
+            const scopePresentation = memoryUseScopePresentation(scope);
+            const busy = busyAction.startsWith(`${memory.id}:`);
+            const actionsLocked = Boolean(busyAction);
+            const usage = usageByMemory[memory.id];
+            const confirming = confirmingAction?.id === memory.id ? confirmingAction.kind : null;
+            return (
+              <article key={memory.id} aria-busy={busy}>
+                <header>
+                  <span>{memoryTypeLabel(memory.memoryType)}</span>
+                  <em data-tone={confirmed ? 'positive' : sensitivity.tone}>{memoryStatusLabel(memory.status)}</em>
+                </header>
+                {editingId === memory.id ? (
+                  <form
+                    className={styles.memoryEditForm}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const nextValue = editValue.trim();
+                      if (!nextValue) return;
+                      void execute(`${memory.id}:edit`, async () => {
+                        if (await onUpdate(memory.id, { value: nextValue })) setEditingId('');
+                      });
+                    }}
+                  >
+                    <label>
+                      <span>纠正这条画像</span>
+                      <textarea
+                        value={editValue}
+                        maxLength={240}
+                        autoFocus
+                        onChange={(event) => setEditValue(event.target.value)}
+                      />
+                    </label>
+                    <div className={styles.inlineActions}>
+                      <button type="submit" disabled={!editValue.trim() || actionsLocked}>保存纠正</button>
+                      <button type="button" disabled={actionsLocked} onClick={() => setEditingId('')}>取消</button>
+                    </div>
+                  </form>
+                ) : (
+                  <strong>{memory.value || memory.summary || '未填写'}</strong>
+                )}
+                <dl className={styles.memoryMetadata}>
+                  <div><dt>信息来源</dt><dd>{memorySourceLabel(memory.source)}</dd></div>
+                  <div><dt>提取把握</dt><dd>{memoryConfidenceLabel(memory.confidence)}</dd></div>
+                  <div><dt>敏感等级</dt><dd data-tone={sensitivity.tone}>{sensitivity.label}</dd></div>
+                  <div><dt>使用范围</dt><dd>{scopePresentation.label}</dd></div>
+                  <div><dt>最后更新</dt><dd>{formatMemoryDate(memory.updatedAt || memory.createdAt)}</dd></div>
+                  {memory.userConfirmedAt ? <div><dt>由你确认</dt><dd>{formatMemoryDate(memory.userConfirmedAt)}</dd></div> : null}
+                  {memory.expiresAt ? <div><dt>有效期至</dt><dd>{formatMemoryDate(memory.expiresAt)}</dd></div> : null}
+                </dl>
+                {(evidence.length || memory.sourceConversationId) ? (
+                  <details className={styles.memoryEvidence}>
+                    <summary>为什么会出现</summary>
+                    {evidence.map((item) => <blockquote key={item}>“{item}”</blockquote>)}
+                    {memory.sourceConversationId ? (
+                      <Link href={`/agent/try/chat/${encodeURIComponent(memory.sourceConversationId)}`}>
+                        查看来源对话
+                      </Link>
+                    ) : null}
+                  </details>
+                ) : null}
+                <label className={styles.memoryScopeField}>
+                  <span>这条画像可以用于</span>
+                  <select
+                    value={scope}
+                    disabled={actionsLocked}
+                    onChange={(event) => {
+                      const nextScope = event.target.value as AgentMemoryUseScope;
+                      const previousScope = scope;
+                      setScopeDrafts((current) => ({ ...current, [memory.id]: nextScope }));
+                      if (!memoryCanChangeScope(memory.status)) return;
+                      void execute(`${memory.id}:scope`, async () => {
+                        if (!(await onUpdate(memory.id, { useScope: nextScope })))
+                          setScopeDrafts((current) => ({ ...current, [memory.id]: previousScope }));
+                      });
+                    }}
+                  >
+                    {agentMemoryUseScopeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <small>
+                    {scopePresentation.description}
+                    {sensitivity.tone === 'caution' && ['agent_and_matching', 'matching_only'].includes(scope)
+                      ? ' 选择后即明确授权这条敏感画像参与匹配。'
+                      : ''}
+                  </small>
+                </label>
+                <p className={styles.memoryBoundary}><FiShield /> {memoryBoundaryNotice(memory)}</p>
+                {confirmed ? (
+                  <div className={styles.memoryUsageDisclosure}>
+                    <button
+                      type="button"
+                      aria-expanded={expandedUsageId === memory.id}
+                      onClick={() => toggleUsage(memory.id)}
+                    >
+                      {expandedUsageId === memory.id ? '收起使用记录' : '查看在哪里用过'}
+                    </button>
+                    {expandedUsageId === memory.id ? (
+                      <div className={styles.memoryUsagePanel}>
+                        {usage?.loading && !usage.items.length ? <p role="status">正在读取真实使用记录…</p> : null}
+                        {usage?.error ? (
+                          <p role="alert">
+                            {usage.error}
+                            <button type="button" onClick={() => void loadUsage(memory.id)}>重试</button>
+                          </p>
+                        ) : null}
+                        {usage && !usage.loading && !usage.error && !usage.items.length ? (
+                          <p>尚未发现这条画像被 Agent 或匹配真正使用。</p>
+                        ) : null}
+                        {usage?.items.length ? (
+                          <ol>
+                            {usage.items.map((event) => {
+                              const path = memoryUsagePath(event);
+                              const content = (
+                                <>
+                                  <strong>{memoryUsagePurposeLabel(event.purpose)}</strong>
+                                  <span>{memoryUsageContextLabel(event)} · {formatMemoryDate(event.createdAt)}</span>
+                                </>
+                              );
+                              return <li key={event.id}>{path ? <Link href={path}>{content}</Link> : content}</li>;
+                            })}
+                          </ol>
+                        ) : null}
+                        {usage?.nextCursor ? (
+                          <button
+                            type="button"
+                            disabled={usage.loading}
+                            onClick={() => void loadUsage(memory.id, usage.nextCursor ?? undefined)}
+                          >
+                            {usage.loading ? '正在加载…' : '查看更多记录'}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className={`${styles.inlineActions} ${styles.memoryActions}`}>
+                  {confirming ? (
+                    <div className={styles.memoryConfirmAction} role="group" aria-label={confirming === 'delete' ? '确认删除记忆' : '确认禁止再次推断'}>
+                      <span>{confirming === 'delete' ? '删除后将立即停止使用。' : `删除并不再推断“${memoryTypeLabel(memory.memoryType)}”？`}</span>
+                      <button
+                        type="button"
+                        disabled={actionsLocked}
+                        onClick={() => void execute(`${memory.id}:${confirming}`, async () => {
+                          const succeeded = confirming === 'delete'
+                            ? await onDelete(memory.id)
+                            : await onSuppress(memory.id);
+                          if (succeeded) setConfirmingAction(null);
+                        })}
+                      >确认</button>
+                      <button type="button" disabled={actionsLocked} onClick={() => setConfirmingAction(null)}>取消</button>
+                    </div>
+                  ) : memoryActions.length ? (
+                    <>
+                      {memoryActions.includes('confirm') ? (
+                        <button type="button" disabled={actionsLocked} aria-busy={busyAction === `${memory.id}:save`} onClick={() => void execute(`${memory.id}:save`, () => onSave(memory.id, scope, sensitivity.tone === 'caution'))}>
+                          {busyAction === `${memory.id}:save` ? <FiRefreshCw /> : <FiCheck />} {memory.status === 'expired' ? '重新确认' : sensitivity.tone === 'caution' ? '确认保存敏感画像' : '确认保存'}
+                        </button>
+                      ) : null}
+                      {confirmed && editingId !== memory.id ? (
+                        <button type="button" disabled={actionsLocked} onClick={() => {
+                          setEditingId(memory.id);
+                          setEditValue(memory.value || memory.summary || '');
+                        }}><FiEdit3 /> 纠正</button>
+                      ) : null}
+                      {memoryActions.includes('reject') ? (
+                        <button type="button" disabled={actionsLocked} aria-busy={busyAction === `${memory.id}:reject`} onClick={() => void execute(`${memory.id}:reject`, () => onReject(memory.id))}>
+                          {busyAction === `${memory.id}:reject` ? <FiRefreshCw /> : <FiX />} 不保存
+                        </button>
+                      ) : null}
+                      {memoryActions.includes('delete') ? (
+                        <button type="button" disabled={actionsLocked} onClick={() => setConfirmingAction({ id: memory.id, kind: 'delete' })}><FiTrash2 /> 删除</button>
+                      ) : null}
+                      <button type="button" disabled={actionsLocked} onClick={() => setConfirmingAction({ id: memory.id, kind: 'suppress' })}><FiLock /> 删除并不再推断此类</button>
+                    </>
+                  ) : <small>当前状态没有可执行操作。</small>}
+                </div>
+              </article>
+            );
+          })
+        ) : !error ? (
+          <p className={styles.emptyState}>
+            目前没有待确认或已保存的画像。小福只会从你的原话中提出，并先交给你确认。
+          </p>
+        ) : null}
+      </section>
+      <p className={styles.memoryScopeNote}><FiInfo /> Agent 记忆、匹配资料和公开个人资料保持分开；当前页面不会自动公开资料，也不会替你发消息、加好友、邀请或组局。</p>
     </Sheet>
   );
 }

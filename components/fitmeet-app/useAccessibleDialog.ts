@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 const focusableSelector = [
   "a[href]",
@@ -11,7 +11,11 @@ const focusableSelector = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-export function useAccessibleDialog(active: boolean, onClose: () => void) {
+export function useAccessibleDialog(
+  active: boolean,
+  onClose: () => void,
+  initialFocusRef?: RefObject<HTMLElement | null>,
+) {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
 
@@ -24,8 +28,10 @@ export function useAccessibleDialog(active: boolean, onClose: () => void) {
     document.body.style.overflow = "hidden";
 
     const frame = window.requestAnimationFrame(() => {
+      const preferred = initialFocusRef?.current;
       const first = dialogRef.current?.querySelector<HTMLElement>(focusableSelector);
-      (first ?? dialogRef.current)?.focus();
+      const target = preferred && dialogRef.current?.contains(preferred) ? preferred : first;
+      (target ?? dialogRef.current)?.focus();
     });
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -59,7 +65,7 @@ export function useAccessibleDialog(active: boolean, onClose: () => void) {
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
-  }, [active]);
+  }, [active, initialFocusRef]);
 
   return dialogRef;
 }

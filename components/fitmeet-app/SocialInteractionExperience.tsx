@@ -25,20 +25,29 @@ import {
 } from 'react-icons/fi';
 import type {
   AgentInboxEvent,
+  AgentInboxScope,
   ConversationMessage,
   FeedComment,
   FeedPost,
   FitMeetConnectionRequest,
   FitMeetConversation,
   FitMeetDemand,
+  FitMeetGroupJoinMode,
   PublicUserProfile,
 } from '@/lib/fitmeet-api-contract';
 import type { FitMeetApiClient } from '@/lib/fitmeet-api-client';
+import type { FitMeetActionResult } from '@/lib/fitmeet-interaction-state';
+import {
+  inboxEventCategory,
+  type InboxEventCategory,
+} from '@/lib/fitmeet-product-trust';
 import {
   firstUnreadPeerMessageIndex,
   type RelationshipSnapshot,
 } from '@/lib/fitmeet-social-state';
 import styles from './social-interaction.module.css';
+import { FriendRequestDialog } from './FriendRequestDialog';
+import { GroupExperience } from './GroupExperience';
 
 export type SocialExperienceMode =
   | 'user'
@@ -46,7 +55,9 @@ export type SocialExperienceMode =
   | 'conversation'
   | 'notifications'
   | 'post'
-  | 'demand';
+  | 'demand'
+  | 'groups'
+  | 'group';
 
 function UserAvatar({
   user,
@@ -100,9 +111,19 @@ export function SocialInteractionExperience(props: {
   conversation?: FitMeetConversation | null;
   messages: ConversationMessage[];
   messageInput: string;
+  messageSending: boolean;
   events: AgentInboxEvent[];
+  eventsScope: AgentInboxScope;
+  eventsTotal: number;
+  eventsHistoryCount: number;
+  eventsUnreadCount: number;
+  eventsLoading: boolean;
+  eventsError?: string | null;
+  eventsNextCursor?: string | null;
+  eventsLoadingMore: boolean;
   post?: FeedPost | null;
   demand?: FitMeetDemand | null;
+  groupId?: string;
   onBack: () => void;
   onUser: (id: number) => void;
   onMessageInput: (value: string) => void;
@@ -116,7 +137,7 @@ export function SocialInteractionExperience(props: {
     request: FitMeetConnectionRequest,
     action: 'accept' | 'reject' | 'cancel',
   ) => void;
-  onAddFriend: (user: PublicUserProfile, message: string) => void;
+  onAddFriend: (user: PublicUserProfile, message: string) => Promise<FitMeetActionResult>;
   onDeleteFriend: (user: PublicUserProfile) => void;
   onStartConversation: (user: PublicUserProfile) => void;
   onConversation: (id: string) => void;
@@ -125,13 +146,32 @@ export function SocialInteractionExperience(props: {
   onUnblockUser: (user: PublicUserProfile) => void;
   onReportUser: (user: PublicUserProfile, reason: string, details?: string) => void;
   onEvent: (event: AgentInboxEvent) => void;
+  onAcknowledgeEvent: (id: string) => Promise<void>;
   onAcknowledgeAll: () => void;
+  onEventsScope: (scope: AgentInboxScope) => void;
+  onRetryEvents: () => void;
+  onLoadMoreEvents: () => void;
   onPostLike: (id: number) => void;
   postLiked: boolean;
   onOpenPost: (id: number) => void;
   onOpenDemand: (id: string) => void;
+  onGroup: (id: string) => void;
+  onGroups: () => void;
+  onCreateGroup: (demand: FitMeetDemand, joinMode: FitMeetGroupJoinMode) => Promise<boolean>;
   onNotice: (message: string) => void;
 }) {
+  if (props.mode === 'groups' || props.mode === 'group')
+    return (
+      <GroupExperience
+        api={props.api}
+        groupId={props.mode === 'group' ? props.groupId : undefined}
+        onBack={props.onBack}
+        onGroup={props.onGroup}
+        onConversation={props.onConversation}
+        onUser={props.onUser}
+        onNotice={props.onNotice}
+      />
+    );
   if (props.mode === 'conversation') return <ConversationWorkspace {...props} />;
   if (props.mode === 'relationships') return <RelationshipsWorkspace {...props} />;
   if (props.mode === 'notifications') return <NotificationsWorkspace {...props} />;
@@ -144,7 +184,6 @@ type SocialProps = Parameters<typeof SocialInteractionExperience>[0];
 
 function UserWorkspace(props: SocialProps) {
   const [friendSheet, setFriendSheet] = useState(false);
-  const [message, setMessage] = useState('想先从共同兴趣开始认识一下。');
   const [confirm, setConfirm] = useState<'delete' | 'block' | 'report' | null>(null);
   const [reportReason, setReportReason] = useState('inappropriate_behavior');
   const [reportDetails, setReportDetails] = useState('');
@@ -404,44 +443,18 @@ function UserWorkspace(props: SocialProps) {
           </p>
         </aside>
       </div>
-      {friendSheet ? (
-        <div className={styles.modalShade} onMouseDown={() => setFriendSheet(false)}>
-          <section
-            className={styles.modal}
-            role="dialog"
-            aria-modal="true"
-            aria-label="发送好友申请"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <h2>发送好友申请</h2>
-                <p>对方接受前不会开放连续私信</p>
-              </div>
-              <button type="button" onClick={() => setFriendSheet(false)}>
-                <FiX />
-              </button>
-            </header>
-            <textarea
-              value={message}
-              maxLength={120}
-              onChange={(event) => setMessage(event.target.value)}
-            />
-            <small>{message.length}/120</small>
-            <button
-              type="button"
-              className={styles.confirmButton}
-              disabled={!message.trim()}
-              onClick={() => {
-                props.onAddFriend(user, message.trim());
-                setFriendSheet(false);
-              }}
-            >
-              确认发送申请
-            </button>
-          </section>
-        </div>
-      ) : null}
+      <FriendRequestDialog
+        open={friendSheet}
+        userName={user.name}
+        initialMessage="想先从共同兴趣开始认识一下。"
+        context={{
+          demandTitle: props.userContext?.demandTitle,
+          reason: props.userContext?.reason,
+          sourceLabel: props.userContext ? '当前需求的候选人资料' : '公开资料页',
+        }}
+        onClose={() => setFriendSheet(false)}
+        onSubmit={(value) => props.onAddFriend(user, value)}
+      />
       {confirm ? (
         <div className={styles.modalShade} onMouseDown={() => setConfirm(null)}>
           <section
@@ -677,16 +690,22 @@ function ConversationWorkspace(props: SocialProps) {
         <header className={styles.pageHeader}>
           <BackButton onBack={props.onBack} />
           <div>
-            <h1>私信</h1>
+            <h1>消息会话</h1>
             <p>正在同步会话权限</p>
           </div>
         </header>
-        <p className={styles.empty}>会话不可用，或双方尚未建立允许聊天的真实关系。</p>
+        <p className={styles.empty}>会话不可用，或当前账号还没有服务端确认的聊天权限。</p>
       </main>
     );
+  const isGroup = conversation.isGroup === true || conversation.contextType === 'group';
   const title =
-    conversation.displayName || conversation.username || conversation.peer?.name || 'FitMeet 用户';
+    conversation.title ||
+    conversation.displayName ||
+    conversation.username ||
+    conversation.peer?.name ||
+    (isGroup ? '组局群聊' : 'FitMeet 用户');
   const muted = conversation.notificationLevel === 'muted';
+  const canSendMessages = conversation.canSendMessages !== false;
   const firstUnreadIndex = firstUnreadPeerMessageIndex(props.messages, conversation.unread);
   return (
     <main className={`${styles.page} ${styles.conversationPage}`}>
@@ -696,6 +715,10 @@ function ConversationWorkspace(props: SocialProps) {
           type="button"
           className={styles.peerButton}
           onClick={() => {
+            if (isGroup) {
+              if (conversation.contextId) props.onGroup(conversation.contextId);
+              return;
+            }
             const id = Number(conversation.userId ?? conversation.peer?.id);
             if (id) props.onUser(id);
           }}
@@ -703,7 +726,13 @@ function ConversationWorkspace(props: SocialProps) {
           <span className={styles.smallAvatar}>{title.slice(0, 1)}</span>
           <span>
             <strong>{title}</strong>
-            <small>{conversation.online ? '在线' : '消息由统一服务同步'}</small>
+            <small>
+              {isGroup
+                ? `${conversation.memberCount || 0} 位正式成员 · 服务端群聊`
+                : conversation.online
+                  ? '在线'
+                  : '消息由统一服务同步'}
+            </small>
           </span>
         </button>
         <button
@@ -714,20 +743,22 @@ function ConversationWorkspace(props: SocialProps) {
         >
           <FiBell />
         </button>
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="拉黑用户"
-          onClick={() => setConfirmBlock(true)}
-        >
-          <FiShield />
-        </button>
+        {!isGroup ? (
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="拉黑用户"
+            onClick={() => setConfirmBlock(true)}
+          >
+            <FiShield />
+          </button>
+        ) : null}
       </header>
       <div className={styles.chatLayout}>
-        <aside className={styles.conversationListPanel} aria-label="私信列表">
+        <aside className={styles.conversationListPanel} aria-label="会话列表">
           <header>
             <div>
-              <strong>私信</strong>
+              <strong>会话</strong>
               <small>{props.conversations.length} 个已开放会话</small>
             </div>
             <FiMessageCircle />
@@ -735,7 +766,7 @@ function ConversationWorkspace(props: SocialProps) {
           <div>
             {props.conversations.map((item) => {
               const itemTitle =
-                item.displayName || item.username || item.peer?.name || 'FitMeet 用户';
+                item.title || item.displayName || item.username || item.peer?.name || 'FitMeet 用户';
               const active = item.id === conversation.id || item.conversationId === conversation.id;
               const mutedItem = item.notificationLevel === 'muted' || Boolean(item.mutedUntil);
               return (
@@ -765,7 +796,12 @@ function ConversationWorkspace(props: SocialProps) {
         </aside>
         <section className={styles.messageThread} ref={threadRef}>
           <p className={styles.threadSafety}>
-            <FiShield /> 双方确认后开放的真实会话；当前网页端发送文字消息。
+            <FiShield />{' '}
+            {isGroup
+              ? canSendMessages
+                ? '只有服务端确认的正式成员可以进入；退出或被移除后会同步收回群聊权限。'
+                : '当前群聊仅允许主理人和协作者发言；你仍可读取已有消息。'
+              : '双方确认后开放的真实会话；当前网页端发送文字消息。'}
           </p>
           {props.messages.length ? (
             props.messages.map((item, index) => {
@@ -786,6 +822,9 @@ function ConversationWorkspace(props: SocialProps) {
                   className={`${styles.bubbleRow} ${item.role === 'user' ? styles.mine : ''}`}
                 >
                   <div className={styles.bubble}>
+                    {isGroup && item.role === 'peer' ? (
+                      <strong className={styles.messageSender}>{item.senderName || '组局成员'}</strong>
+                    ) : null}
                     <p>{item.text}</p>
                     <footer>
                       <small>
@@ -871,39 +910,49 @@ function ConversationWorkspace(props: SocialProps) {
         <aside className={styles.peerRail}>
           <span className={styles.railAvatar}>{title.slice(0, 1)}</span>
           <h2>{title}</h2>
-          <p>加好友、活动邀请和聊天权限分别管理。任何线下见面仍需双方再次确认。</p>
+          <p>
+            {isGroup
+              ? `${conversation.memberCount || 0} 位正式成员。群聊不会替任何人确认时间、地点或线下出席。`
+              : '加好友、活动邀请和聊天权限分别管理。任何线下见面仍需双方再次确认。'}
+          </p>
           <button
             type="button"
             onClick={() => {
+              if (isGroup) {
+                if (conversation.contextId) props.onGroup(conversation.contextId);
+                return;
+              }
               const id = Number(conversation.userId ?? conversation.peer?.id);
               if (id) props.onUser(id);
             }}
           >
-            查看公开资料 <FiChevronRight />
+            {isGroup ? '查看组局详情' : '查看公开资料'} <FiChevronRight />
           </button>
         </aside>
       </div>
       <form
         className={styles.fixedComposer}
+        aria-busy={props.messageSending}
         onSubmit={(event) => {
           event.preventDefault();
-          props.onSend();
+          if (canSendMessages) props.onSend();
         }}
       >
         <textarea
           rows={1}
           value={props.messageInput}
+          disabled={props.messageSending || !canSendMessages}
           onChange={(event) => props.onMessageInput(event.target.value)}
-          placeholder="输入消息，Enter 发送"
+          placeholder={!canSendMessages ? '当前仅主理人和协作者可发言' : props.messageSending ? '正在发送…' : '输入消息，Enter 发送'}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
-              props.onSend();
+              if (canSendMessages) props.onSend();
             }
           }}
         />
-        <button type="submit" disabled={!props.messageInput.trim()} aria-label="发送">
-          <FiSend />
+        <button type="submit" disabled={!canSendMessages || !props.messageInput.trim() || props.messageSending} aria-label={props.messageSending ? '正在发送消息' : '发送'}>
+          {props.messageSending ? <FiRefreshCw /> : <FiSend />}
         </button>
       </form>
       {confirmBlock ? (
@@ -994,66 +1043,148 @@ function ConversationWorkspace(props: SocialProps) {
 }
 
 function NotificationsWorkspace(props: SocialProps) {
-  const groups = useMemo(
-    () => ({
-      relationship: props.events.filter((item) =>
-        /connection|friend|relationship/i.test(item.type || ''),
-      ),
-      message: props.events.filter((item) => /message|conversation/i.test(item.type || '')),
-      other: props.events.filter(
-        (item) => !/connection|friend|relationship|message|conversation/i.test(item.type || ''),
-      ),
-    }),
-    [props.events],
+  const [filter, setFilter] = useState<'all' | InboxEventCategory>('all');
+  const [acknowledgingId, setAcknowledgingId] = useState('');
+  const categoryLabels: Record<InboxEventCategory, string> = {
+    relationship: '关系',
+    message: '私信',
+    activity: '活动',
+    safety: '安全',
+    system: '系统',
+  };
+  const counts = useMemo(() => {
+    const next: Record<InboxEventCategory, number> = {
+      relationship: 0,
+      message: 0,
+      activity: 0,
+      safety: 0,
+      system: 0,
+    };
+    props.events.forEach((event) => {
+      next[inboxEventCategory(event)] += 1;
+    });
+    return next;
+  }, [props.events]);
+  const visibleEvents = useMemo(
+    () =>
+      filter === 'all'
+        ? props.events
+        : props.events.filter((event) => inboxEventCategory(event) === filter),
+    [filter, props.events],
   );
+  const eventTime = (value?: string) => {
+    if (!value) return '时间未提供';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  };
   return (
     <main className={styles.page}>
       <header className={styles.pageHeader}>
         <BackButton onBack={props.onBack} />
         <div>
           <h1>通知中心</h1>
-          <p>关系、私信、需求与安全通知</p>
+          <p>{props.eventsUnreadCount} 条未读 · 共 {props.eventsHistoryCount} 条历史</p>
         </div>
         <button
           type="button"
           className={styles.markRead}
-          disabled={!props.events.length}
+          disabled={!props.eventsUnreadCount || props.eventsLoading}
           onClick={props.onAcknowledgeAll}
         >
           全部已读
         </button>
       </header>
+      <nav className={styles.notificationScopes} aria-label="通知阅读范围">
+        <button
+          type="button"
+          aria-pressed={props.eventsScope === 'unread'}
+          disabled={props.eventsLoading}
+          onClick={() => props.onEventsScope('unread')}
+        >
+          未读 <span>{props.eventsUnreadCount}</span>
+        </button>
+        <button
+          type="button"
+          aria-pressed={props.eventsScope === 'all'}
+          disabled={props.eventsLoading}
+          onClick={() => props.onEventsScope('all')}
+        >
+          全部历史 <span>{props.eventsHistoryCount}</span>
+        </button>
+      </nav>
+      <nav className={styles.notificationFilters} aria-label="通知分类">
+        <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部 <span>{props.events.length}</span></button>
+        {(Object.keys(categoryLabels) as InboxEventCategory[]).map((category) => (
+          <button type="button" key={category} aria-pressed={filter === category} onClick={() => setFilter(category)}>
+            {categoryLabels[category]} <span>{counts[category]}</span>
+          </button>
+        ))}
+      </nav>
       <section className={styles.notificationList}>
-        {props.events.length ? (
-          (
-            [
-              ['relationship', '关系互动'],
-              ['message', '私信更新'],
-              ['other', '需求与系统'],
-            ] as const
-          ).map(([key, label]) =>
-            groups[key].length ? (
-              <div key={key}>
-                <h2>{label}</h2>
-                {groups[key].map((event) => (
-                  <button type="button" key={event.id} onClick={() => props.onEvent(event)}>
+        {props.eventsError ? (
+          <div className={styles.notificationError} role="alert">
+            <div>
+              <strong>通知历史没有同步成功</strong>
+              <p>{props.eventsError}</p>
+            </div>
+            <button type="button" onClick={props.onRetryEvents}>重新加载</button>
+          </div>
+        ) : null}
+        {visibleEvents.length ? (
+          <div>
+            <h2>
+              {filter === 'all'
+                ? props.eventsScope === 'unread' ? '全部未读' : `全部历史 · ${props.eventsTotal} 条`
+                : `${categoryLabels[filter]}通知`}
+            </h2>
+            {visibleEvents.map((event) => {
+              const category = inboxEventCategory(event);
+              const isRead = Boolean(event.acknowledgedAt);
+              return (
+                <article key={event.id} data-read={isRead}>
+                  <button type="button" className={styles.notificationOpen} onClick={() => props.onEvent(event)}>
                     <span>
                       <FiBell />
                     </span>
                     <div>
+                      <small>{categoryLabels[category]} · {eventTime(event.createdAt)}</small>
                       <strong>{event.title || 'FitMeet 通知'}</strong>
                       <p>{event.body || event.type}</p>
                     </div>
                     <i />
                     <FiChevronRight />
                   </button>
-                ))}
-              </div>
-            ) : null,
-          )
+                  {isRead ? (
+                    <span className={styles.notificationReadState}><FiCheck /> 已读</span>
+                  ) : (
+                    <button type="button" className={styles.notificationRead} aria-label={`将“${event.title || 'FitMeet 通知'}”标记为已读`} aria-busy={acknowledgingId === event.id} disabled={Boolean(acknowledgingId)} onClick={() => {
+                      setAcknowledgingId(event.id);
+                      void props.onAcknowledgeEvent(event.id).finally(() => setAcknowledgingId(''));
+                    }}>{acknowledgingId === event.id ? <FiRefreshCw /> : <FiCheck />}</button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : props.eventsLoading ? (
+          <p className={styles.notificationStatus}><FiRefreshCw /> 正在同步通知…</p>
         ) : (
-          <p className={styles.empty}>没有未读通知。多端已读状态会通过统一接口同步。</p>
+          <p className={styles.empty}>
+            {props.events.length
+              ? `没有${filter === 'all' ? '' : categoryLabels[filter]}通知。`
+              : props.eventsScope === 'unread'
+                ? '没有未读通知。你仍可切换到“全部历史”查看已读内容。'
+                : '还没有通知历史。新的关系、私信和活动事件会保存在这里。'}
+          </p>
         )}
+        {props.eventsNextCursor ? <button type="button" className={styles.notificationLoadMore} disabled={props.eventsLoadingMore} onClick={props.onLoadMoreEvents}>{props.eventsLoadingMore ? <><FiRefreshCw /> 正在加载…</> : props.eventsScope === 'unread' ? '加载更早的未读通知' : '加载更早的历史通知'}</button> : null}
+        <p className={styles.notificationBoundary}><FiShield /> 站内通知历史与已读状态由服务端保存；网页关闭后的系统级推送仍取决于设备权限与通知偏好。</p>
       </section>
     </main>
   );
@@ -1284,6 +1415,9 @@ function PostWorkspace(props: SocialProps) {
 }
 
 function DemandWorkspace(props: SocialProps) {
+  const [showGroupSetup, setShowGroupSetup] = useState(false);
+  const [joinMode, setJoinMode] = useState<FitMeetGroupJoinMode>('request');
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const demand = props.demand;
   if (!demand)
     return (
@@ -1327,6 +1461,40 @@ function DemandWorkspace(props: SocialProps) {
           </small>
         </footer>
       </article>
+      <section className={styles.groupEntry}>
+        <div>
+          <FiUsers />
+          <span>
+            <strong>多人组局</strong>
+            <small>成员、候补和群聊权限由服务端统一管理</small>
+          </span>
+        </div>
+        <div className={styles.groupEntryActions}>
+          <button type="button" className={styles.secondaryAction} onClick={props.onGroups}>查看组局</button>
+          {demand.capacityMax >= 3 && !['closed', 'canceled'].includes(demand.status) ? (
+            <button type="button" onClick={() => setShowGroupSetup(true)}>创建组局</button>
+          ) : null}
+        </div>
+        {demand.capacityMax < 3 ? <p>当前需求上限为 {demand.capacityMax} 人；把人数调整为至少 3 人后才会开放组局创建。</p> : null}
+      </section>
+      {showGroupSetup ? (
+        <section className={styles.groupSetup} role="dialog" aria-modal="true" aria-label="确认创建多人组局">
+          <header><div><h2>确认创建组局</h2><p>不会自动邀请或联系任何人，创建后仍由你处理加入申请。</p></div><button type="button" aria-label="关闭" onClick={() => setShowGroupSetup(false)}><FiX /></button></header>
+          <div className={styles.groupModeChoices}>
+            {([
+              ['request', '申请后加入', '你确认成员后开放群聊'],
+              ['open', '开放加入', '有空位时直接成为成员'],
+              ['invite_only', '仅邀请加入', '不出现在公开可加入列表'],
+            ] as Array<[FitMeetGroupJoinMode, string, string]>).map(([value, title, copy]) => (
+              <button type="button" key={value} aria-pressed={joinMode === value} onClick={() => setJoinMode(value)}>
+                <span>{joinMode === value ? <FiCheck /> : null}</span><strong>{title}</strong><small>{copy}</small>
+              </button>
+            ))}
+          </div>
+          <dl><div><dt>成局人数</dt><dd>{Math.max(2, demand.capacityMin)} 人</dd></div><div><dt>人数上限</dt><dd>{demand.capacityMax} 人</dd></div></dl>
+          <footer><button type="button" className={styles.secondaryAction} onClick={() => setShowGroupSetup(false)}>暂不创建</button><button type="button" disabled={creatingGroup} onClick={() => { setCreatingGroup(true); void props.onCreateGroup(demand, joinMode).then((created) => { if (created) setShowGroupSetup(false); }).finally(() => setCreatingGroup(false)); }}>{creatingGroup ? '正在创建…' : '确认创建组局'}</button></footer>
+        </section>
+      ) : null}
     </main>
   );
 }

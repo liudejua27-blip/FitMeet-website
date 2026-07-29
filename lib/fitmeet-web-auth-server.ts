@@ -56,6 +56,11 @@ export function upstreamMessage(payload: unknown, fallback: string) {
   return typeof message === 'string' && message.trim() ? message : fallback;
 }
 
+export function upstreamCode(payload: unknown) {
+  const code = payloadRecord(payload)?.code;
+  return typeof code === 'string' && code.trim() ? code : null;
+}
+
 export const refreshCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',

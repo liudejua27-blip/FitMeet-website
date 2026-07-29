@@ -7,7 +7,10 @@ import {
   type AgentThreadEntry,
   type AgentThreadTurn,
   type AgentInboxEventPage,
+  type AgentInboxScope,
   type AuthSession,
+  type EmailActionResult,
+  type EmailRegistrationPending,
   type Conversation,
   type ConversationMessage,
   type DemandCandidateBehavior,
@@ -18,14 +21,29 @@ import {
   type FeedComment,
   type FeedCommentPage,
   type FitMeetAgentMemory,
+  type AgentMemoryControl,
+  type AgentMemoryMutation,
+  type AgentMemorySuppressionMutation,
+  type AgentMemoryUsagePage,
+  type AgentMemoryUseScope,
   type FitMeetConversation,
   type FitMeetConversationMessage,
   type FitMeetDemand,
   type FitMeetDemandCandidate,
+  type FitMeetGroup,
+  type FitMeetGroupAttendanceStatus,
+  type FitMeetGroupChatMode,
+  type FitMeetGroupMember,
+  type FitMeetGroupMemberRole,
+  type FitMeetGroupPoll,
+  type FitMeetGroupPollType,
+  type CreateFitMeetGroupPayload,
   type FitMeetIntentApplication,
   type FitMeetProfilePhoto,
   type FitMeetPublicIntent,
   type FitMeetUploadImage,
+  type FitMeetSearchResponse,
+  type FitMeetSearchType,
   type UserAdvantage,
   type UserVerification,
   type PublicUserProfile,
@@ -43,6 +61,7 @@ import {
   type SafetyReportPayload,
   type SocialProfile,
 } from './fitmeet-api-contract.ts';
+import type { FitMeetRegistrationConsent } from './fitmeet-registration-consent.ts';
 
 type ApiErrorPayload = { code?: string; message?: string; details?: unknown };
 
@@ -204,32 +223,105 @@ export class FitMeetApiClient {
     );
   }
 
-  async sendWebSmsCode(phone: string) {
-    const response = await fetch('/api/auth/sms/send', {
+  private async authenticateWebByEmail(
+    path: '/api/auth/login',
+    body: { email: string; password: string; name?: string },
+    fallbackMessage: string,
+  ) {
+    const response = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify(body),
+      cache: 'no-store',
     });
     const payload: unknown = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
-      throw new Error(error.message || error.code || '验证码发送失败，请稍后重试。');
-    }
-    return unwrap<{ message: string; expiresIn?: number }>(payload);
-  }
-
-  async loginWebByPhone(phone: string, code: string) {
-    const response = await fetch('/api/auth/sms/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, code }),
-    });
-    const payload: unknown = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
-      throw new Error(error.message || error.code || '手机号验证码登录失败。');
+      throw new FitMeetApiError(
+        error.message || error.code || fallbackMessage,
+        response.status,
+        error.code,
+        error.details,
+      );
     }
     return normalizeAuthSession(unwrap<RawAuthSession>(payload));
+  }
+
+  loginWebByEmail(email: string, password: string) {
+    return this.authenticateWebByEmail(
+      '/api/auth/login',
+      { email, password },
+      '邮箱或密码错误。',
+    );
+  }
+
+  registerWebByEmail(
+    email: string,
+    password: string,
+    name: string,
+    consents: FitMeetRegistrationConsent,
+  ) {
+    return this.publicWebEmailRequest<EmailRegistrationPending>(
+      '/api/auth/register',
+      { email, password, name, consents },
+      '暂时无法创建账号，请稍后重试。',
+    );
+  }
+
+  verifyWebEmail(token: string) {
+    return this.publicWebEmailRequest<EmailActionResult>(
+      '/api/auth/email/verify',
+      { token },
+      '邮箱验证暂时不可用，请稍后重试。',
+    );
+  }
+
+  resendWebEmailVerification(email: string) {
+    return this.publicWebEmailRequest<EmailActionResult>(
+      '/api/auth/email/verification/resend',
+      { email },
+      '验证邮件暂时无法发送，请稍后重试。',
+    );
+  }
+
+  requestWebPasswordReset(email: string) {
+    return this.publicWebEmailRequest<EmailActionResult>(
+      '/api/auth/password/forgot',
+      { email },
+      '如果该邮箱已注册，我们会向它发送密码重置邮件。',
+    );
+  }
+
+  resetWebPassword(token: string, password: string) {
+    return this.publicWebEmailRequest<EmailActionResult>(
+      '/api/auth/password/reset',
+      { token, password },
+      '密码重置暂时不可用，请稍后重试。',
+    );
+  }
+
+  private async publicWebEmailRequest<T>(
+    path: string,
+    body: Record<string, unknown>,
+    fallbackMessage: string,
+  ) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+    const payload: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
+      throw new FitMeetApiError(
+        error.message || error.code || fallbackMessage,
+        response.status,
+        error.code,
+        error.details,
+      );
+    }
+    return unwrap<T>(payload);
   }
 
   async refreshWebSession() {
@@ -636,6 +728,111 @@ export class FitMeetApiClient {
       idempotencyKey: `web-demand-cancel-${id}-${crypto.randomUUID()}`,
     });
   }
+  listGroups(scope: 'mine' | 'discover' = 'mine') {
+    return this.request<{ items: FitMeetGroup[]; total: number }>({
+      method: 'GET',
+      path: `${fitMeetPaths.groups.root}?scope=${scope}`,
+    });
+  }
+  getGroup(id: string) {
+    return this.request<FitMeetGroup>({ method: 'GET', path: fitMeetPaths.groups.detail(id) });
+  }
+  createGroup(payload: CreateFitMeetGroupPayload) {
+    return this.request<FitMeetGroup>({
+      method: 'POST',
+      path: fitMeetPaths.groups.root,
+      body: payload,
+      idempotencyKey: `web-group-create-${payload.demandId}-${crypto.randomUUID()}`,
+    });
+  }
+  joinGroup(id: string) {
+    return this.request<{ group: FitMeetGroup; membership: FitMeetGroupMember }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.join(id),
+      body: {},
+      idempotencyKey: `web-group-join-${id}-${crypto.randomUUID()}`,
+    });
+  }
+  leaveGroup(id: string) {
+    return this.request<{ group: FitMeetGroup; membership: FitMeetGroupMember }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.leave(id),
+      body: {},
+      idempotencyKey: `web-group-leave-${id}-${crypto.randomUUID()}`,
+    });
+  }
+  resolveGroupRequest(id: string, membershipId: number, decision: 'approve' | 'reject') {
+    return this.request<{ group: FitMeetGroup; membership: FitMeetGroupMember }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.resolveRequest(id, membershipId, decision),
+      body: {},
+      idempotencyKey: `web-group-request-${id}-${membershipId}-${decision}-${crypto.randomUUID()}`,
+    });
+  }
+  cancelGroup(id: string, reason?: string) {
+    return this.request<FitMeetGroup>({
+      method: 'POST',
+      path: fitMeetPaths.groups.cancel(id),
+      body: { reason },
+      idempotencyKey: `web-group-cancel-${id}-${crypto.randomUUID()}`,
+    });
+  }
+  createGroupPoll(id: string, payload: { type: FitMeetGroupPollType; question: string; options: string[]; closesAt?: string | null }) {
+    return this.request<{ group: FitMeetGroup; poll: FitMeetGroupPoll }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.polls(id),
+      body: payload,
+      idempotencyKey: `web-group-poll-create-${id}-${payload.type}-${crypto.randomUUID()}`,
+    });
+  }
+  voteGroupPoll(id: string, pollId: string, optionId: string) {
+    return this.request<{ group: FitMeetGroup; poll: FitMeetGroupPoll }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.vote(id, pollId),
+      body: { optionId },
+      idempotencyKey: `web-group-poll-vote-${id}-${pollId}-${crypto.randomUUID()}`,
+    });
+  }
+  finalizeGroupPoll(id: string, pollId: string, optionId: string) {
+    return this.request<{ group: FitMeetGroup; poll: FitMeetGroupPoll }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.finalizePoll(id, pollId),
+      body: { optionId },
+      idempotencyKey: `web-group-poll-finalize-${id}-${pollId}-${crypto.randomUUID()}`,
+    });
+  }
+  updateGroupCheckIn(id: string, status: Exclude<FitMeetGroupAttendanceStatus, 'none'>) {
+    return this.request<{ group: FitMeetGroup; checkIn: { status: string } }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.checkIn(id),
+      body: { status },
+      idempotencyKey: `web-group-check-in-${id}-${crypto.randomUUID()}`,
+    });
+  }
+  updateGroupMemberRole(id: string, membershipId: number, role: Exclude<FitMeetGroupMemberRole, 'host'>) {
+    return this.request<{ group: FitMeetGroup; membership: FitMeetGroupMember }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.memberRole(id, membershipId),
+      body: { role },
+      idempotencyKey: `web-group-member-role-${id}-${membershipId}-${role}-${crypto.randomUUID()}`,
+    });
+  }
+  removeGroupMember(id: string, membershipId: number, reason?: string) {
+    return this.request<{ group: FitMeetGroup; membership: FitMeetGroupMember }>({
+      method: 'POST',
+      path: fitMeetPaths.groups.removeMember(id, membershipId),
+      body: { reason },
+      idempotencyKey: `web-group-member-remove-${id}-${membershipId}-${crypto.randomUUID()}`,
+    });
+  }
+  updateGroupChatMode(id: string, chatMode: FitMeetGroupChatMode) {
+    return this.request<FitMeetGroup>({
+      method: 'POST',
+      path: fitMeetPaths.groups.chatMode(id),
+      body: { chatMode },
+      idempotencyKey: `web-group-chat-mode-${id}-${chatMode}-${crypto.randomUUID()}`,
+    });
+  }
   recordDemandCandidateBehavior(
     demandId: string,
     candidateId: number,
@@ -689,6 +886,31 @@ export class FitMeetApiClient {
     >({ method: 'GET', path: fitMeetPaths.agentThreads.root });
     return Array.isArray(payload) ? { items: payload, data: payload } : payload;
   }
+  search(
+    query: string,
+    types: FitMeetSearchType[] = ['agent_thread', 'message', 'friend', 'group'],
+    limit = 20,
+  ) {
+    const params = new URLSearchParams({
+      q: query.trim(),
+      types: types
+        .map((type) =>
+          type === 'agent_thread'
+            ? 'agent_threads'
+            : type === 'message'
+              ? 'messages'
+              : type === 'friend'
+                ? 'friends'
+                : 'groups',
+        )
+        .join(','),
+      limit: String(Math.max(1, Math.min(40, Math.round(limit)))),
+    });
+    return this.request<FitMeetSearchResponse>({
+      method: 'GET',
+      path: `${fitMeetPaths.search}?${params.toString()}`,
+    });
+  }
   createAgentThread(title?: string) {
     const clientThreadId = crypto.randomUUID();
     return this.request<{ thread: AgentThread; entries: AgentThreadEntry[] }>({
@@ -731,17 +953,26 @@ export class FitMeetApiClient {
       path: fitMeetPaths.agentThreads.detail(id),
     });
   }
-  getAgentInboxEvents(limit = 30) {
+  getAgentInboxEvents(limit = 30, cursor?: string, scope: AgentInboxScope = 'unread') {
+    const query = new URLSearchParams({ limit: String(limit), scope });
+    if (cursor) query.set('cursor', cursor);
     return this.request<AgentInboxEventPage>({
       method: 'GET',
-      path: `${fitMeetPaths.agentInbox.events}?limit=${limit}`,
+      path: `${fitMeetPaths.agentInbox.events}?${query.toString()}`,
     });
   }
   acknowledgeAgentInboxEvents(ids: string[]) {
-    return this.request<{ acknowledged: string[]; acknowledgedCount: number }>({
+    return this.request<{ acknowledged: string[]; acknowledgedCount: number; acknowledgedAll?: boolean }>({
       method: 'POST',
       path: fitMeetPaths.agentInbox.acknowledge,
       body: { ids },
+    });
+  }
+  acknowledgeAllAgentInboxEvents() {
+    return this.request<{ acknowledged: string[]; acknowledgedCount: number; acknowledgedAll: boolean }>({
+      method: 'POST',
+      path: fitMeetPaths.agentInbox.acknowledge,
+      body: { all: true },
     });
   }
 
@@ -1065,26 +1296,95 @@ export class FitMeetApiClient {
     >({ method: 'GET', path: fitMeetPaths.users.agentMemory });
     return Array.isArray(payload) ? { items: payload, data: payload } : payload;
   }
-  confirmAgentMemory(payload: { memoryType: string; value: string; summary?: string }) {
-    return this.request<FitMeetAgentMemory>({
+  async confirmAgentMemory(
+    memoryId: string,
+    expectedRevision: number,
+    useScope?: AgentMemoryUseScope,
+    explicitSensitiveConsent = false,
+  ) {
+    const result = await this.request<AgentMemoryMutation>({
       method: 'POST',
       path: fitMeetPaths.users.agentMemoryConfirm,
-      body: payload,
-      idempotencyKey: `web-memory-${crypto.randomUUID()}`,
+      body: {
+        memoryId,
+        action: 'confirm_memory',
+        expectedRevision,
+        ...(useScope ? { useScope } : {}),
+        ...(explicitSensitiveConsent ? { explicitSensitiveConsent: true } : {}),
+      },
+      idempotencyKey: `web-memory-confirm-${memoryId}-${crypto.randomUUID()}`,
     });
+    return result.item;
   }
-  rejectAgentMemory(id: string) {
-    return this.request({
+  async rejectAgentMemory(memoryId: string, expectedRevision: number) {
+    const result = await this.request<AgentMemoryMutation>({
       method: 'POST',
       path: fitMeetPaths.users.agentMemoryReject,
-      body: { id },
-      idempotencyKey: `web-memory-reject-${id}-${crypto.randomUUID()}`,
+      body: { memoryId, expectedRevision },
+      idempotencyKey: `web-memory-reject-${memoryId}-${crypto.randomUUID()}`,
     });
+    return result.item;
   }
-  deleteAgentMemory(id: string) {
+  deleteAgentMemory(id: string, expectedRevision: number) {
     return this.request({
       method: 'DELETE',
       path: `${fitMeetPaths.users.agentMemory}/${encodeURIComponent(id)}`,
+      body: { expectedRevision },
+    });
+  }
+  async updateAgentMemory(
+    id: string,
+    patch: {
+      value?: string;
+      summary?: string;
+      useScope?: AgentMemoryUseScope;
+      expectedRevision?: number;
+      explicitSensitiveConsent?: boolean;
+    },
+  ) {
+    const result = await this.request<AgentMemoryMutation>({
+      method: 'PATCH',
+      path: `${fitMeetPaths.users.agentMemory}/${encodeURIComponent(id)}`,
+      body: patch,
+      idempotencyKey: `web-memory-update-${id}-${crypto.randomUUID()}`,
+    });
+    return result.item;
+  }
+  getAgentMemoryControl() {
+    return this.request<AgentMemoryControl>({
+      method: 'GET',
+      path: fitMeetPaths.users.agentMemoryControl,
+    });
+  }
+  updateAgentMemoryControl(inferenceEnabled: boolean) {
+    return this.request<AgentMemoryControl>({
+      method: 'PATCH',
+      path: fitMeetPaths.users.agentMemoryControl,
+      body: { inferenceEnabled },
+      idempotencyKey: `web-memory-control-${crypto.randomUUID()}`,
+    });
+  }
+  listAgentMemoryUsage(id: string, cursor?: string, limit = 20) {
+    const query = new URLSearchParams({ limit: String(Math.max(1, Math.min(40, limit))) });
+    if (cursor) query.set('cursor', cursor);
+    return this.request<AgentMemoryUsagePage>({
+      method: 'GET',
+      path: `${fitMeetPaths.users.agentMemoryUsage(id)}?${query.toString()}`,
+    });
+  }
+  suppressAgentMemory(id: string, expectedRevision: number) {
+    return this.request<AgentMemorySuppressionMutation>({
+      method: 'POST',
+      path: fitMeetPaths.users.agentMemorySuppress(id),
+      body: { expectedRevision },
+      idempotencyKey: `web-memory-suppress-${id}-${crypto.randomUUID()}`,
+    });
+  }
+  removeAgentMemorySuppression(memoryType: string) {
+    return this.request<AgentMemoryControl>({
+      method: 'DELETE',
+      path: fitMeetPaths.users.agentMemorySuppression(memoryType),
+      idempotencyKey: `web-memory-unsuppress-${memoryType}-${crypto.randomUUID()}`,
     });
   }
 
