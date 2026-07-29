@@ -3,6 +3,7 @@ import {
   FITMEET_LEGACY_REFRESH_COOKIE,
   FITMEET_WEB_REFRESH_COOKIE,
   fitMeetServerApiBase,
+  fitMeetWebClientHeaders,
   refreshCookieOptions,
   refreshTokenFrom,
   upstreamMessage,
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
   try {
     const response = await fetch(`${fitMeetServerApiBase()}/auth/sms/verify`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...fitMeetWebClientHeaders() },
       body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),
       cache: 'no-store',
       signal: AbortSignal.timeout(7000),

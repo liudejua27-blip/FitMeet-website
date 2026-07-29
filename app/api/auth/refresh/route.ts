@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   FITMEET_WEB_REFRESH_COOKIE,
   fitMeetServerApiBase,
+  fitMeetWebClientHeaders,
   refreshCookieOptions,
   refreshTokenFrom,
   withoutRefreshToken,
@@ -17,16 +18,22 @@ export async function POST(request: NextRequest) {
   try {
     const response = await fetch(`${fitMeetServerApiBase()}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...fitMeetWebClientHeaders() },
       body: JSON.stringify({ refreshToken }),
       cache: 'no-store',
       signal: AbortSignal.timeout(5000),
     });
     const payload: unknown = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const result = NextResponse.json({ message: '登录已失效。' }, { status: 401 });
-      result.cookies.set(FITMEET_WEB_REFRESH_COOKIE, '', { ...refreshCookieOptions, maxAge: 0 });
-      return result;
+      if (response.status === 401) {
+        const result = NextResponse.json({ message: '登录已失效。' }, { status: 401 });
+        result.cookies.set(FITMEET_WEB_REFRESH_COOKIE, '', { ...refreshCookieOptions, maxAge: 0 });
+        return result;
+      }
+      return NextResponse.json(
+        { message: '暂时无法确认登录状态，请稍后重试。' },
+        { status: 503, headers: { 'Cache-Control': 'no-store, private' } },
+      );
     }
     const rotated = refreshTokenFrom(payload);
     const result = NextResponse.json(withoutRefreshToken(payload), {

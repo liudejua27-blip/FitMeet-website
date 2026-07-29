@@ -200,16 +200,29 @@ function applyRecommendedPreferences(draft: Draft): Draft {
   };
 }
 
-export function OnboardingFlow({ userId, initialProfile, initialStatus, onComplete, onUploadPhotos, onExit, onLifeNeed }: { userId: number; initialProfile?: SocialProfile | null; initialStatus?: OnboardingStatus | null; onComplete: (payload: OnboardingPayload) => Promise<void>; onUploadPhotos: (files: File[]) => Promise<FitMeetProfilePhoto[]>; onExit: () => void; onLifeNeed: (purpose: InitialPurpose) => void }) {
+export function OnboardingFlow({ userId, initialProfile, initialStatus, onComplete, onUploadPhotos, onExit, onLifeNeed }: { userId: number; initialProfile?: SocialProfile | null; initialStatus?: OnboardingStatus | null; onComplete: (payload: OnboardingPayload) => Promise<void>; onUploadPhotos: (files: File[]) => Promise<FitMeetProfilePhoto[]>; onExit: () => Promise<void>; onLifeNeed: (purpose: InitialPurpose) => void }) {
   const [entry, setEntry] = useState<"initialPurpose" | "onboarding">("initialPurpose");
   const [stage, setStage] = useState(0);
   const [draft, setDraft] = useState<Draft>(() => readStoredDraft(userId, initialProfile));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const currentStage = onboardingStages[stage];
   const currentHint = useMemo(() => validationHint(stage, draft), [draft, stage]);
   const canContinue = currentHint === null;
+
+  const exit = async () => {
+    if (exiting) return;
+    setExiting(true);
+    setError(null);
+    try {
+      await onExit();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "退出暂未完成，请稍后重试。");
+      setExiting(false);
+    }
+  };
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 0 });
@@ -286,7 +299,7 @@ export function OnboardingFlow({ userId, initialProfile, initialStatus, onComple
   };
 
   if (entry === "initialPurpose") {
-    return <main className={styles.onboardingPage}><section className={styles.mobileSurface} aria-label="FitMeet 初始需求选择"><div className={styles.initialPurposeBody}><div className={styles.onboardingBrand}><FitMeetBrandIcon size={64} priority /></div><h1>你想让 FitMeet 先帮你做什么？</h1><p>先判断需求，再决定是否建档。只有涉及真人连接、亲密关系、线下同行或被推荐给别人时，才进入社交资料完善。</p>{initialPurposeGroups.map((group) => <section key={group.title} className={styles.initialPurposeGroup}><h2>{group.title}</h2><small>{group.subtitle}</small><div>{group.options.map((option) => { const Icon = option.icon; return <button type="button" key={option.value} onClick={() => selectInitialPurpose(option)}><span><Icon /></span><i><strong>{option.title}</strong><em>{option.subtitle}</em></i><FiArrowRight /></button>; })}</div></section>)}<button type="button" className={styles.flowExit} onClick={onExit}>退出当前账号</button></div></section></main>;
+    return <main className={styles.onboardingPage}><section className={styles.mobileSurface} aria-label="FitMeet 初始需求选择"><div className={styles.initialPurposeBody}><div className={styles.onboardingBrand}><FitMeetBrandIcon size={64} priority /></div><h1>你想让 FitMeet 先帮你做什么？</h1><p>先判断需求，再决定是否建档。只有涉及真人连接、亲密关系、线下同行或被推荐给别人时，才进入社交资料完善。</p>{initialPurposeGroups.map((group) => <section key={group.title} className={styles.initialPurposeGroup}><h2>{group.title}</h2><small>{group.subtitle}</small><div>{group.options.map((option) => { const Icon = option.icon; return <button type="button" key={option.value} onClick={() => selectInitialPurpose(option)}><span><Icon /></span><i><strong>{option.title}</strong><em>{option.subtitle}</em></i><FiArrowRight /></button>; })}</div></section>)}{error ? <p className={`${styles.footerStatus} ${styles.footerStatusError}`} role="alert">{error}</p> : null}<button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出当前账号"}</button></div></section></main>;
   }
 
   return (
@@ -295,7 +308,7 @@ export function OnboardingFlow({ userId, initialProfile, initialStatus, onComple
         <header className={styles.flowHeader}>
           <button type="button" aria-label={stage ? "返回上一阶段" : "返回需求选择"} onClick={stage ? () => { setError(null); setStage((value) => value - 1); } : () => setEntry("initialPurpose")}>{stage ? <FiArrowLeft /> : <FiX />}</button>
           <div><strong>完善你的社交资料</strong><small>{currentStage.title} · {stage + 1} / 3</small></div>
-          <button type="button" className={styles.flowExit} onClick={onExit}>退出建档</button>
+          <button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出建档"}</button>
         </header>
 
         <div ref={bodyRef} className={styles.onboardingBody}>

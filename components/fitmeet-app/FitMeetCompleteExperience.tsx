@@ -2569,7 +2569,13 @@ export function FitMeetCompleteExperience({
               }}
               onSafety={() => setOverlay('accountSafety')}
               onMoments={() => navigateDestination('moments')}
-              onLogout={session.logout}
+              onLogout={async () => {
+                try {
+                  await session.logout();
+                } catch (reason) {
+                  notice(reason instanceof Error ? reason.message : '退出暂未完成，请稍后重试。');
+                }
+              }}
               onBlockUser={async (user: PublicUserProfile) => {
                 try {
                   await blockAndRemember({ id: user.id, name: user.name, avatar: user.avatar });

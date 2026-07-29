@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { FitMeetApiClient, FitMeetApiError } from '../lib/fitmeet-api-client.ts';
 
@@ -269,4 +270,35 @@ test('formal web authentication uses same-origin routes and never returns refres
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('formal web logout does not hide an upstream revocation failure', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => response({ message: '登录状态尚未安全撤销。' }, 503);
+  try {
+    const api = new FitMeetApiClient(() => null, baseUrl);
+    await assert.rejects(() => api.logoutWebSession(), /退出暂未完成/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('web auth proxy carries platform context and clears cookies only after safe logout outcomes', async () => {
+  const [serverAuth, loginRoute, refreshRoute, logoutRoute] = await Promise.all([
+    fs.readFile(new URL('../lib/fitmeet-web-auth-server.ts', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../app/api/auth/sms/verify/route.ts', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../app/api/auth/refresh/route.ts', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../app/api/auth/logout/route.ts', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(serverAuth, /'X-FitMeet-Platform': 'web'/);
+  assert.match(serverAuth, /'X-FitMeet-App-Version'/);
+  assert.match(loginRoute, /fitMeetWebClientHeaders\(\)/);
+  assert.match(refreshRoute, /fitMeetWebClientHeaders\(\)/);
+  assert.match(logoutRoute, /fitMeetServerApiBase\(\)\}\/auth\/logout/);
+  assert.match(logoutRoute, /response\.ok \|\| response\.status === 401/);
+  assert.match(logoutRoute, /登录状态尚未安全撤销/);
+  assert.doesNotMatch(logoutRoute, /\[401, 403\]/);
+  assert.match(refreshRoute, /if \(response\.status === 401\)/);
+  assert.match(refreshRoute, /暂时无法确认登录状态/);
 });

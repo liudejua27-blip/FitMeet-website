@@ -61,10 +61,16 @@ export function useFitMeetSession() {
 
   const sendSmsCode = useCallback((phone: string) => api.sendWebSmsCode(phone), [api]);
 
-  const logout = useCallback(() => {
-    void api.logoutWebSession();
-    storedRef.current = null;
-    setState({ ...initialState, status: "anonymous", error: null });
+  const logout = useCallback(async () => {
+    try {
+      await api.logoutWebSession();
+      storedRef.current = null;
+      setState({ ...initialState, status: "anonymous", error: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "退出暂未完成，请稍后重试。";
+      setState((current) => ({ ...current, error: message }));
+      throw error;
+    }
   }, [api]);
 
   const setSocialProfile = useCallback((socialProfile: SocialProfile) => {

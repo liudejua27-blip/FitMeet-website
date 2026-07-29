@@ -248,11 +248,22 @@ export class FitMeetApiClient {
   }
 
   async logoutWebSession() {
-    await fetch('/api/auth/logout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-    }).catch(() => undefined);
+    let response: Response;
+    try {
+      response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(6000),
+      });
+    } catch {
+      throw new Error('退出暂未完成，请稍后重试。');
+    }
+    const payload: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
+      throw new Error(error.message || '退出暂未完成，请稍后重试。');
+    }
   }
 
   async refreshSession(refreshToken: string) {

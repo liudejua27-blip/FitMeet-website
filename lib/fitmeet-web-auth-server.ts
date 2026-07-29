@@ -13,6 +13,18 @@ export function fitMeetServerApiBase() {
   ).replace(/\/$/, '');
 }
 
+export function fitMeetWebClientHeaders() {
+  const appVersion = (
+    process.env.FITMEET_WEB_APP_VERSION ||
+    process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ||
+    'web'
+  ).trim();
+  return {
+    'X-FitMeet-Platform': 'web',
+    'X-FitMeet-App-Version': appVersion || 'web',
+  };
+}
+
 export function payloadRecord(payload: unknown) {
   if (!payload || typeof payload !== 'object') return null;
   const root = payload as Record<string, unknown>;

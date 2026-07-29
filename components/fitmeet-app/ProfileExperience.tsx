@@ -38,7 +38,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   onReboard: () => void;
   onSafety: () => void;
   onMoments: () => void;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
   onBlockUser: (user: PublicUserProfile) => Promise<void>;
   onUnblockUser: (user: BlockedUserRecord) => Promise<void>;
   onRefreshBlockedUsers: () => Promise<void>;
@@ -208,7 +208,7 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
     try {
       await api.deleteAccount();
       onNotice("账号已由后端注销，本机登录状态已清理。");
-      onLogout();
+      await onLogout();
     } catch (reason) { onNotice(reason instanceof Error ? reason.message : "账号注销暂时未能完成。"); }
     finally { setAccountBusy(false); }
   };
