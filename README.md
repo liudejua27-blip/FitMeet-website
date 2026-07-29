@@ -28,7 +28,7 @@ FitMeet 是面向城市青年的辅助社交 Agent。用户说出运动、旅行
 | `/world` | Social World | 无限场景地图 | implemented; desktop QA passed |
 | `/moments` | Moments | 时间胶片与记忆档案 | temporary homepage bridge; standalone design specified; requires authorised real stories |
 | `/agent` | Agent | 一句话形成社交轨道 | implemented; desktop QA passed |
-| `/agent/try` | Agent 体验账号 | 移动端 FitMeet Agent 路演体验 | implemented; mobile-first QA passed |
+| `/agent/try` | FitMeet Web App | 响应式 Agent、发现、消息与个人中心 | implemented; desktop/mobile QA passed |
 | `/safety` | Safety | 透明边界与信任半径 | implemented; production build passed; visual QA pending browser connection |
 | `/support` | Support | 安全问题后的可执行下一步 | implemented; desktop QA passed |
 | `/about` | About | 从一个节点扩展到世界 | design specified |
@@ -109,9 +109,9 @@ NEXT_PUBLIC_SITE_URL=https://fitmeet.app
 
 当前已实现的 Agent 页面：`http://localhost:3000/agent`
 
-当前已实现的移动端内测入口：`http://localhost:3000/agent/try`。该路由使用项目组发放的 4 位邀请码登录，主导航与当前产品约束一致，仅保留首页、发现、消息和我的四个 Tab；小福 Agent 位于首页。线程、需求草稿、需求卡、候选、邀请和消息均读取 MobileAPI 的账号级真实状态，刷新后恢复，不使用浏览器演示数据冒充业务事实。资料完善可从个人页进入，或直接打开 `http://localhost:3000/agent/try/onboarding`。
+当前 Web App 入口：`http://localhost:3000/agent/try`。Web 端仅开放邮箱注册与登录，并继续复用 MobileAPI 的统一账号、JWT 和会话合同；手机号短信或微信等端能力仍由各自客户端按共享合同使用，不在 Web 登录界面开放。refresh token 只保存在同源 HttpOnly Cookie 中，access token 只保存在当前页面内存。桌面端使用可折叠对话侧栏和用户导航，移动端使用底部主导航与对话抽屉。线程、需求草稿、需求卡、候选、邀请和消息均读取 MobileAPI 的账号级真实状态，刷新后恢复，不使用浏览器演示数据冒充业务事实。资料完善可从个人页进入，或直接打开 `http://localhost:3000/agent/try/onboarding`。
 
-三端接口路径以 iOS `FitMeetCoreEndpoint.swift` 为唯一基线。Web 的路径、认证头和幂等写入规则见 `docs/THREE_CLIENT_API_PARITY.md`。内测账号会写入正式 MobileAPI 的测试账号数据；发布、邀请、关系、安全和资料修改等真实动作必须经过用户确认，不能把前端提示当作服务端成功。
+三端接口路径以 iOS `FitMeetCoreEndpoint.swift` 为唯一基线。Web 的路径、认证头和幂等写入规则见 `docs/THREE_CLIENT_API_PARITY.md`。发布、邀请、关系、安全和资料修改等真实动作必须经过用户确认，不能把前端提示当作服务端成功。
 
 当前已实现的 Safety 页面：`http://localhost:3000/safety`
 

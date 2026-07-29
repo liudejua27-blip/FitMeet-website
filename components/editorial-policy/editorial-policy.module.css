@@ -2,11 +2,28 @@
   --paper: #f3f0e9;
   --ink: #08090b;
   --cyan: #19e9e2;
-  min-width: 1080px;
+  width: 100%;
   overflow: clip;
   background: var(--paper);
   color: var(--ink);
 }
+
+.skipLink {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 750;
+  transform: translateY(-160%);
+  transition: transform 160ms ease;
+}
+
+.skipLink:focus { transform: translateY(0); }
 
 .hero {
   position: relative;
@@ -143,15 +160,15 @@
 .document aside nav a:hover { color: var(--ink); }
 .document aside > a { display: flex; width: max-content; align-items: center; gap: 9px; margin-top: 12px; border-bottom: 1px solid rgba(8, 9, 11, 0.35); padding-bottom: 5px; font-size: 0.7rem; font-weight: 720; }
 
-.document article > section {
+.document article > section:not(.documentNotice) {
   padding: 0 0 12svh;
   scroll-margin-top: 110px;
 }
-.document article > section + section { padding-top: 10svh; border-top: 1px solid rgba(8, 9, 11, 0.14); }
+.document article > section:not(.documentNotice) + section:not(.documentNotice) { padding-top: 10svh; border-top: 1px solid rgba(8, 9, 11, 0.14); }
 .document article > section > div { display: flex; align-items: center; gap: 15px; margin-bottom: 39px; }
 .document article > section > div span,
-.document article > section > div strong { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em; }
-.document article > section > div i { width: 56px; height: 1px; background: linear-gradient(90deg, #19e9e2, #38efb8); }
+.document article > section > div h2 { margin: 0; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em; }
+.document article > section > div i { width: 56px; height: 1px; flex: 0 0 auto; background: linear-gradient(90deg, #19e9e2, #38efb8); }
 .document article p {
   margin: 0 0 24px;
   font-size: clamp(1.75rem, 2.35vw, 2.55rem);
@@ -159,6 +176,47 @@
   letter-spacing: -0.05em;
   line-height: 1.35;
   text-wrap: pretty;
+}
+
+.document article p a {
+  border-bottom: 1px solid rgba(8, 9, 11, 0.38);
+  color: #066d69;
+  font-weight: 680;
+  text-decoration: none;
+  text-underline-offset: 0.18em;
+}
+
+.document article p a:hover {
+  border-bottom-color: #066d69;
+}
+
+.documentNotice {
+  margin-bottom: 11svh;
+  padding: 30px 32px;
+  border: 1px solid rgba(8, 9, 11, 0.15);
+  border-left: 4px solid #19cfc9;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.documentNotice h2 {
+  margin: 0 0 18px;
+  font-size: 1rem;
+  font-weight: 820;
+  letter-spacing: -0.02em;
+}
+
+.document article .documentNotice p {
+  margin-bottom: 12px;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.document article .documentNotice p:last-child { margin-bottom: 0; }
+
+.page a:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid #087f7a;
+  outline-offset: 4px;
 }
 
 .footer {
@@ -217,9 +275,141 @@
 /* Simplified Chinese desktop typography */
 .heroCopy h1 { font-size: clamp(4.7rem, 6.8vw, 8rem); letter-spacing: -0.045em; line-height: .96; }
 .heroCopy > span, .footer > span, .document aside > span,
-.document article > section > div span, .document article > section > div strong { font-size: .72rem; letter-spacing: .035em; }
+.document article > section > div span, .document article > section > div h2 { font-size: .72rem; letter-spacing: .035em; }
 .reviewState, .documentMeta dt { font-size: .66rem; letter-spacing: .03em; }
 .documentMeta dd, .document aside nav a, .document aside > a, .readCue { font-size: .74rem; }
 .document article p { font-size: clamp(1.25rem, 1.65vw, 1.7rem); letter-spacing: -0.02em; line-height: 1.72; }
 .footer > a { font-size: clamp(4rem, 6.5vw, 7.5rem); letter-spacing: -0.045em; line-height: 1; }
 .footer > div { font-size: .68rem; letter-spacing: .03em; }
+
+@media (max-width: 900px) {
+  .hero {
+    min-height: 660px;
+    height: auto;
+    place-items: end start;
+    padding: 150px 22px 84px;
+  }
+
+  .heroOrbit {
+    top: 34%;
+    left: 82%;
+    width: 92vw;
+  }
+
+  .heroCopy {
+    width: 100%;
+    max-width: 680px;
+  }
+
+  .heroCopy h1 {
+    margin: 22px 0 24px;
+    font-size: clamp(3rem, 15vw, 5.5rem);
+    letter-spacing: -0.055em;
+    line-height: 0.96;
+  }
+
+  .heroCopy p {
+    width: min(100%, 520px);
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+
+  .documentMeta {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .documentMeta div {
+    min-width: 0;
+    padding-right: 8px;
+    border-right: 1px solid rgba(8, 9, 11, 0.12);
+  }
+
+  .documentMeta div:last-child { border-right: 0; }
+  .documentMeta dd { overflow-wrap: anywhere; }
+  .readCue { right: 22px; bottom: 26px; }
+
+  .document {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 64px 22px 88px;
+  }
+
+  .document aside {
+    position: static;
+    margin-bottom: 64px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid rgba(8, 9, 11, 0.14);
+  }
+
+  .document aside nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    margin: 20px 0 28px;
+  }
+
+  .document aside nav a {
+    min-width: 0;
+    padding: 11px 10px 11px 0;
+    border-bottom: 1px solid rgba(8, 9, 11, 0.09);
+    font-size: 0.76rem;
+    line-height: 1.4;
+  }
+
+  .documentNotice {
+    margin-bottom: 70px;
+    padding: 24px 22px;
+  }
+
+  .document article > section:not(.documentNotice) {
+    padding: 0 0 64px;
+    scroll-margin-top: 82px;
+  }
+
+  .document article > section:not(.documentNotice) + section:not(.documentNotice) {
+    padding-top: 64px;
+  }
+
+  .document article > section > div {
+    gap: 11px;
+    margin-bottom: 25px;
+  }
+
+  .document article > section > div i { width: 36px; }
+  .document article p { margin-bottom: 18px; font-size: 1.08rem; line-height: 1.75; }
+
+  .footer {
+    min-height: 520px;
+    padding: 92px 22px 90px;
+  }
+
+  .footer > a {
+    max-width: 100%;
+    margin-top: 24px;
+    font-size: clamp(3rem, 14vw, 5rem);
+    overflow-wrap: anywhere;
+  }
+
+  .footer > div {
+    right: 22px;
+    bottom: 24px;
+    left: 22px;
+  }
+}
+
+@media (max-width: 520px) {
+  .hero { min-height: 620px; padding-inline: 18px; }
+  .reviewState { max-width: 100%; min-height: 38px; height: auto; padding-block: 8px; line-height: 1.35; }
+  .documentMeta { grid-template-columns: 1fr; gap: 0; }
+  .documentMeta div { grid-template-columns: 74px 1fr; gap: 8px; padding: 9px 0; border-right: 0; border-bottom: 1px solid rgba(8, 9, 11, 0.1); }
+  .documentMeta div:last-child { border-bottom: 0; }
+  .document { padding-inline: 18px; }
+  .document aside nav { grid-template-columns: 1fr; }
+  .documentNotice { padding: 22px 18px; }
+  .document article > section > div { align-items: flex-start; flex-wrap: wrap; }
+  .document article > section > div h2 { flex: 1 1 65%; line-height: 1.45; }
+  .footer { padding-inline: 18px; }
+  .footer > div { right: 18px; left: 18px; gap: 18px; align-items: flex-start; }
+}

@@ -200,16 +200,29 @@ function applyRecommendedPreferences(draft: Draft): Draft {
   };
 }
 
-export function OnboardingFlow({ userId, initialProfile, initialStatus, onComplete, onUploadPhotos, onExit, onLifeNeed }: { userId: number; initialProfile?: SocialProfile | null; initialStatus?: OnboardingStatus | null; onComplete: (payload: OnboardingPayload) => Promise<void>; onUploadPhotos: (files: File[]) => Promise<FitMeetProfilePhoto[]>; onExit: () => void; onLifeNeed: (purpose: InitialPurpose) => void }) {
+export function OnboardingFlow({ userId, initialProfile, initialStatus, onComplete, onUploadPhotos, onExit, onLifeNeed }: { userId: number; initialProfile?: SocialProfile | null; initialStatus?: OnboardingStatus | null; onComplete: (payload: OnboardingPayload) => Promise<void>; onUploadPhotos: (files: File[]) => Promise<FitMeetProfilePhoto[]>; onExit: () => Promise<void>; onLifeNeed: (purpose: InitialPurpose) => void }) {
   const [entry, setEntry] = useState<"initialPurpose" | "onboarding">("initialPurpose");
   const [stage, setStage] = useState(0);
   const [draft, setDraft] = useState<Draft>(() => readStoredDraft(userId, initialProfile));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const currentStage = onboardingStages[stage];
   const currentHint = useMemo(() => validationHint(stage, draft), [draft, stage]);
   const canContinue = currentHint === null;
+
+  const exit = async () => {
+    if (exiting) return;
+    setExiting(true);
+    setError(null);
+    try {
+      await onExit();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "退出暂未完成，请稍后重试。");
+      setExiting(false);
+    }
+  };
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 0 });
@@ -286,7 +299,7 @@ export function OnboardingFlow({ userId, initialProfile, initialStatus, onComple
   };
 
   if (entry === "initialPurpose") {
-    return <main className={styles.onboardingPage}><section className={styles.mobileSurface} aria-label="FitMeet 初始需求选择"><div className={styles.initialPurposeBody}><div className={styles.onboardingBrand}><FitMeetBrandIcon size={64} priority /></div><h1>你想让 FitMeet 先帮你做什么？</h1><p>先判断需求，再决定是否建档。只有涉及真人连接、亲密关系、线下同行或被推荐给别人时，才进入社交资料完善。</p>{initialPurposeGroups.map((group) => <section key={group.title} className={styles.initialPurposeGroup}><h2>{group.title}</h2><small>{group.subtitle}</small><div>{group.options.map((option) => { const Icon = option.icon; return <button type="button" key={option.value} onClick={() => selectInitialPurpose(option)}><span><Icon /></span><i><strong>{option.title}</strong><em>{option.subtitle}</em></i><FiArrowRight /></button>; })}</div></section>)}<button type="button" className={styles.flowExit} onClick={onExit}>退出内测账号</button></div></section></main>;
+    return <main className={styles.onboardingPage}><section className={styles.mobileSurface} aria-label="FitMeet 初始需求选择"><div className={styles.initialPurposeBody}><div className={styles.onboardingBrand}><FitMeetBrandIcon size={64} priority /></div><h1>你想让 FitMeet 先帮你做什么？</h1><p>先判断需求，再决定是否建档。只有涉及真人连接、亲密关系、线下同行或被推荐给别人时，才进入社交资料完善。</p>{initialPurposeGroups.map((group) => <section key={group.title} className={styles.initialPurposeGroup}><h2>{group.title}</h2><small>{group.subtitle}</small><div>{group.options.map((option) => { const Icon = option.icon; return <button type="button" key={option.value} onClick={() => selectInitialPurpose(option)}><span><Icon /></span><i><strong>{option.title}</strong><em>{option.subtitle}</em></i><FiArrowRight /></button>; })}</div></section>)}{error ? <p className={`${styles.footerStatus} ${styles.footerStatusError}`} role="alert">{error}</p> : null}<button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出当前账号"}</button></div></section></main>;
   }
 
   return (
@@ -295,7 +308,7 @@ export function OnboardingFlow({ userId, initialProfile, initialStatus, onComple
         <header className={styles.flowHeader}>
           <button type="button" aria-label={stage ? "返回上一阶段" : "返回需求选择"} onClick={stage ? () => { setError(null); setStage((value) => value - 1); } : () => setEntry("initialPurpose")}>{stage ? <FiArrowLeft /> : <FiX />}</button>
           <div><strong>完善你的社交资料</strong><small>{currentStage.title} · {stage + 1} / 3</small></div>
-          <button type="button" className={styles.flowExit} onClick={onExit}>退出建档</button>
+          <button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出建档"}</button>
         </header>
 
         <div ref={bodyRef} className={styles.onboardingBody}>
@@ -336,7 +349,7 @@ function Welcome({ draft, setDraft }: { draft: Draft; setDraft: React.Dispatch<R
 }
 
 function Identity({ draft, setDraft }: { draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>> }) {
-  return <section className={styles.stepSection}><h1>先填基础资料</h1><p>昵称和城市优先沿用内测档案；生日使用系统日期选择，不公开精确位置。</p><Field label="昵称"><input value={draft.nickname} maxLength={20} onChange={(event) => setDraft((current) => ({ ...current, nickname: event.target.value }))} /></Field><Field label="出生日期"><input type="date" value={draft.dateOfBirth} onChange={(event) => setDraft((current) => ({ ...current, dateOfBirth: event.target.value }))} /></Field><Field label="常驻城市"><input value={draft.city} onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))} /></Field><div className={styles.choiceRow}>{cityOptions.map((value) => <button type="button" key={value} className={draft.city === value ? styles.chipSelected : ""} onClick={() => setDraft((current) => ({ ...current, city: value }))}>{value}</button>)}</div><p className={styles.groupLabel}>你的性别</p><div className={styles.choiceRow}>{genderOptions.map((value) => <button type="button" key={value} className={draft.gender === value ? styles.chipSelected : ""} onClick={() => setDraft((current) => ({ ...current, gender: value }))}>{value}</button>)}</div><p className={styles.groupLabel}>想认识谁</p><div className={styles.choiceRow}>{showMeOptions.map((value) => <button type="button" key={value} className={draft.showMe.includes(value) ? styles.chipSelected : ""} onClick={() => setDraft((current) => ({ ...current, showMe: [value] }))}>{value}</button>)}</div></section>;
+  return <section className={styles.stepSection}><h1>先填基础资料</h1><p>昵称和城市优先沿用现有账号资料；生日使用系统日期选择，不公开精确位置。</p><Field label="昵称"><input value={draft.nickname} maxLength={20} onChange={(event) => setDraft((current) => ({ ...current, nickname: event.target.value }))} /></Field><Field label="出生日期"><input type="date" value={draft.dateOfBirth} onChange={(event) => setDraft((current) => ({ ...current, dateOfBirth: event.target.value }))} /></Field><Field label="常驻城市"><input value={draft.city} onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))} /></Field><div className={styles.choiceRow}>{cityOptions.map((value) => <button type="button" key={value} className={draft.city === value ? styles.chipSelected : ""} onClick={() => setDraft((current) => ({ ...current, city: value }))}>{value}</button>)}</div><p className={styles.groupLabel}>你的性别</p><div className={styles.choiceRow}>{genderOptions.map((value) => <button type="button" key={value} className={draft.gender === value ? styles.chipSelected : ""} onClick={() => setDraft((current) => ({ ...current, gender: value }))}>{value}</button>)}</div><p className={styles.groupLabel}>想认识谁</p><div className={styles.choiceRow}>{showMeOptions.map((value) => <button type="button" key={value} className={draft.showMe.includes(value) ? styles.chipSelected : ""} onClick={() => setDraft((current) => ({ ...current, showMe: [value] }))}>{value}</button>)}</div></section>;
 }
 
 function Purpose({ draft, setDraft }: { draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>> }) {
@@ -361,7 +374,7 @@ function Bio({ draft, setDraft }: { draft: Draft; setDraft: React.Dispatch<React
 }
 
 function Photos({ photos, onUpload, onRemove }: { photos: DraftPhoto[]; onUpload: (files: FileList | null) => void; onRemove: (index: number) => void }) {
-  return <section className={styles.stepSection}><h1>上传照片</h1><p>至少 2 张，最多 6 张。第一张会作为封面；照片会先经过审核。审核通过前，账号不会进入其他用户的匹配候选。</p><div className={styles.photoGrid}>{photos.map((photo, index) => <figure key={photo.preview}><img src={photo.preview} alt={`资料照片 ${index + 1}`} /><button type="button" aria-label="删除照片" onClick={() => onRemove(index)}><FiX /></button>{index === 0 ? <figcaption>封面</figcaption> : null}</figure>)}{photos.length < 6 ? <label className={styles.photoUpload}><FiImage /><span>添加照片</span><input type="file" accept="image/*" multiple onChange={(event) => onUpload(event.target.files)} /></label> : null}</div><aside><FiShield /> 请使用清晰、真实的本人照片；避免敏感信息、未成年人和他人隐私。内测账号也必须完成同样的真实资料门槛。</aside></section>;
+  return <section className={styles.stepSection}><h1>上传照片</h1><p>至少 2 张，最多 6 张。第一张会作为封面；照片会先经过审核。审核通过前，账号不会进入其他用户的匹配候选。</p><div className={styles.photoGrid}>{photos.map((photo, index) => <figure key={photo.preview}><img src={photo.preview} alt={`资料照片 ${index + 1}`} /><button type="button" aria-label="删除照片" onClick={() => onRemove(index)}><FiX /></button>{index === 0 ? <figcaption>封面</figcaption> : null}</figure>)}{photos.length < 6 ? <label className={styles.photoUpload}><FiImage /><span>添加照片</span><input type="file" accept="image/*" multiple onChange={(event) => onUpload(event.target.files)} /></label> : null}</div><aside><FiShield /> 请使用清晰、真实的本人照片；避免敏感信息、未成年人和他人隐私。所有账号都必须完成同样的真实资料门槛。</aside></section>;
 }
 
 function Preview({ draft }: { draft: Draft }) {

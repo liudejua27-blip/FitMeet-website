@@ -2,11 +2,19 @@ import Image from "next/image";
 
 import styles from "./fitmeet-complete.module.css";
 
-export function FitMeetBrandIcon({ size = 30, priority = false }: { size?: number; priority?: boolean }) {
+export function FitMeetBrandIcon({
+  size = 30,
+  priority = false,
+  src = "/brand/fitmeet-logo-v2.png",
+}: {
+  size?: number;
+  priority?: boolean;
+  src?: string;
+}) {
   return (
     <Image
       className={styles.brandIcon}
-      src="/brand/fitmeet-logo-v2.png"
+      src={src}
       alt="FitMeet"
       width={size}
       height={size}

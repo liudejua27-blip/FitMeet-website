@@ -1,6 +1,6 @@
 export const siteConfig = {
   name: "FitMeet",
-  companyName: "晤云科技",
+  legalEntityName: "晤云科技（青岛）有限公司",
   contactEmail: "support@fitmeet.cn",
   copyrightYear: 2026,
   icpRecord: "鲁ICP备2026015946号-4",

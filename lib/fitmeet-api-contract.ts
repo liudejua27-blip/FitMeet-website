@@ -13,6 +13,10 @@ export const fitMeetPaths = {
   auth: {
     login: "/auth/login",
     register: "/auth/register",
+    resendEmailVerification: "/auth/email/verification/resend",
+    verifyEmail: "/auth/email/verify",
+    forgotPassword: "/auth/password/forgot",
+    resetPassword: "/auth/password/reset",
     sendSmsCode: "/auth/sms/send",
     phoneLogin: "/auth/sms/verify",
     bindPhone: "/auth/phone/bind",
@@ -40,6 +44,13 @@ export const fitMeetPaths = {
     agentMemoryExtract: "/users/me/agent-memory/extract",
     agentMemoryConfirm: "/users/me/agent-memory/confirm",
     agentMemoryReject: "/users/me/agent-memory/reject",
+    agentMemoryControl: "/users/me/agent-memory/control",
+    agentMemoryUsage: (id: string) =>
+      `/users/me/agent-memory/${encodeURIComponent(id)}/usage`,
+    agentMemorySuppress: (id: string) =>
+      `/users/me/agent-memory/${encodeURIComponent(id)}/suppress`,
+    agentMemorySuppression: (memoryType: string) =>
+      `/users/me/agent-memory/suppressions/${encodeURIComponent(memoryType)}`,
     reminderPreferences: "/social-agent/reminders/preferences",
   },
   feed: {
@@ -118,6 +129,7 @@ export const fitMeetPaths = {
     events: "/agent-inbox/events",
     acknowledge: "/agent-inbox/events/ack",
   },
+  search: "/search",
   meets: {
     confirm: (id: number) => `/meets/${id}/confirm`,
     cancel: (id: number) => `/meets/${id}/cancel`,
@@ -125,8 +137,29 @@ export const fitMeetPaths = {
     noShow: (id: number) => `/meets/${id}/no-show`,
     reviews: (id: number) => `/meets/${id}/reviews`,
   },
+  groups: {
+    root: "/groups",
+    detail: (id: string) => `/groups/${encodeURIComponent(id)}`,
+    join: (id: string) => `/groups/${encodeURIComponent(id)}/join`,
+    leave: (id: string) => `/groups/${encodeURIComponent(id)}/leave`,
+    cancel: (id: string) => `/groups/${encodeURIComponent(id)}/cancel`,
+    polls: (id: string) => `/groups/${encodeURIComponent(id)}/polls`,
+    vote: (id: string, pollId: string) =>
+      `/groups/${encodeURIComponent(id)}/polls/${encodeURIComponent(pollId)}/vote`,
+    finalizePoll: (id: string, pollId: string) =>
+      `/groups/${encodeURIComponent(id)}/polls/${encodeURIComponent(pollId)}/finalize`,
+    checkIn: (id: string) => `/groups/${encodeURIComponent(id)}/check-in`,
+    memberRole: (id: string, membershipId: number) =>
+      `/groups/${encodeURIComponent(id)}/members/${membershipId}/role`,
+    removeMember: (id: string, membershipId: number) =>
+      `/groups/${encodeURIComponent(id)}/members/${membershipId}/remove`,
+    chatMode: (id: string) => `/groups/${encodeURIComponent(id)}/chat-mode`,
+    resolveRequest: (id: string, membershipId: number, decision: "approve" | "reject") =>
+      `/groups/${encodeURIComponent(id)}/requests/${membershipId}/${decision}`,
+  },
   safety: {
     reports: "/safety/reports",
+    blocks: "/safety/blocks",
     block: (id: number) => `/safety/blocks/${id}`,
   },
 } as const;
@@ -148,6 +181,18 @@ export type RawAuthSession = {
   user: FitMeetUser;
   phoneVerificationRequired?: boolean;
   phone_verification_required?: boolean;
+};
+
+export type EmailRegistrationPending = {
+  status: "verification_required";
+  emailVerificationRequired: true;
+  emailVerificationDelivery: "sent";
+};
+
+export type EmailActionResult = {
+  status: "accepted" | "verified" | "password_reset";
+  message?: string;
+  sessionsRevoked?: boolean;
 };
 
 export type OnboardingStatus = {
@@ -285,6 +330,11 @@ export type PublicUserProfile = {
   avatar?: string | null;
   city?: string | null;
   status?: string;
+  bio?: string | null;
+  interests?: string[];
+  verificationStatus?: string | null;
+  relationship?: RelationshipState;
+  connectionRequest?: FitMeetConnectionRequest | null;
 };
 
 export type FitMeetDemand = {
@@ -348,6 +398,12 @@ export type FitMeetDemandCandidate = {
 export type FitMeetConversation = {
   id: string;
   conversationId?: string;
+  contextType?: string | null;
+  contextId?: string | null;
+  isGroup?: boolean;
+  memberCount?: number;
+  chatMode?: FitMeetGroupChatMode | null;
+  canSendMessages?: boolean;
   userId?: number;
   displayName?: string;
   username?: string;
@@ -370,6 +426,8 @@ export type FitMeetConversationMessage = {
   id: string;
   conversationId?: string;
   senderId?: number;
+  senderName?: string;
+  senderAvatar?: string | null;
   text: string;
   body?: { text?: string };
   createdAt: string;
@@ -388,8 +446,63 @@ export type BlockedUserRecord = {
   id: number;
   name: string;
   avatar?: string | null;
+  city?: string | null;
+  reason?: string | null;
   blockedAt: string;
 };
+
+export type SafetyBlockListResponse = {
+  items: Array<{
+    blockedUserId: number;
+    user: PublicUserProfile;
+    reason?: string | null;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+  }>;
+  total?: number;
+};
+
+export type SafetyReportRecord = {
+  id: number;
+  targetType?: string | null;
+  targetId?: string | null;
+  reason?: string | null;
+  status: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type SafetyReportListResponse = {
+  items: SafetyReportRecord[];
+  total?: number;
+};
+
+export type AgentMemoryStatus =
+  | 'pending'
+  | 'draft'
+  | 'proposed'
+  | 'confirmed'
+  | 'active'
+  | 'rejected'
+  | 'disabled'
+  | 'expired'
+  | 'deleted';
+
+export type AgentMemorySensitivity = 'normal' | 'low' | 'medium' | 'sensitive' | 'high' | string;
+
+export type AgentMemoryUseScope =
+  | 'agent_and_matching'
+  | 'agent_only'
+  | 'matching_only'
+  | 'paused';
+
+export type AgentMemoryEvidence =
+  | string
+  | {
+      text?: string | null;
+      sourceRole?: 'user' | string | null;
+      sourceEventId?: string | null;
+    };
 
 export type FitMeetAgentMemory = {
   id: string;
@@ -397,11 +510,62 @@ export type FitMeetAgentMemory = {
   memoryKey?: string;
   value?: string | null;
   summary?: string | null;
-  status: string;
+  status: AgentMemoryStatus;
   source?: string;
-  sensitivity?: string;
+  sourceConversationId?: string | null;
+  sourceRunId?: string | null;
+  sourceEventId?: string | null;
+  sensitivity?: AgentMemorySensitivity;
+  evidence?: AgentMemoryEvidence[];
   confidence?: number;
+  useScope?: AgentMemoryUseScope;
+  revision?: number;
+  lastUsedAt?: string | null;
+  lastExtractedAt?: string | null;
+  userConfirmedAt?: string | null;
+  expiresAt?: string | null;
   createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AgentMemoryMutation = {
+  status: AgentMemoryStatus;
+  item: FitMeetAgentMemory;
+};
+
+export type AgentMemorySuppression = {
+  memoryType: string;
+  createdAt?: string | null;
+};
+
+export type AgentMemoryControl = {
+  inferenceEnabled: boolean;
+  suppressions: AgentMemorySuppression[];
+  updatedAt?: string | null;
+};
+
+export type AgentMemoryUsagePurpose = 'agent_context' | 'matching';
+
+export type AgentMemoryUsageEvent = {
+  id: string;
+  memoryId: string;
+  purpose: AgentMemoryUsagePurpose;
+  contextType?: 'agent_thread' | 'demand' | string | null;
+  contextId?: string | null;
+  subjectId?: string | null;
+  createdAt: string;
+};
+
+export type AgentMemoryUsagePage = {
+  items: AgentMemoryUsageEvent[];
+  nextCursor?: string | null;
+  total?: number;
+};
+
+export type AgentMemorySuppressionMutation = {
+  status: 'suppressed';
+  item: FitMeetAgentMemory;
+  control: AgentMemoryControl;
 };
 
 export type AgentToolCall = {
@@ -505,10 +669,14 @@ export type ConversationMessage = {
   text: string;
   createdAt: string;
   senderId?: number;
+  senderName?: string;
+  senderAvatar?: string | null;
   readByOther?: boolean | null;
   status?: string;
   lifecycleStatus?: string;
   recalledAt?: string | null;
+  clientMessageId?: string | null;
+  localStatus?: "sending" | "failed";
 };
 
 export type DemandDraftSession = {
@@ -572,6 +740,33 @@ export type AgentThreadTurn = {
   idempotent?: boolean;
 };
 
+export type FitMeetSearchType = "agent_thread" | "message" | "friend" | "group";
+
+export type FitMeetSearchResult = {
+  id: string;
+  type: FitMeetSearchType;
+  title: string;
+  subtitle?: string | null;
+  snippet?: string | null;
+  path: string;
+  updatedAt?: string | null;
+};
+
+export type FitMeetSearchCounts = {
+  agent_threads: number;
+  messages: number;
+  friends: number;
+  groups: number;
+};
+
+export type FitMeetSearchResponse = {
+  query: string;
+  items: FitMeetSearchResult[];
+  counts: FitMeetSearchCounts;
+};
+
+export type AgentInboxScope = 'unread' | 'all' | 'read';
+
 export type AgentInboxEvent = {
   id: string;
   type?: string;
@@ -579,6 +774,7 @@ export type AgentInboxEvent = {
   body?: string;
   status?: string;
   createdAt?: string;
+  acknowledgedAt?: string | null;
   relatedUserId?: number | null;
   relatedCandidateId?: number | null;
   payload?: Record<string, unknown>;
@@ -587,6 +783,8 @@ export type AgentInboxEvent = {
 export type AgentInboxEventPage = {
   items: AgentInboxEvent[];
   total?: number;
+  historyCount?: number;
+  unreadCount?: number;
   nextCursor?: string | null;
 };
 
@@ -636,6 +834,127 @@ export type MeetInvitation = MeetInvitationDraft & {
 export type DemandCandidateBehavior = "viewed" | "saved" | "dismissed" | "invited" | "reported";
 
 export type MeetLifecycleStatus = "scheduled" | "arrived" | "completed" | "cancelled" | "no_show";
+
+export type FitMeetGroupJoinMode = "open" | "request" | "invite_only";
+export type FitMeetGroupStatus = "forming" | "confirmed" | "cancelled" | "completed";
+export type FitMeetGroupChatMode = "all_members" | "admins_only";
+export type FitMeetGroupPollType = "time" | "location";
+export type FitMeetGroupPollStatus = "open" | "finalized" | "cancelled";
+export type FitMeetGroupAttendanceStatus = "none" | "attending" | "arrived" | "not_attending";
+export type FitMeetGroupMemberStatus =
+  | "active"
+  | "pending"
+  | "waitlisted"
+  | "left"
+  | "rejected"
+  | "removed";
+export type FitMeetGroupMemberRole = "host" | "cohost" | "member";
+
+export type FitMeetGroupMember = {
+  id: number;
+  groupId: string;
+  userId: number;
+  name?: string;
+  avatar?: string | null;
+  role: FitMeetGroupMemberRole;
+  status: FitMeetGroupMemberStatus;
+  attendanceStatus?: FitMeetGroupAttendanceStatus;
+  joinedAt?: string | null;
+  resolvedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type FitMeetGroupEvent = {
+  id: string;
+  groupId: string;
+  type: string;
+  actorUserId?: number | null;
+  actorName?: string | null;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type FitMeetGroupPollOption = {
+  id: string;
+  pollId: string;
+  label: string;
+  voteCount: number;
+  currentUserVoted: boolean;
+};
+
+export type FitMeetGroupPoll = {
+  id: string;
+  groupId: string;
+  type: FitMeetGroupPollType;
+  question: string;
+  status: FitMeetGroupPollStatus;
+  createdByUserId: number;
+  createdByName?: string;
+  finalOptionId?: string | null;
+  closesAt?: string | null;
+  options: FitMeetGroupPollOption[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type FitMeetGroupAttendanceSummary = {
+  attending: number;
+  arrived: number;
+  notAttending: number;
+  unconfirmed: number;
+};
+
+export type FitMeetGroup = {
+  id: string;
+  demandId?: string | null;
+  hostUserId: number;
+  title: string;
+  summary: string;
+  activityType: string;
+  city?: string | null;
+  locationText?: string | null;
+  timeWindow?: string | null;
+  timeFinalizedAt?: string | null;
+  locationFinalizedAt?: string | null;
+  joinMode: FitMeetGroupJoinMode;
+  chatMode: FitMeetGroupChatMode;
+  status: FitMeetGroupStatus;
+  capacityMin: number;
+  capacityMax: number;
+  memberCount: number;
+  pendingCount: number;
+  waitlistCount: number;
+  availableSeats: number;
+  conversationId?: string | null;
+  currentUserRole: FitMeetGroupMemberRole | "none";
+  currentUserMembershipStatus: FitMeetGroupMemberStatus | "none";
+  currentUserAttendanceStatus: FitMeetGroupAttendanceStatus;
+  canManage: boolean;
+  canSendGroupMessages: boolean;
+  canCheckIn: boolean;
+  canJoin: boolean;
+  members?: FitMeetGroupMember[];
+  requests?: FitMeetGroupMember[];
+  polls?: FitMeetGroupPoll[];
+  attendanceSummary?: FitMeetGroupAttendanceSummary;
+  events?: FitMeetGroupEvent[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type CreateFitMeetGroupPayload = {
+  demandId: string;
+  title?: string;
+  summary?: string;
+  activityType?: string;
+  city?: string | null;
+  locationText?: string | null;
+  timeWindow?: string | null;
+  joinMode: FitMeetGroupJoinMode;
+  capacityMin: number;
+  capacityMax: number;
+};
 
 export type MeetReviewPayload = {
   rating: number;
