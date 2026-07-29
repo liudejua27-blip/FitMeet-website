@@ -189,3 +189,43 @@ test('API errors expose authoritative status, code and details instead of fake s
     globalThis.fetch = originalFetch;
   }
 });
+
+test('formal web authentication uses same-origin routes and never returns refresh tokens to storage', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    if (String(input).endsWith('/sms/send')) return response({ message: '验证码已发送' });
+    if (String(input).endsWith('/sms/verify'))
+      return response({ accessToken: 'web-access-token', user: { id: 7, name: '正式用户' } });
+    if (String(input).endsWith('/refresh'))
+      return response({ accessToken: 'rotated-access-token', user: { id: 7, name: '正式用户' } });
+    return response({ status: 'logged_out' });
+  };
+
+  try {
+    const api = new FitMeetApiClient(() => null, baseUrl);
+    const sent = await api.sendWebSmsCode('13800138000');
+    const loggedIn = await api.loginWebByPhone('13800138000', '2468');
+    const refreshed = await api.refreshWebSession();
+    await api.logoutWebSession();
+
+    assert.equal(sent.message, '验证码已发送');
+    assert.equal(loggedIn.accessToken, 'web-access-token');
+    assert.equal(loggedIn.refreshToken, undefined);
+    assert.equal(refreshed.accessToken, 'rotated-access-token');
+    assert.deepEqual(
+      calls.map((call) => [call.init.method, call.url]),
+      [
+        ['POST', '/api/auth/sms/send'],
+        ['POST', '/api/auth/sms/verify'],
+        ['POST', '/api/auth/refresh'],
+        ['POST', '/api/auth/logout'],
+      ],
+    );
+    assert.deepEqual(body(calls[0]), { phone: '13800138000' });
+    assert.deepEqual(body(calls[1]), { phone: '13800138000', code: '2468' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

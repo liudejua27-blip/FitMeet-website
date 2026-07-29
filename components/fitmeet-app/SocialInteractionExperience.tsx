@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FiArrowDown,
   FiArrowLeft,
   FiBell,
   FiCalendar,
@@ -33,7 +34,10 @@ import type {
   PublicUserProfile,
 } from '@/lib/fitmeet-api-contract';
 import type { FitMeetApiClient } from '@/lib/fitmeet-api-client';
-import type { RelationshipSnapshot } from '@/lib/fitmeet-social-state';
+import {
+  firstUnreadPeerMessageIndex,
+  type RelationshipSnapshot,
+} from '@/lib/fitmeet-social-state';
 import styles from './social-interaction.module.css';
 
 export type SocialExperienceMode =
@@ -639,22 +643,34 @@ function ConversationWorkspace(props: SocialProps) {
   const [messageReportReason, setMessageReportReason] = useState('inappropriate_content');
   const [messageReportDetails, setMessageReportDetails] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
+  const unreadMarkerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const positionedConversationRef = useRef<string | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const conversation = props.conversation;
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
     const rememberPosition = () => {
       stickToBottomRef.current = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
+      setShowJumpToLatest(!stickToBottomRef.current);
     };
     thread.addEventListener('scroll', rememberPosition, { passive: true });
     rememberPosition();
     return () => thread.removeEventListener('scroll', rememberPosition);
   }, [conversation?.id]);
   useEffect(() => {
+    if (!conversation?.id || !props.messages.length) return;
+    if (positionedConversationRef.current !== conversation.id) {
+      positionedConversationRef.current = conversation.id;
+      if (Number(conversation.unread || 0) > 0 && unreadMarkerRef.current) {
+        unreadMarkerRef.current.scrollIntoView({ block: 'center' });
+        return;
+      }
+    }
     if (stickToBottomRef.current)
       threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
-  }, [props.messages.length]);
+  }, [conversation?.id, conversation?.unread, props.messages.length]);
   if (!conversation)
     return (
       <main className={styles.page}>
@@ -671,6 +687,7 @@ function ConversationWorkspace(props: SocialProps) {
   const title =
     conversation.displayName || conversation.username || conversation.peer?.name || 'FitMeet 用户';
   const muted = conversation.notificationLevel === 'muted';
+  const firstUnreadIndex = firstUnreadPeerMessageIndex(props.messages, conversation.unread);
   return (
     <main className={`${styles.page} ${styles.conversationPage}`}>
       <header className={styles.conversationHeader}>
@@ -751,7 +768,7 @@ function ConversationWorkspace(props: SocialProps) {
             <FiShield /> 双方确认后开放的真实会话；当前网页端发送文字消息。
           </p>
           {props.messages.length ? (
-            props.messages.map((item) => {
+            props.messages.map((item, index) => {
               const recalled = item.lifecycleStatus === 'recalled' || Boolean(item.recalledAt);
               const canRecall =
                 item.role === 'user' &&
@@ -759,8 +776,13 @@ function ConversationWorkspace(props: SocialProps) {
                 item.localStatus !== 'failed' &&
                 Date.now() - new Date(item.createdAt).getTime() <= 120000;
               return (
+                <div className={styles.messageSequence} key={item.id}>
+                  {index === firstUnreadIndex ? (
+                    <div ref={unreadMarkerRef} className={styles.unreadMarker} role="separator">
+                      <span>以下是未读消息</span>
+                    </div>
+                  ) : null}
                 <article
-                  key={item.id}
                   className={`${styles.bubbleRow} ${item.role === 'user' ? styles.mine : ''}`}
                 >
                   <div className={styles.bubble}>
@@ -826,12 +848,26 @@ function ConversationWorkspace(props: SocialProps) {
                     ) : null}
                   </div>
                 </article>
+                </div>
               );
             })
           ) : (
             <p className={styles.empty}>会话已经开放。先从一句轻松的问候开始吧。</p>
           )}
         </section>
+        {showJumpToLatest ? (
+          <button
+            type="button"
+            className={styles.jumpToLatest}
+            onClick={() => {
+              threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
+              stickToBottomRef.current = true;
+              setShowJumpToLatest(false);
+            }}
+          >
+            <FiArrowDown /> 回到最新消息
+          </button>
+        ) : null}
         <aside className={styles.peerRail}>
           <span className={styles.railAvatar}>{title.slice(0, 1)}</span>
           <h2>{title}</h2>

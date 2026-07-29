@@ -76,6 +76,21 @@ export function failOptimisticMessage(
   );
 }
 
+export function firstUnreadPeerMessageIndex(
+  messages: ConversationMessage[],
+  unreadCount: number | undefined,
+): number {
+  let remaining = Math.max(0, Number(unreadCount || 0));
+  let firstUnreadIndex = -1;
+  for (let index = messages.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    if (messages[index]?.role === 'peer') {
+      firstUnreadIndex = index;
+      remaining -= 1;
+    }
+  }
+  return firstUnreadIndex;
+}
+
 export function dedupeInboxEvents(events: AgentInboxEvent[]): AgentInboxEvent[] {
   const seen = new Set<string>();
   return events.filter((event) => {

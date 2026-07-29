@@ -35,7 +35,7 @@ export function useFitMeetSession() {
 
   const refresh = useCallback(async () => {
     try {
-      const renewed = await api.refreshInternalTesterSession();
+      const renewed = await api.refreshWebSession();
       return loadAuthenticatedState({ accessToken: renewed.accessToken });
     } catch (error) {
       storedRef.current = null;
@@ -54,13 +54,15 @@ export function useFitMeetSession() {
     });
   }, [refresh]);
 
-  const login = useCallback(async (accessCode: string) => {
-    const authenticated = await api.loginInternalTester(accessCode);
+  const login = useCallback(async (phone: string, code: string) => {
+    const authenticated = await api.loginWebByPhone(phone, code);
     return loadAuthenticatedState({ accessToken: authenticated.accessToken });
   }, [api, loadAuthenticatedState]);
 
+  const sendSmsCode = useCallback((phone: string) => api.sendWebSmsCode(phone), [api]);
+
   const logout = useCallback(() => {
-    void api.logoutInternalTester();
+    void api.logoutWebSession();
     storedRef.current = null;
     setState({ ...initialState, status: "anonymous", error: null });
   }, [api]);
@@ -73,5 +75,5 @@ export function useFitMeetSession() {
     setState((current) => ({ ...current, onboarding }));
   }, []);
 
-  return { api, state, login, logout, refresh, setSocialProfile, setOnboarding };
+  return { api, state, login, sendSmsCode, logout, refresh, setSocialProfile, setOnboarding };
 }

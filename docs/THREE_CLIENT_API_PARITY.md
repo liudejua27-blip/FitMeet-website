@@ -15,7 +15,7 @@
 | 活动邀请与约练 | `/meet-invitations*`、`/meets/:id/{confirm,cancel,complete,no-show,reviews}` | `MeetLifecycleViews.swift` | 创建、接受、拒绝、撤回、到达、完成、爽约、评价 | 消息/发现联动 |
 | 设置与安全 | `/social-agent/reminders/preferences`、`/safety/*`、账号导出/删除 | `ProfileSettingsSheets.swift` | 隐私、通知、举报、拉黑、退出体验 | `profile-settings` |
 
-Agent 的正式闲聊运行时通过同一认证会话访问 `/agent/v1` 代理；iOS 的 `social_chat_v1` 与 `social_task_v1` 明确要求：在用户确认前，Agent 不得声称已经发布需求、搜索候选、发送邀请、修改画像、拉黑或举报。路演体验账号使用本地受控回复演示这一边界，不能替代正式模型调用。
+Agent 的正式闲聊运行时通过同一认证会话访问 `/agent/v1` 代理；iOS 的 `social_chat_v1` 与 `social_task_v1` 明确要求：在用户确认前，Agent 不得声称已经发布需求、搜索候选、发送邀请、修改画像、拉黑或举报。Web、iOS 与微信端都必须使用服务端回执更新真实状态，不能用本地受控回复替代正式模型调用。
 
 ## Web 路演闭环（本次补齐）
 

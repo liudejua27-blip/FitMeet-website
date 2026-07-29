@@ -672,7 +672,15 @@ export function MomentsExperience({
                 </article>
               ))
             ) : (
-              <p className={styles.emptyState}>暂时没有可展示的真实动态。你可以发布第一条近况。</p>
+              <section className={styles.feedEmptyState} aria-label="动态空状态">
+                <span><FiImage /></span>
+                <h2>从一条真实近况开始</h2>
+                <p>这里不会填充虚构动态。发布运动、兴趣或城市生活近况，也可以先看看公开的社交需求。</p>
+                <div>
+                  <button type="button" onClick={onCompose}><FiPlus /> 发布动态</button>
+                  <button type="button" onClick={() => onChannel('social')}>查看社交大厅 <FiChevronRight /></button>
+                </div>
+              </section>
             )}
             <div className={styles.paginationFooter}>
               {currentPage < lastPage ? (

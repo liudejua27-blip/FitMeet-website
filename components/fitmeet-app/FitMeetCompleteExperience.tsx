@@ -103,7 +103,7 @@ import {
   settleOptimisticMessage,
 } from '@/lib/fitmeet-social-state';
 import { OnboardingFlow } from './OnboardingFlow';
-import { InternalTesterLogin } from './InternalTesterLogin';
+import { FitMeetLogin } from './FitMeetLogin';
 import { FitMeetBrandIcon } from './FitMeetBrandIcon';
 import { CandidateProfileExperience } from './CandidateProfileExperience';
 import { MessagesExperience } from './MessagesExperience';
@@ -162,7 +162,7 @@ const quickAgentPrompts = [
 ];
 
 const emptyProfile: SocialProfile = {
-  nickname: '内测用户',
+  nickname: 'FitMeet 用户',
   city: '',
   bio: '',
   interests: [],
@@ -2256,12 +2256,18 @@ export function FitMeetCompleteExperience({
       <main className={styles.appPage}>
         <section className={`${styles.mobileSurface} ${styles.loadingSurface}`} aria-live="polite">
           <FitMeetBrandIcon size={78} priority />
-          <p>正在准备你的 FitMeet 内测档案…</p>
+          <p>正在准备你的 FitMeet 工作台…</p>
         </section>
       </main>
     );
-  if (session.state.status === 'anonymous' && process.env.NODE_ENV !== 'development')
-    return <InternalTesterLogin onLogin={session.login} initialError={session.state.error} />;
+  if (session.state.status === 'anonymous')
+    return (
+      <FitMeetLogin
+        onLogin={session.login}
+        onSendCode={session.sendSmsCode}
+        initialError={session.state.error}
+      />
+    );
 
   if (surface === 'onboarding')
     return (
@@ -3001,22 +3007,6 @@ function HomeScreen({
             disabled={sending}
           />
           <div className={styles.composerTools}>
-            <button
-              type="button"
-              aria-label="附件能力等待统一上传接口"
-              title="附件能力等待统一上传接口"
-              disabled
-            >
-              <FiPlus />
-            </button>
-            <button
-              type="button"
-              aria-label="图片理解等待统一上传接口"
-              title="图片理解等待统一上传接口"
-              disabled
-            >
-              <FiImage />
-            </button>
             <span>需求整理</span>
             <button
               type="button"
@@ -3591,7 +3581,7 @@ function ProfileScreen({
         <div>
           <h1>{profile.nickname}</h1>
           <p>{profile.city || '城市待填写'}</p>
-          <span>内测资料</span>
+          <span>{profile.profileDiscoverable ? '资料可发现' : '资料已隐藏'}</span>
         </div>
         <button type="button" onClick={onEdit}>
           编辑资料
@@ -4414,7 +4404,7 @@ function HistorySheet({
   return (
     <Sheet title="对话记录" onClose={onClose}>
       <p className={styles.sheetLead}>
-        对话和需求草稿已同步到你的内测账号；刷新或换到 iOS、微信端后都可继续。
+        对话和需求草稿已同步到你的 FitMeet 账号；刷新或换到 iOS、微信端后都可继续。
       </p>
       <div className={styles.historyList}>
         {threads.length ? (
@@ -4760,7 +4750,7 @@ function AccountSafetySheet({
   return (
     <Sheet title="账号与安全" onClose={onClose}>
       <p className={styles.sheetLead}>
-        这里管理当前内测账号的资料安全与互动边界，不会默认举报任何候选人。
+        这里管理当前账号的资料安全与互动边界，不会默认举报任何候选人。
       </p>
       <div className={styles.accountSafetyGrid}>
         <span>

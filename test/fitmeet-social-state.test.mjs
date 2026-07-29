@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   dedupeInboxEvents,
   failOptimisticMessage,
+  firstUnreadPeerMessageIndex,
   optimisticMessage,
   optimisticLikeState,
   relationshipSnapshot,
@@ -39,6 +40,19 @@ test('optimistic messages settle or remain retryable after failure', () => {
   });
   assert.equal(settled[0].id, 'server-1');
   assert.equal(settled[0].localStatus, undefined);
+});
+
+test('unread positioning counts peer messages without treating my replies as unread', () => {
+  const messages = [
+    { id: '1', role: 'peer', text: 'old', createdAt: '2026-01-01T00:00:00Z' },
+    { id: '2', role: 'user', text: 'reply', createdAt: '2026-01-01T00:00:01Z' },
+    { id: '3', role: 'peer', text: 'unread one', createdAt: '2026-01-01T00:00:02Z' },
+    { id: '4', role: 'user', text: 'local reply', createdAt: '2026-01-01T00:00:03Z' },
+    { id: '5', role: 'peer', text: 'unread two', createdAt: '2026-01-01T00:00:04Z' },
+  ];
+  assert.equal(firstUnreadPeerMessageIndex(messages, 2), 2);
+  assert.equal(firstUnreadPeerMessageIndex(messages, 0), -1);
+  assert.equal(firstUnreadPeerMessageIndex(messages, 9), 0);
 });
 
 test('notification events are deduplicated without reordering', () => {

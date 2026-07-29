@@ -202,27 +202,36 @@ export class FitMeetApiClient {
     );
   }
 
-  /**
-   * The public web client never sees a tester phone number or the MobileAPI
-   * test-code.  Those credentials stay in the web server's environment and
-   * are exchanged only after an internal invite code is verified.
-   */
-  async loginInternalTester(accessCode: string) {
-    const response = await fetch('/api/internal-test/login', {
+  async sendWebSmsCode(phone: string) {
+    const response = await fetch('/api/auth/sms/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessCode }),
+      body: JSON.stringify({ phone }),
     });
     const payload: unknown = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
-      throw new Error(error.message || error.code || '内测登录未能完成。');
+      throw new Error(error.message || error.code || '验证码发送失败，请稍后重试。');
+    }
+    return unwrap<{ message: string; expiresIn?: number }>(payload);
+  }
+
+  async loginWebByPhone(phone: string, code: string) {
+    const response = await fetch('/api/auth/sms/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, code }),
+    });
+    const payload: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
+      throw new Error(error.message || error.code || '手机号验证码登录失败。');
     }
     return normalizeAuthSession(unwrap<RawAuthSession>(payload));
   }
 
-  async refreshInternalTesterSession() {
-    const response = await fetch('/api/internal-test/refresh', {
+  async refreshWebSession() {
+    const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
@@ -236,8 +245,8 @@ export class FitMeetApiClient {
     return normalizeAuthSession(unwrap<RawAuthSession>(payload));
   }
 
-  async logoutInternalTester() {
-    await fetch('/api/internal-test/logout', {
+  async logoutWebSession() {
+    await fetch('/api/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',

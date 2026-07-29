@@ -163,6 +163,86 @@
   font-size: 11px;
   line-height: 1.45;
 }
+.formalLogin {
+  min-height: min(820px, calc(100dvh - 56px));
+}
+.formalLogin > section {
+  padding-block: 20px 24px;
+}
+.formalLogin > section > p:not(.loginEyebrow) {
+  margin-bottom: 20px;
+}
+.loginFormTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #24304a;
+  font-size: 13px;
+}
+.loginFormTitle svg {
+  width: 17px;
+  height: 17px;
+}
+.loginFormTitle span {
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef3ff;
+  color: #5676df;
+  font-size: 9px;
+  font-weight: 850;
+}
+.internalLogin form .loginCodeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 102px;
+  gap: 8px;
+}
+.internalLogin form .loginCodeRow button {
+  border: 1px solid #dce3f0;
+  border-radius: 13px;
+  background: #fff;
+  color: #34415a;
+  font-size: 11px;
+  font-weight: 800;
+}
+.internalLogin form .loginCodeRow button:disabled {
+  color: #9aa4b6;
+  cursor: default;
+}
+.loginNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -2px 0 0;
+  color: #467f70;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.loginNotice svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.internalLogin form .loginAgreement {
+  display: flex;
+  grid-template-columns: none;
+  align-items: flex-start;
+  gap: 8px;
+  color: #7d8799;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.internalLogin form .loginAgreement input {
+  width: 15px;
+  min-height: 15px;
+  margin-top: 1px;
+  padding: 0;
+  accent-color: #5b78e6;
+}
+.loginAgreement a {
+  color: #526fd9;
+  text-decoration: none;
+}
 
 .appScroll {
   height: 100%;
@@ -918,6 +998,14 @@
   display: grid;
   gap: 13px;
 }
+.feedEmptyState { display: grid; min-height: 300px; place-items: center; align-content: center; gap: 10px; padding: 42px 24px; border: 1px solid #e5e9f1; border-radius: 20px; background: linear-gradient(180deg,#fff,#fafbfe); text-align: center; }
+.feedEmptyState>span { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid #dfe6f5; border-radius: 17px; background: #f1f5ff; color: #4d77dd; font-size: 23px; }
+.feedEmptyState h2 { margin: 5px 0 0; color: #252c3d; font-size: 18px; letter-spacing: -.35px; }
+.feedEmptyState p { max-width: 430px; margin: 0; color: #7d8798; font-size: 11px; line-height: 1.7; }
+.feedEmptyState>div { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.feedEmptyState button { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid #dfe4ed; border-radius: 11px; background: #fff; color: #4d586d; font: inherit; font-size: 10px; font-weight: 740; cursor: pointer; }
+.feedEmptyState button:first-child { border-color: #3478f6; background: #3478f6; color: #fff; }
+.feedEmptyState button:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(35,47,78,.09); }
 .postCard {
   padding: 14px;
   border: 1px solid #e6e9f0;
@@ -5064,8 +5152,11 @@
   }
   .secondaryWorkspaceScroll > div {
     width: 100%;
-    padding: 22px max(14px, env(safe-area-inset-left)) 40px;
+    padding: 16px max(14px, env(safe-area-inset-left)) 40px;
   }
+  .feedEmptyState { min-height: 250px; padding: 32px 18px; border-radius: 16px; }
+  .feedEmptyState>div { width: 100%; }
+  .feedEmptyState button { flex: 1; }
   .sheet {
     width: 100%;
   }

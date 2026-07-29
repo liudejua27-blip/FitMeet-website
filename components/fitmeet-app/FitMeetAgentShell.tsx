@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FiBookOpen,
   FiCheck,
@@ -177,6 +177,8 @@ export function FitMeetAgentShell({
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const storedCollapsed = window.localStorage.getItem("fitmeet:web-sidebar-collapsed:v1");
@@ -195,6 +197,20 @@ export function FitMeetAgentShell({
           return next;
         });
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setMobileOpen(false);
+        onNewThread();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        if (window.innerWidth <= 767) {
+          setMobileOpen(true);
+          window.requestAnimationFrame(() => searchInputRef.current?.focus());
+        } else {
+          searchInputRef.current?.focus();
+        }
+      }
       if (event.key === "Escape") {
         setMobileOpen(false);
         setUserMenuOpen(false);
@@ -202,7 +218,16 @@ export function FitMeetAgentShell({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [onNewThread]);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) setUserMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => window.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [userMenuOpen]);
 
   const visibleThreads = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
@@ -257,7 +282,7 @@ export function FitMeetAgentShell({
         </button>
         <label className={styles.searchField}>
           <FiSearch />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" aria-label="搜索对话" />
+          <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" aria-label="搜索对话" />
         </label>
       </div>
 
@@ -289,7 +314,7 @@ export function FitMeetAgentShell({
         </section>
       </div>
 
-      <footer className={styles.sidebarFooter}>
+      <footer ref={userMenuRef} className={styles.sidebarFooter}>
         <div id="fitmeet-user-menu" className={`${styles.userMenu} ${userMenuOpen ? styles.userMenuOpen : ""}`}>
           <nav aria-label="用户导航">
             {destinationItems.map((item) => {
@@ -323,7 +348,7 @@ export function FitMeetAgentShell({
         ? "消息"
         : "我的";
 
-  return <section className={`${styles.shell} ${collapsed ? styles.collapsed : ""} ${theme === "dark" ? styles.dark : ""}`} data-theme={theme}>
+  return <section className={`${styles.shell} ${collapsed ? styles.collapsed : ""} ${theme === "dark" ? styles.dark : ""}`} data-theme={theme} data-destination={activeDestination}>
     <div className={styles.desktopSidebar}>{sidebar}</div>
 
     {mobileOpen ? <div className={styles.mobileShade} role="presentation" onMouseDown={() => setMobileOpen(false)}>
@@ -347,6 +372,22 @@ export function FitMeetAgentShell({
         </div>
       </header>
       <div className={styles.workspaceBody}>{children}</div>
+      <nav className={styles.mobilePrimaryNav} aria-label="FitMeet 主导航">
+        {destinationItems.map((item) => {
+          const Icon = item.icon;
+          const active = activeDestination === item.id;
+          return <button
+            type="button"
+            key={item.id}
+            className={active ? styles.mobilePrimaryNavActive : ""}
+            aria-current={active ? "page" : undefined}
+            onClick={() => navigate(item.id)}
+          >
+            <span><Icon />{item.id === "messages" && unreadCount ? <b>{unreadCount > 99 ? "99+" : unreadCount}</b> : null}</span>
+            <small>{item.label}</small>
+          </button>;
+        })}
+      </nav>
     </main>
 
     {contextPanel ? <aside className={styles.context} aria-label="当前任务上下文">{contextPanel}</aside> : null}
