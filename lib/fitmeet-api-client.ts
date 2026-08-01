@@ -27,6 +27,8 @@ import {
   type AgentMemoryUsagePage,
   type AgentMemoryUseScope,
   type FitMeetConversation,
+  type FitMeetAppConfig,
+  type FitMeetConversationHistoryPage,
   type FitMeetConversationMessage,
   type FitMeetDemand,
   type FitMeetDemandCandidate,
@@ -39,6 +41,7 @@ import {
   type FitMeetGroupPollType,
   type CreateFitMeetGroupPayload,
   type FitMeetIntentApplication,
+  type FitMeetNotificationPreferences,
   type FitMeetProfilePhoto,
   type FitMeetPublicIntent,
   type FitMeetUploadImage,
@@ -152,6 +155,13 @@ export class FitMeetApiClient {
   constructor(getToken: () => string | null, baseUrl = FITMEET_API_BASE_URL) {
     this.getToken = getToken;
     this.baseUrl = baseUrl;
+  }
+
+  getAppConfig() {
+    return this.request<FitMeetAppConfig>({
+      method: 'GET',
+      path: fitMeetPaths.appConfig,
+    });
   }
 
   async request<T>({ method, path, body, idempotencyKey }: RequestOptions): Promise<T> {
@@ -1176,6 +1186,24 @@ export class FitMeetApiClient {
     });
     return payload.items ?? [];
   }
+  getNotificationPreferences() {
+    return this.request<FitMeetNotificationPreferences>({
+      method: 'GET',
+      path: fitMeetPaths.users.notificationPreferences,
+    });
+  }
+  updateNotificationPreferences(
+    payload: Pick<
+      FitMeetNotificationPreferences,
+      'directMessagesEnabled' | 'interactionsEnabled' | 'systemEnabled'
+    >,
+  ) {
+    return this.request<FitMeetNotificationPreferences>({
+      method: 'PUT',
+      path: fitMeetPaths.users.notificationPreferences,
+      body: payload,
+    });
+  }
   async listBlockedUsers() {
     const payload = await this.request<SafetyBlockListResponse>({
       method: 'GET',
@@ -1208,6 +1236,21 @@ export class FitMeetApiClient {
       path: fitMeetPaths.messages.conversations,
     });
   }
+  async listConversationsPage(cursor?: string, limit = 30) {
+    const pageSize = Math.min(Math.max(limit, 1), 99);
+    const query = new URLSearchParams({ limit: String(pageSize + 1) });
+    if (cursor?.trim()) query.set('cursor', cursor.trim());
+    const rows = await this.request<FitMeetConversation[]>({
+      method: 'GET',
+      path: `${fitMeetPaths.messages.conversations}?${query.toString()}`,
+    });
+    const hasNextPage = rows.length > pageSize;
+    const items = rows.slice(0, pageSize);
+    return {
+      items,
+      nextCursor: hasNextPage ? items.at(-1)?.updatedAt ?? null : null,
+    };
+  }
   startConversation(targetUserId: number, contextType = 'profile', contextId = '') {
     return this.request<FitMeetConversation>({
       method: 'POST',
@@ -1216,11 +1259,33 @@ export class FitMeetApiClient {
       idempotencyKey: `web-conversation-start-${targetUserId}-${contextType}-${contextId || 'direct'}`,
     });
   }
-  getConversation(id: string) {
-    return this.request<FitMeetConversationMessage[]>({
+  async getConversationMessagesPage(
+    id: string,
+    before?: string,
+    after?: string,
+    limit = 50,
+  ): Promise<FitMeetConversationHistoryPage> {
+    const pageSize = Math.min(Math.max(limit, 1), 99);
+    const query = new URLSearchParams({ limit: String(pageSize + 1) });
+    if (before?.trim()) query.set('before', before.trim());
+    if (after?.trim()) query.set('after', after.trim());
+    const payload = await this.request<
+      | FitMeetConversationMessage[]
+      | { items?: FitMeetConversationMessage[]; data?: FitMeetConversationMessage[] }
+    >({
       method: 'GET',
-      path: fitMeetPaths.messages.thread(id),
+      path: `${fitMeetPaths.messages.thread(id)}?${query.toString()}`,
     });
+    const rows = Array.isArray(payload) ? payload : payload.items ?? payload.data ?? [];
+    const hasEarlierPage = rows.length > pageSize;
+    const items = hasEarlierPage ? rows.slice(-pageSize) : rows;
+    return {
+      items,
+      nextBefore: hasEarlierPage ? items[0]?.createdAt ?? null : null,
+    };
+  }
+  getConversation(id: string) {
+    return this.getConversationMessagesPage(id).then((page) => page.items);
   }
   sendConversationMessage(
     id: string,

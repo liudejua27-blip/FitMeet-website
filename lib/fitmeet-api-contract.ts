@@ -10,6 +10,10 @@ export const FITMEET_API_BASE_URL = process.env.NEXT_PUBLIC_FITMEET_API_BASE_URL
 export const FITMEET_REALTIME_BASE_URL = FITMEET_API_BASE_URL.replace(/\/api\/?$/, "");
 
 export const fitMeetPaths = {
+  // The API currently exposes one shared public capability manifest under the
+  // iOS-compatible path. It is platform-neutral in shape and is consumed by
+  // every authenticated client to keep rollout and maintenance gates aligned.
+  appConfig: "/app-config/ios",
   auth: {
     login: "/auth/login",
     register: "/auth/register",
@@ -28,6 +32,7 @@ export const fitMeetPaths = {
     profile: "/users/profile",
     account: "/users/me",
     accountExport: "/users/me/export",
+    notificationPreferences: "/users/me/notification-preferences",
     socialProfile: "/users/me/social-profile",
     socialProfilePrivacy: "/users/me/social-profile/privacy",
     onboardingStatus: "/users/me/onboarding-status",
@@ -215,6 +220,13 @@ export type FitMeetUser = {
   avatar?: string | null;
   city?: string | null;
   phoneVerifiedAt?: string | null;
+};
+
+export type FitMeetNotificationPreferences = {
+  directMessagesEnabled: boolean;
+  interactionsEnabled: boolean;
+  systemEnabled: boolean;
+  updatedAt?: string | null;
 };
 
 export type OnboardingPayload = {
@@ -440,6 +452,49 @@ export type FitMeetConversationMessage = {
   clientMessageId?: string | null;
   recalledAt?: string | null;
   moderationStatus?: string;
+};
+
+export type FitMeetConversationHistoryPage = {
+  items: FitMeetConversationMessage[];
+  nextBefore: string | null;
+};
+
+export type FitMeetFeatureKey =
+  | "agent"
+  | "matching"
+  | "demandPublishing"
+  | "messaging"
+  | "voice"
+  | "discovery"
+  | "multiplayerGroups";
+
+export type FitMeetFeatureAvailability = {
+  enabled: boolean;
+  rolloutPercentage?: number;
+};
+
+export type FitMeetAppConfig = {
+  schemaVersion?: number;
+  platform?: string;
+  launchScope?: string;
+  revision?: string;
+  generatedAt?: string;
+  cacheTTLSeconds?: number;
+  maintenance?: {
+    enabled: boolean;
+    title?: string;
+    message?: string;
+    retryAfterSeconds?: number;
+  };
+  authentication?: {
+    phoneEnabled?: boolean;
+    emailEnabled?: boolean;
+    emailRegistrationEnabled?: boolean;
+    emailRecoveryEnabled?: boolean;
+    appleEnabled?: boolean;
+    googleEnabled?: boolean;
+  };
+  features?: Partial<Record<FitMeetFeatureKey, FitMeetFeatureAvailability>>;
 };
 
 export type BlockedUserRecord = {

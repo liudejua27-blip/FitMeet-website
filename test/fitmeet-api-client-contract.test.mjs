@@ -194,6 +194,85 @@ test('conversation lifecycle uses a formal start contract and retry-stable clien
   assert.equal(Object.hasOwn(body(calls[7]), 'archived'), false);
 });
 
+test('shared app capability manifest and message history pages preserve server cursors', async () => {
+  const history = Array.from({ length: 51 }, (_, index) => ({
+    id: `message-${index + 1}`,
+    text: `消息 ${index + 1}`,
+    createdAt: `2026-08-01T00:${String(index).padStart(2, '0')}:00.000Z`,
+  }));
+  const calls = await recordRequests(
+    async (api) => {
+      const config = await api.getAppConfig();
+      assert.equal(config.features.multiplayerGroups.enabled, false);
+      const page = await api.getConversationMessagesPage(
+        'conversation/a',
+        '2026-08-01T01:00:00.000Z',
+        undefined,
+        50,
+      );
+      assert.equal(page.items.length, 50);
+      assert.equal(page.items[0].id, 'message-2');
+      assert.equal(page.items.at(-1).id, 'message-51');
+      assert.equal(page.nextBefore, '2026-08-01T00:01:00.000Z');
+    },
+    (call) =>
+      call.url.endsWith('/app-config/ios')
+        ? response({ features: { multiplayerGroups: { enabled: false, rolloutPercentage: 0 } } })
+        : new Response(JSON.stringify(history), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+  );
+
+  assert.equal(calls[0].url, `${baseUrl}/app-config/ios`);
+  const historyUrl = new URL(calls[1].url);
+  assert.equal(historyUrl.pathname, '/api/messages/conversations/conversation%2Fa');
+  assert.equal(historyUrl.searchParams.get('limit'), '51');
+  assert.equal(historyUrl.searchParams.get('before'), '2026-08-01T01:00:00.000Z');
+});
+
+test('notification preferences stay server-backed and update all web categories together', async () => {
+  const calls = await recordRequests(
+    async (api) => {
+      const current = await api.getNotificationPreferences();
+      assert.equal(current.directMessagesEnabled, true);
+      const saved = await api.updateNotificationPreferences({
+        directMessagesEnabled: false,
+        interactionsEnabled: false,
+        systemEnabled: false,
+      });
+      assert.equal(saved.systemEnabled, false);
+    },
+    (call) =>
+      call.init.method === 'GET'
+        ? response({
+            directMessagesEnabled: true,
+            interactionsEnabled: true,
+            systemEnabled: true,
+          })
+        : response({
+            directMessagesEnabled: false,
+            interactionsEnabled: false,
+            systemEnabled: false,
+            updatedAt: '2026-08-02T00:00:00.000Z',
+          }),
+  );
+
+  assert.deepEqual(
+    calls.map((call) => [call.init.method, call.url.replace(baseUrl, '')]),
+    [
+      ['GET', '/users/me/notification-preferences'],
+      ['PUT', '/users/me/notification-preferences'],
+    ],
+  );
+  assert.deepEqual(body(calls[1]), {
+    directMessagesEnabled: false,
+    interactionsEnabled: false,
+    systemEnabled: false,
+  });
+  calls.forEach(assertAuthorized);
+});
+
 test('memory decisions target the exact proposal and unwrap the server mutation envelope', async () => {
   let confirmed;
   let rejected;

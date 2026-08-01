@@ -8,6 +8,7 @@ import {
   FiCalendar,
   FiCheck,
   FiChevronRight,
+  FiChevronUp,
   FiFlag,
   FiHeart,
   FiMapPin,
@@ -110,6 +111,8 @@ export function SocialInteractionExperience(props: {
   conversations: FitMeetConversation[];
   conversation?: FitMeetConversation | null;
   messages: ConversationMessage[];
+  conversationNextBefore?: string | null;
+  conversationLoadingMore?: boolean;
   messageInput: string;
   messageSending: boolean;
   events: AgentInboxEvent[];
@@ -127,6 +130,8 @@ export function SocialInteractionExperience(props: {
   onBack: () => void;
   onUser: (id: number) => void;
   onMessageInput: (value: string) => void;
+  onLoadOlderConversation?: () => void;
+  onMessageVisible?: (messageId: string) => void;
   onSend: () => void;
   onRetry: (message: ConversationMessage) => void;
   onRecall: (id: string) => void;
@@ -157,6 +162,7 @@ export function SocialInteractionExperience(props: {
   onOpenDemand: (id: string) => void;
   onGroup: (id: string) => void;
   onGroups: () => void;
+  groupsEnabled: boolean;
   onCreateGroup: (demand: FitMeetDemand, joinMode: FitMeetGroupJoinMode) => Promise<boolean>;
   onNotice: (message: string) => void;
 }) {
@@ -684,6 +690,26 @@ function ConversationWorkspace(props: SocialProps) {
     if (stickToBottomRef.current)
       threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
   }, [conversation?.id, conversation?.unread, props.messages.length]);
+  const latestPeerMessageId = [...props.messages]
+    .reverse()
+    .find((item) => item.role === 'peer')?.id;
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread || !latestPeerMessageId || !props.onMessageVisible) return;
+    const target = Array.from(
+      thread.querySelectorAll<HTMLElement>('[data-peer-message="true"]'),
+    ).find((item) => item.dataset.messageId === latestPeerMessageId);
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && entry.intersectionRatio >= 0.5)
+          props.onMessageVisible?.(latestPeerMessageId);
+      },
+      { root: thread, threshold: [0.5] },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [latestPeerMessageId, conversation?.id, props.messages.length, props.onMessageVisible]);
   if (!conversation)
     return (
       <main className={styles.page}>
@@ -801,8 +827,18 @@ function ConversationWorkspace(props: SocialProps) {
               ? canSendMessages
                 ? '只有服务端确认的正式成员可以进入；退出或被移除后会同步收回群聊权限。'
                 : '当前群聊仅允许主理人和协作者发言；你仍可读取已有消息。'
-              : '双方确认后开放的真实会话；当前网页端发送文字消息。'}
+            : '双方确认后开放的真实会话；当前网页端发送文字消息。'}
           </p>
+          {props.conversationNextBefore ? (
+            <button
+              type="button"
+              className={styles.loadOlderButton}
+              onClick={props.onLoadOlderConversation}
+              disabled={props.conversationLoadingMore}
+            >
+              <FiChevronUp /> {props.conversationLoadingMore ? '正在加载更早消息…' : '加载更早消息'}
+            </button>
+          ) : null}
           {props.messages.length ? (
             props.messages.map((item, index) => {
               const recalled = item.lifecycleStatus === 'recalled' || Boolean(item.recalledAt);
@@ -820,6 +856,8 @@ function ConversationWorkspace(props: SocialProps) {
                   ) : null}
                 <article
                   className={`${styles.bubbleRow} ${item.role === 'user' ? styles.mine : ''}`}
+                  data-peer-message={item.role === 'peer' ? 'true' : undefined}
+                  data-message-id={item.role === 'peer' ? item.id : undefined}
                 >
                   <div className={styles.bubble}>
                     {isGroup && item.role === 'peer' ? (
@@ -1461,22 +1499,24 @@ function DemandWorkspace(props: SocialProps) {
           </small>
         </footer>
       </article>
-      <section className={styles.groupEntry}>
-        <div>
-          <FiUsers />
-          <span>
-            <strong>多人组局</strong>
-            <small>成员、候补和群聊权限由服务端统一管理</small>
-          </span>
-        </div>
-        <div className={styles.groupEntryActions}>
-          <button type="button" className={styles.secondaryAction} onClick={props.onGroups}>查看组局</button>
-          {demand.capacityMax >= 3 && !['closed', 'canceled'].includes(demand.status) ? (
-            <button type="button" onClick={() => setShowGroupSetup(true)}>创建组局</button>
-          ) : null}
-        </div>
-        {demand.capacityMax < 3 ? <p>当前需求上限为 {demand.capacityMax} 人；把人数调整为至少 3 人后才会开放组局创建。</p> : null}
-      </section>
+      {props.groupsEnabled ? (
+        <section className={styles.groupEntry}>
+          <div>
+            <FiUsers />
+            <span>
+              <strong>多人组局</strong>
+              <small>成员、候补和群聊权限由服务端统一管理</small>
+            </span>
+          </div>
+          <div className={styles.groupEntryActions}>
+            <button type="button" className={styles.secondaryAction} onClick={props.onGroups}>查看组局</button>
+            {demand.capacityMax >= 3 && !['closed', 'canceled'].includes(demand.status) ? (
+              <button type="button" onClick={() => setShowGroupSetup(true)}>创建组局</button>
+            ) : null}
+          </div>
+          {demand.capacityMax < 3 ? <p>当前需求上限为 {demand.capacityMax} 人；把人数调整为至少 3 人后才会开放组局创建。</p> : null}
+        </section>
+      ) : null}
       {showGroupSetup ? (
         <section className={styles.groupSetup} role="dialog" aria-modal="true" aria-label="确认创建多人组局">
           <header><div><h2>确认创建组局</h2><p>不会自动邀请或联系任何人，创建后仍由你处理加入申请。</p></div><button type="button" aria-label="关闭" onClick={() => setShowGroupSetup(false)}><FiX /></button></header>

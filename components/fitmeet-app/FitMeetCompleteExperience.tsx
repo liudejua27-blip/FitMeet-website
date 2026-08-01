@@ -54,6 +54,7 @@ import type {
   ConversationMessage,
   DemandDraftSession,
   FeedPost,
+  FitMeetAppConfig,
   FitMeetAgentMemory,
   FitMeetConnectionRequest,
   FitMeetConversation,
@@ -61,6 +62,7 @@ import type {
   FitMeetDemand,
   FitMeetGroupJoinMode,
   FitMeetIntentApplication,
+  FitMeetNotificationPreferences,
   FitMeetProfilePhoto,
   FitMeetPublicIntent,
   FitMeetSearchResult,
@@ -147,6 +149,7 @@ import {
   relationshipSnapshot,
   settleOptimisticMessage,
 } from '@/lib/fitmeet-social-state';
+import { featureEnabled } from '@/lib/fitmeet-capabilities';
 import { OnboardingFlow } from './OnboardingFlow';
 import { FitMeetLogin } from './FitMeetLogin';
 import { FitMeetBrandIcon } from './FitMeetBrandIcon';
@@ -244,6 +247,14 @@ function notificationPreferenceKey(userId: number | undefined) {
   return userId ? `fitmeet:web-foreground-notifications:${userId}` : null;
 }
 
+function notificationPreferencesEnabled(preferences: FitMeetNotificationPreferences) {
+  return (
+    preferences.directMessagesEnabled &&
+    preferences.interactionsEnabled &&
+    preferences.systemEnabled
+  );
+}
+
 function likedMomentsKey(userId: number) {
   return `fitmeet:web-liked-moments:v1:${userId}`;
 }
@@ -309,6 +320,45 @@ function displayConversationMessage(
     recalledAt: message.recalledAt,
     clientMessageId: message.clientMessageId,
   };
+}
+
+function mergeConversationMessages(
+  current: ConversationMessage[],
+  incoming: ConversationMessage[],
+): ConversationMessage[] {
+  const byId = new Map<string, ConversationMessage>();
+  for (const item of current) byId.set(item.id, item);
+  for (const item of incoming) byId.set(item.id, item);
+  return [...byId.values()].sort(
+    (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+  );
+}
+
+function CapabilityGate({
+  title,
+  message,
+  loading = false,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  loading?: boolean;
+  onRetry?: () => void;
+}) {
+  return (
+    <main className={styles.appPage}>
+      <section className={`${styles.mobileSurface} ${styles.loadingSurface}`} aria-live="polite">
+        <FitMeetBrandIcon size={78} priority src="/brand/fitmeet-login-icon.png" />
+        <h1>{title}</h1>
+        <p>{message}</p>
+        {onRetry ? (
+          <button type="button" onClick={onRetry} disabled={loading}>
+            <FiRefreshCw /> {loading ? '正在同步…' : '重新检查'}
+          </button>
+        ) : null}
+      </section>
+    </main>
+  );
 }
 
 function conversationPeerId(conversation: FitMeetConversation | null | undefined) {
@@ -545,6 +595,8 @@ function FitMeetAuthenticatedExperience({
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memoryStateOwnerId, setMemoryStateOwnerId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
+  const [conversationNextBefore, setConversationNextBefore] = useState<string | null>(null);
+  const [conversationLoadingMore, setConversationLoadingMore] = useState(false);
   const [conversationInput, setConversationInput] = useState('');
   const [conversationSending, setConversationSending] = useState(false);
   const [conversations, setConversations] = useState<FitMeetConversation[]>([]);
@@ -556,6 +608,7 @@ function FitMeetAuthenticatedExperience({
   const [incomingConnections, setIncomingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [outgoingConnections, setOutgoingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [notificationPreferenceSyncing, setNotificationPreferenceSyncing] = useState(false);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUserRecord[]>([]);
   const [blockedUsersLoading, setBlockedUsersLoading] = useState(false);
   const [blockedUsersError, setBlockedUsersError] = useState(false);
@@ -567,6 +620,8 @@ function FitMeetAuthenticatedExperience({
   const [deepLinkedDemandRecord, setDeepLinkedDemandRecord] = useState<FitMeetDemand | null>(null);
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
   const conversationSyncing = useRef(false);
+  const conversationReceiptRef = useRef(new Map<string, string>());
+  const conversationReceiptPendingRef = useRef(new Set<string>());
   const conversationDraftsRef = useRef<ConversationDrafts>({});
   const deepLinkLoadedRef = useRef<string | null>(null);
   const activeAgentThreadIdRef = useRef<string | null>(null);
@@ -582,6 +637,26 @@ function FitMeetAuthenticatedExperience({
     [sessionAccessToken],
   );
   const liveApi = session.state.status === 'authenticated';
+  const [appConfig, setAppConfig] = useState<FitMeetAppConfig | null>(null);
+  const [appConfigLoading, setAppConfigLoading] = useState(true);
+  const [appConfigError, setAppConfigError] = useState<string | null>(null);
+  const refreshAppConfig = useCallback(async () => {
+    setAppConfigLoading(true);
+    setAppConfigError(null);
+    try {
+      setAppConfig(await api.getAppConfig());
+    } catch (reason) {
+      setAppConfig(null);
+      setAppConfigError(reason instanceof Error ? reason.message : '服务能力暂时无法同步。');
+    } finally {
+      setAppConfigLoading(false);
+    }
+  }, [api]);
+  useEffect(() => {
+    void refreshAppConfig();
+  }, [refreshAppConfig]);
+  const currentUserId = session.state.session?.user.id;
+  const groupsEnabled = featureEnabled(appConfig, 'multiplayerGroups', currentUserId);
   const memoryStateBelongsToCurrentOwner =
     memoryOwnerId !== null && memoryStateOwnerId === memoryOwnerId;
   const selectedCandidate =
@@ -1009,6 +1084,21 @@ function FitMeetAuthenticatedExperience({
     const userId = session.state.session?.user.id;
     const key = notificationPreferenceKey(userId);
     setNotificationEnabled(!key || window.localStorage.getItem(key) !== 'false');
+    let cancelled = false;
+    if (userId) {
+      void api
+        .getNotificationPreferences()
+        .then((preferences) => {
+          if (cancelled) return;
+          const enabled = notificationPreferencesEnabled(preferences);
+          setNotificationEnabled(enabled);
+          if (key) window.localStorage.setItem(key, String(enabled));
+        })
+        .catch(() => {
+          // Keep the last local value as a safe fallback when an older API
+          // deployment does not expose this optional preference endpoint.
+        });
+    }
     if (userId) {
       setLikedPostIds(
         readStoredArray<number>(likedMomentsKey(userId)).filter((id) => Number.isInteger(id)),
@@ -1019,7 +1109,10 @@ function FitMeetAuthenticatedExperience({
         ),
       );
     }
-  }, [session.state.session?.user.id, session.state.status]);
+    return () => {
+      cancelled = true;
+    };
+  }, [api, session.state.session?.user.id, session.state.status]);
 
   useEffect(() => {
     if (session.state.status !== 'authenticated') return;
@@ -1033,21 +1126,34 @@ function FitMeetAuthenticatedExperience({
           ? await Notification.requestPermission()
           : Notification.permission;
       if (permission !== 'granted') {
-        setNotificationEnabled(false);
-        const deniedKey = notificationPreferenceKey(session.state.session?.user.id);
-        if (deniedKey) window.localStorage.setItem(deniedKey, 'false');
-        notice('浏览器通知权限未开启；页面内实时消息仍会正常更新。');
+        notice('浏览器通知权限未开启；账号通知偏好未修改，页面内实时消息仍会正常更新。');
         return;
       }
     }
-    setNotificationEnabled(enabled);
-    const key = notificationPreferenceKey(session.state.session?.user.id);
-    if (key && typeof window !== 'undefined') window.localStorage.setItem(key, String(enabled));
-    notice(
-      enabled
-        ? '实时提醒已开启；页面打开或处于后台标签页时会提示，彻底关闭浏览器后不会推送。'
-        : '前台实时提醒已关闭；不影响消息和邀请在服务端保存。',
-    );
+    const userId = session.state.session?.user.id;
+    const key = notificationPreferenceKey(userId);
+    const previous = notificationEnabled;
+    setNotificationPreferenceSyncing(true);
+    try {
+      const saved = await api.updateNotificationPreferences({
+        directMessagesEnabled: enabled,
+        interactionsEnabled: enabled,
+        systemEnabled: enabled,
+      });
+      const effective = notificationPreferencesEnabled(saved);
+      setNotificationEnabled(effective);
+      if (key && typeof window !== 'undefined') window.localStorage.setItem(key, String(effective));
+      notice(
+        effective
+          ? '通知偏好已同步；页面打开或处于后台标签页时会提示，彻底关闭浏览器后仍需系统推送能力。'
+          : '通知偏好已同步关闭；不影响消息和邀请在服务端保存。',
+      );
+    } catch (reason) {
+      setNotificationEnabled(previous);
+      notice(reason instanceof Error ? `通知偏好未保存：${reason.message}` : '通知偏好未保存，请稍后重试。');
+    } finally {
+      setNotificationPreferenceSyncing(false);
+    }
   };
 
   const rememberClosedConversations = useCallback(
@@ -1630,29 +1736,86 @@ function FitMeetAuthenticatedExperience({
       }
       if (!summary || (!isGroupConversation(summary) && !conversationPeerId(summary)))
         throw new Error('会话缺少可验证的对方账号，请从最新消息列表重新进入。');
-      const messages = await api.getConversation(conversationId);
+      const page = await api.getConversationMessagesPage(conversationId, undefined, undefined, 50);
       const currentUserId = session.state.session?.user.id;
       setConversation(
-        messages.map((message) => displayConversationMessage(message, currentUserId)),
+        page.items.map((message) => displayConversationMessage(message, currentUserId)),
       );
+      setConversationNextBefore(page.nextBefore);
+      conversationReceiptRef.current.delete(conversationId);
       setConversationInput(conversationDraftsRef.current[summary.id] || '');
       setSelectedConversation(summary);
-      setConversations((items) =>
-        items.map((item) => (item.id === summary.id ? { ...item, unread: 0 } : item)),
-      );
-      setUnreadCount((current) => Math.max(0, current - Number(summary.unread || 0)));
       if (presentation === 'overlay') setOverlay('conversation');
-      const lastMessageId = messages.at(-1)?.id;
-      if (lastMessageId)
-        await Promise.allSettled([
-          api.markConversationDelivered(conversationId, lastMessageId),
-          api.markConversationRead(conversationId, lastMessageId),
-        ]);
       await refreshCommunications();
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : '会话暂时无法打开，请稍后再试。');
     }
   };
+
+  const loadOlderConversation = useCallback(async () => {
+    if (
+      !selectedConversation ||
+      !conversationNextBefore ||
+      conversationLoadingMore ||
+      selectedConversationClosed
+    )
+      return;
+    const conversationId = selectedConversation.id;
+    const requestedBefore = conversationNextBefore;
+    setConversationLoadingMore(true);
+    try {
+      const page = await api.getConversationMessagesPage(
+        conversationId,
+        requestedBefore,
+        undefined,
+        50,
+      );
+      const currentUserId = session.state.session?.user.id;
+      const older = page.items.map((message) => displayConversationMessage(message, currentUserId));
+      setConversation((items) => mergeConversationMessages(items, older));
+      setConversationNextBefore(page.nextBefore);
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : '更早的消息暂时无法加载。', 'error');
+    } finally {
+      setConversationLoadingMore(false);
+    }
+  }, [
+    api,
+    conversationLoadingMore,
+    conversationNextBefore,
+    notice,
+    selectedConversation,
+    selectedConversationClosed,
+    session.state.session?.user.id,
+  ]);
+
+  const markVisibleConversationMessage = useCallback(
+    (messageId: string) => {
+      const activeConversation = selectedConversation;
+      if (!activeConversation || !messageId || selectedConversationClosed) return;
+      const message = conversation.find((item) => item.id === messageId);
+      if (!message || message.role !== 'peer') return;
+      if (conversationReceiptRef.current.get(activeConversation.id) === messageId) return;
+      const receiptKey = `${activeConversation.id}:${messageId}`;
+      if (conversationReceiptPendingRef.current.has(receiptKey)) return;
+      conversationReceiptPendingRef.current.add(receiptKey);
+      void Promise.allSettled([
+        api.markConversationDelivered(activeConversation.id, messageId),
+        api.markConversationRead(activeConversation.id, messageId),
+      ]).then((results) => {
+        conversationReceiptPendingRef.current.delete(receiptKey);
+        if (results.some((result) => result.status === 'rejected')) return;
+        conversationReceiptRef.current.set(activeConversation.id, messageId);
+        setConversations((items) =>
+          items.map((item) =>
+            item.id === activeConversation.id ? { ...item, unread: 0 } : item,
+          ),
+        );
+        setUnreadCount((current) => Math.max(0, current - Number(activeConversation.unread || 0)));
+      });
+    },
+    [api, conversation, selectedConversation, selectedConversationClosed],
+  );
 
   const openDemandConversation = () => {
     const acceptedInvitation = invitations.find(
@@ -2374,18 +2537,15 @@ function FitMeetAuthenticatedExperience({
       return;
     conversationSyncing.current = true;
     try {
-      const messages = await api.getConversation(selectedConversation.id);
+      const page = await api.getConversationMessagesPage(selectedConversation.id, undefined, undefined, 50);
       const currentUserId = session.state.session?.user.id;
-      setConversation(
-        messages.map((message) => displayConversationMessage(message, currentUserId)),
+      setConversation((items) =>
+        mergeConversationMessages(
+          items,
+          page.items.map((message) => displayConversationMessage(message, currentUserId)),
+        ),
       );
-      const lastMessageId = messages.at(-1)?.id;
-      if (lastMessageId) {
-        await Promise.allSettled([
-          api.markConversationDelivered(selectedConversation.id, lastMessageId),
-          api.markConversationRead(selectedConversation.id, lastMessageId),
-        ]);
-      }
+      setConversationNextBefore((current) => current ?? page.nextBefore);
       const [nextConversations, nextUnread] = await Promise.all([
         api.listConversations(),
         api.getUnreadCount(),
@@ -2609,6 +2769,10 @@ function FitMeetAuthenticatedExperience({
     sourceDemand: FitMeetDemand,
     joinMode: FitMeetGroupJoinMode,
   ) => {
+    if (!groupsEnabled) {
+      notice('多人组局当前未由服务端开放；不会提交创建请求。', 'warning');
+      return false;
+    }
     try {
       const created = await api.createGroup({
         demandId: sourceDemand.id,
@@ -2833,6 +2997,42 @@ function FitMeetAuthenticatedExperience({
     }
   }, [api, demands, initialEntityId, initialExperience, liveApi]);
 
+  if (appConfig?.maintenance?.enabled) {
+    return (
+      <CapabilityGate
+        title={appConfig.maintenance.title || '服务暂时维护中'}
+        message={appConfig.maintenance.message || '服务正在短暂维护，请稍后重试。'}
+        loading={appConfigLoading}
+        onRetry={() => void refreshAppConfig()}
+      />
+    );
+  }
+
+  if (initialExperience === 'groups' || initialExperience === 'group') {
+    if (appConfigLoading) {
+      return (
+        <CapabilityGate
+          title="正在检查组局能力"
+          message="只有服务端确认开放后，才会显示成员、候补和群聊入口。"
+          loading
+        />
+      );
+    }
+    if (!groupsEnabled) {
+      return (
+        <CapabilityGate
+          title="多人组局暂未开放"
+          message={
+            appConfigError ||
+            '当前环境尚未开放多人组局；已有好友、需求和一对一消息不会受到影响。'
+          }
+          loading={appConfigLoading}
+          onRetry={() => void refreshAppConfig()}
+        />
+      );
+    }
+  }
+
   if (surface === 'onboarding')
     return (
       <OnboardingFlow
@@ -2954,6 +3154,8 @@ function FitMeetAuthenticatedExperience({
               conversations={visibleConversations}
               conversation={selectedConversation}
               messages={conversation}
+              conversationNextBefore={conversationNextBefore}
+              conversationLoadingMore={conversationLoadingMore}
               messageInput={conversationInput}
               messageSending={conversationSending}
               events={dedupeInboxEvents(agentInboxEvents)}
@@ -2968,9 +3170,12 @@ function FitMeetAuthenticatedExperience({
               post={deepLinkedPost}
               demand={deepLinkedDemand}
               groupId={initialExperience === 'group' ? initialEntityId : undefined}
+              groupsEnabled={groupsEnabled}
               onBack={() => router.back()}
               onUser={(id) => router.push(`/agent/try/users/${id}`)}
               onMessageInput={changeConversationInput}
+              onLoadOlderConversation={() => void loadOlderConversation()}
+              onMessageVisible={markVisibleConversationMessage}
               onSend={() => void sendConversation()}
               onRetry={(item) => void sendConversation(item)}
               onRecall={(id) => void recallConversationMessage(id)}
@@ -3132,12 +3337,14 @@ function FitMeetAuthenticatedExperience({
               profile={profile}
               photos={profilePhotos}
               notificationEnabled={notificationEnabled}
+              notificationPreferenceSyncing={notificationPreferenceSyncing}
               postCount={
                 posts.filter(
                   (post) => Number(post.userId) === Number(session.state.session?.user.id),
                 ).length
               }
               relationshipCount={incomingConnections.length + outgoingConnections.length}
+              groupsEnabled={groupsEnabled}
               blockedUsers={blockedUsers}
               blockedUsersLoading={blockedUsersLoading}
               blockedUsersError={blockedUsersError}
@@ -3381,6 +3588,7 @@ function FitMeetAuthenticatedExperience({
       {overlay === 'settings' ? (
         <SettingsSheet
           notificationEnabled={notificationEnabled}
+          notificationPreferenceSyncing={notificationPreferenceSyncing}
           onNotification={(value) => void updateNotificationPreference(value)}
           onClose={() => setOverlay(null)}
           onReset={() => {
@@ -5564,12 +5772,14 @@ function PrivacySheet({
 
 function SettingsSheet({
   notificationEnabled,
+  notificationPreferenceSyncing,
   onNotification,
   onClose,
   onReset,
   onSafety,
 }: {
   notificationEnabled: boolean;
+  notificationPreferenceSyncing: boolean;
   onNotification: (value: boolean) => void;
   onClose: () => void;
   onReset: () => void;
@@ -5580,11 +5790,12 @@ function SettingsSheet({
       <label className={styles.switchRow}>
         <span>
           <strong>通知设置</strong>
-          <small>私信、互动和约练提醒仅当前设备生效</small>
+          <small>{notificationPreferenceSyncing ? '正在同步账号偏好…' : '私信、互动和系统提醒跨设备同步'}</small>
         </span>
         <input
           type="checkbox"
           checked={notificationEnabled}
+          disabled={notificationPreferenceSyncing}
           onChange={(event) => onNotification(event.target.checked)}
         />
         <i />
@@ -5598,7 +5809,7 @@ function SettingsSheet({
         </button>
       </div>
       <p className={styles.sheetSafety}>
-        <FiShield /> 举报、拉黑、邀约与会话均写入同一后端合同；小福不会代替你做决定。
+        <FiShield /> 站内通知历史和账号偏好由服务端保存；网页关闭后的系统级推送仍取决于浏览器权限。
       </p>
     </Sheet>
   );
