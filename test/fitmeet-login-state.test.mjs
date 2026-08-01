@@ -247,3 +247,14 @@ test('all email authentication surfaces use the supplied login brand icon', () =
     /FitMeetBrandIcon size=\{48\} priority src="\/brand\/fitmeet-login-icon\.png"/,
   );
 });
+
+test('the Agent entry is formal email authentication, never an invite-code gate', () => {
+  const agentEntry = readFileSync(new URL('../app/agent/try/page.tsx', import.meta.url), 'utf8');
+  const workbench = readFileSync(
+    new URL('../components/fitmeet-app/FitMeetCompleteExperience.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(agentEntry, /FitMeetCompleteExperience/);
+  assert.doesNotMatch(`${agentEntry}\n${workbench}`, /内测邀请码|进入内测|邀请码|invite.?code/i);
+});
