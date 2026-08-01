@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "4YUF6653JF.cn.fitmeet.app"
+        ],
+        "components": [
+          {
+            "/": "/agent/try/discover/posts/*",
+            "comment": "Open public FitMeet post details in the iOS app."
+          },
+          {
+            "/": "/agent/try/*",
+            "comment": "Open the FitMeet Agent experience in the iOS app."
+          }
+        ]
+      }
+    ]
+  }
+}
