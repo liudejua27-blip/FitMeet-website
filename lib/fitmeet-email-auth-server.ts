@@ -38,14 +38,22 @@ export async function forwardFitMeetEmailAuth({
       signal: AbortSignal.timeout(7000),
     });
     const payload: unknown = await response.json().catch(() => ({}));
-    if (!response.ok)
+    if (!response.ok) {
+      const retryAfter = response.headers.get('retry-after');
       return NextResponse.json(
         {
           message: upstreamMessage(payload, fallbackMessage),
           ...(upstreamCode(payload) ? { code: upstreamCode(payload) } : {}),
         },
-        { status: response.status, headers: { 'Cache-Control': 'no-store, private' } },
+        {
+          status: response.status,
+          headers: {
+            'Cache-Control': 'no-store, private',
+            ...(retryAfter ? { 'Retry-After': retryAfter } : {}),
+          },
+        },
       );
+    }
 
     if (action === 'register') {
       if (refreshTokenFrom(payload))

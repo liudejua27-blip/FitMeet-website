@@ -315,7 +315,8 @@ function StoreSection() {
       <div className={styles.storeActions}>
         <span><SiApple /><strong>苹果应用商店</strong><small>即将上线</small></span>
         <span><SiGoogleplay /><strong>谷歌应用商店</strong><small>即将上线</small></span>
-        <Link href="/contact">获取上线消息 <FiArrowUpRight /></Link>
+        <Link href="/agent/try">使用 Web Agent <FiArrowUpRight /></Link>
+        <Link href="/contact">获取上线消息</Link>
       </div>
     </section>
   );

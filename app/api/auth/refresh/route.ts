@@ -7,11 +7,15 @@ import {
   refreshTokenFrom,
   withoutRefreshToken,
 } from '@/lib/fitmeet-web-auth-server';
+import { validateFitMeetWebOrigin } from '@/lib/fitmeet-web-origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const origin = validateFitMeetWebOrigin(request);
+  if (!origin.ok)
+    return NextResponse.json(origin, { status: 403, headers: { 'Cache-Control': 'no-store, private' } });
   const refreshToken = request.cookies.get(FITMEET_WEB_REFRESH_COOKIE)?.value;
   if (!refreshToken) return NextResponse.json({ message: '登录已失效。' }, { status: 401 });
 

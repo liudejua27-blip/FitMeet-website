@@ -6,10 +6,10 @@ import { fitMeetRegistrationConsentFromExplicitChoice } from '../lib/fitmeet-reg
 
 const baseUrl = 'https://contract.fitmeet.test/api';
 
-function response(data = { ok: true }, status = 200) {
+function response(data = { ok: true }, status = 200, headers = {}) {
   return new Response(JSON.stringify({ data }), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   });
 }
 
@@ -647,6 +647,70 @@ test('formal web logout does not hide an upstream revocation failure', async () 
   }
 });
 
+test('formal web auth preserves server retry guidance for accessible cooldown feedback', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ code: 'AUTH_RATE_LIMITED', message: '尝试次数过多，请稍后重试。', retryAfterSeconds: 73 }),
+    { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '73' } },
+  );
+  try {
+    const api = new FitMeetApiClient(() => null, baseUrl);
+    await assert.rejects(
+      () => api.loginWebByEmail('hello@example.com', 'wrong-password'),
+      (error) => {
+        assert.ok(error instanceof FitMeetApiError);
+        assert.equal(error.status, 429);
+        assert.equal(error.code, 'AUTH_RATE_LIMITED');
+        assert.equal(error.retryAfterSeconds, 73);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('authenticated clients list and revoke server-backed login devices', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    if ((init.method || 'GET') === 'DELETE')
+      return response({ id: 'session-other', status: 'revoked', revokedCount: 1 });
+    return response({
+      items: [
+        {
+          id: 'session-current',
+          platform: 'web',
+          appVersion: 'release-1',
+          createdAt: '2026-08-02T00:00:00.000Z',
+          lastActiveAt: '2026-08-02T01:00:00.000Z',
+          expiresAt: '2026-09-01T00:00:00.000Z',
+          isCurrent: true,
+        },
+      ],
+      total: 1,
+    });
+  };
+  try {
+    const api = new FitMeetApiClient(() => 'contract-token', baseUrl);
+    const page = await api.listAuthSessions();
+    const revoked = await api.revokeAuthSession('session-other');
+    assert.equal(page.items[0].isCurrent, true);
+    assert.equal(revoked.status, 'revoked');
+    assert.deepEqual(
+      calls.map((call) => [call.init.method || 'GET', call.url]),
+      [
+        ['GET', `${baseUrl}/auth/sessions`],
+        ['DELETE', `${baseUrl}/auth/sessions/session-other`],
+      ],
+    );
+    calls.forEach(assertAuthorized);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('web auth proxy carries platform context and clears cookies only after safe logout outcomes', async () => {
   const [serverAuth, emailAuthServer, loginRoute, registerRoute, refreshRoute, logoutRoute, sessionHook] = await Promise.all([
     fs.readFile(new URL('../lib/fitmeet-web-auth-server.ts', import.meta.url), 'utf8'),
@@ -663,6 +727,7 @@ test('web auth proxy carries platform context and clears cookies only after safe
   assert.match(emailAuthServer, /fitMeetWebClientHeaders\(\)/);
   assert.match(emailAuthServer, /withoutRefreshToken\(payload\)/);
   assert.match(emailAuthServer, /FITMEET_WEB_REFRESH_COOKIE/);
+  assert.match(emailAuthServer, /'Retry-After'/);
   assert.match(loginRoute, /action: 'login'/);
   assert.match(registerRoute, /action: 'register'/);
   assert.match(registerRoute, /validateFitMeetRegistrationConsent\(consents\)/);

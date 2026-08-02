@@ -131,7 +131,8 @@ function AppEntry() {
       <div className={styles.storeState}>
         <span><SiApple aria-hidden="true" /><small>苹果应用商店</small><strong>即将上线</strong></span>
         <span><SiGoogleplay aria-hidden="true" /><small>谷歌应用商店</small><strong>即将上线</strong></span>
-        <Link href="/app">查看应用进度 <FiArrowUpRight aria-hidden="true" /></Link>
+        <Link href="/agent/try">立即使用 Web Agent <FiArrowUpRight aria-hidden="true" /></Link>
+        <Link href="/app">查看应用进度</Link>
       </div>
     </section>
   );
@@ -146,7 +147,7 @@ export function AgentSemanticPage() {
         <div className={styles.heroCopy}>
           <h1>你说想法<br />它帮你把条件理清</h1>
           <p>FitMeet 帮你整理时间、地点、人数、预算和边界邀请谁、要不要见面仍由你决定</p>
-          <a href="#how-it-works">试着整理一个计划 <FiArrowUpRight aria-hidden="true" /></a>
+          <Link href="/agent/try">立即使用 Agent <FiArrowUpRight aria-hidden="true" /></Link>
         </div>
         <AgentDemo />
       </section>

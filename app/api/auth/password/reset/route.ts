@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server';
 import { forwardFitMeetEmailAction } from '@/lib/fitmeet-email-action-server';
 import { isValidEmailActionToken } from '@/lib/fitmeet-email-action-token';
 import { isValidFitMeetPassword } from '@/lib/fitmeet-login-state';
+import { validateFitMeetWebOrigin } from '@/lib/fitmeet-web-origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  const origin = validateFitMeetWebOrigin(request);
+  if (!origin.ok)
+    return NextResponse.json(origin, { status: 403, headers: { 'Cache-Control': 'no-store, private' } });
   const body: unknown = await request.json().catch(() => null);
   const token = body && typeof body === 'object' ? (body as { token?: unknown }).token : null;
   const password = body && typeof body === 'object' ? (body as { password?: unknown }).password : null;

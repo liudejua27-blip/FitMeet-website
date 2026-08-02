@@ -1,16 +1,32 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiAward, FiBell, FiBriefcase, FiCamera, FiCheck, FiChevronRight, FiDownload, FiEdit3, FiEye, FiImage, FiLock, FiLogOut, FiPlus, FiRefreshCw, FiSettings, FiShield, FiSliders, FiTrash2, FiUpload, FiUsers, FiX } from "react-icons/fi";
-import type { BlockedUserRecord, FeedPost, FitMeetProfilePhoto, PublicUserProfile, SocialProfile, UserAdvantage, UserVerification } from "@/lib/fitmeet-api-contract";
+import { FiAlertCircle, FiAward, FiBell, FiBriefcase, FiCamera, FiCheck, FiChevronRight, FiDownload, FiEdit3, FiEye, FiImage, FiLock, FiLogOut, FiMonitor, FiPlus, FiRefreshCw, FiSettings, FiShield, FiSliders, FiTrash2, FiUpload, FiUsers, FiX } from "react-icons/fi";
+import type { BlockedUserRecord, FeedPost, FitMeetAuthSessionRecord, FitMeetProfilePhoto, PublicUserProfile, SocialProfile, UserAdvantage, UserVerification } from "@/lib/fitmeet-api-contract";
 import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import styles from "./fitmeet-complete.module.css";
 
-type ProfilePanel = "preview" | "photos" | "advantages" | "verifications" | "friends" | "settings" | "blocklist" | "closure" | null;
+type ProfilePanel = "preview" | "photos" | "advantages" | "verifications" | "friends" | "settings" | "sessions" | "blocklist" | "closure" | null;
 
 function ProfileImage({ photo, name, className }: { photo?: FitMeetProfilePhoto; name: string; className?: string }) {
   return photo?.url ? <img className={className} src={photo.url} alt={`${name}的资料照片`} /> : <span className={`${styles.profileImageFallback} ${className || ""}`}>{name.slice(0, 1)}</span>;
+}
+
+function authSessionPlatformLabel(session: FitMeetAuthSessionRecord) {
+  const platform = session.platform.trim().toLowerCase();
+  if (platform === "web") return "网页端";
+  if (platform === "ios") return "iPhone / iPad";
+  if (platform === "android") return "Android";
+  return session.platform || "未知设备";
+}
+
+function authSessionTime(value: string | null) {
+  if (!value) return "时间未知";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "时间未知"
+    : date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function ProfilePanelShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
@@ -61,6 +77,10 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
   const [newVerification, setNewVerification] = useState("");
   const [profileDataBusy, setProfileDataBusy] = useState(false);
   const [pendingBlockUserId, setPendingBlockUserId] = useState<number | null>(null);
+  const [authSessions, setAuthSessions] = useState<FitMeetAuthSessionRecord[]>([]);
+  const [authSessionsLoading, setAuthSessionsLoading] = useState(false);
+  const [authSessionsError, setAuthSessionsError] = useState("");
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const orderedPhotos = useMemo(() => [...photos].sort((left, right) => (left.sortOrder ?? left.sort_order ?? 0) - (right.sortOrder ?? right.sort_order ?? 0)), [photos]);
   const cover = orderedPhotos.find((photo) => photo.isCover || photo.is_cover) || orderedPhotos[0];
@@ -216,6 +236,39 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
     finally { setAccountBusy(false); }
   };
 
+  const refreshAuthSessions = async () => {
+    if (authSessionsLoading) return;
+    setAuthSessionsLoading(true);
+    setAuthSessionsError("");
+    try {
+      const page = await api.listAuthSessions();
+      setAuthSessions(page.items);
+    } catch (reason) {
+      setAuthSessionsError(reason instanceof Error ? reason.message : "登录设备暂时无法读取。");
+    } finally {
+      setAuthSessionsLoading(false);
+    }
+  };
+
+  const openAuthSessions = () => {
+    setPanel("sessions");
+    void refreshAuthSessions();
+  };
+
+  const revokeAuthSession = async (session: FitMeetAuthSessionRecord) => {
+    if (session.isCurrent || revokingSessionId) return;
+    setRevokingSessionId(session.id);
+    try {
+      await api.revokeAuthSession(session.id);
+      setAuthSessions((items) => items.filter((item) => item.id !== session.id));
+      onNotice("该设备的登录状态已撤销。");
+    } catch (reason) {
+      onNotice(reason instanceof Error ? reason.message : "该设备暂时无法退出。");
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
   return <div className={styles.profileScreen}>
     <header><div><h1>我的</h1><p>资料、照片、隐私和账号安全</p></div><aside><button type="button" aria-label="账号安全" onClick={onSafety}><FiShield /></button><button type="button" aria-label="设置" onClick={() => setPanel("settings")}><FiSettings /></button></aside></header>
     <section className={styles.profileHero}><ProfileImage photo={cover} name={profile.nickname} /><div><h1>{profile.nickname || "FitMeet 用户"}<FiCheck /></h1><p>{profile.city || "城市待填写"}</p><span>{profile.profileDiscoverable ? "资料可发现" : "资料已隐藏"}</span></div><button type="button" onClick={onEdit}>编辑资料</button></section>
@@ -243,7 +296,9 @@ export function ProfileExperience({ api, userId, profile, photos, notificationEn
 
     {panel === "friends" ? <ProfilePanelShell title="好友列表" onClose={() => setPanel(null)}><p className={styles.sheetLead}>这里只展示双方已确认的关系。解除好友与拉黑是两个独立动作。</p><div className={styles.profileDataList}>{friends.length ? friends.map((friend) => <article key={friend.id}>{friend.avatar ? <img src={friend.avatar} alt={`${friend.name}头像`} /> : <span>{friend.name.slice(0, 1)}</span>}<div><strong>{friend.name}</strong><small>{pendingBlockUserId === friend.id ? "再次点击盾牌确认拉黑" : friend.city || "城市未公开"}</small></div><aside className={styles.profileRecordActions}><button type="button" aria-label="解除好友" onClick={() => void removeFriend(friend)}><FiTrash2 /></button><button type="button" aria-label={pendingBlockUserId === friend.id ? "确认拉黑用户" : "拉黑用户"} onClick={() => { if (pendingBlockUserId === friend.id) { void onBlockUser(friend); setPendingBlockUserId(null); } else setPendingBlockUserId(friend.id); }}><FiShield /></button></aside></article>) : <p className={styles.emptyState}>还没有双方确认的好友。</p>}</div></ProfilePanelShell> : null}
 
-    {panel === "settings" ? <ProfilePanelShell title="更多设置" onClose={() => setPanel(null)}><label className={styles.switchRow}><span><strong>实时通知</strong><small>{notificationPreferenceSyncing ? "正在同步账号偏好…" : "私信、互动和系统提醒跨设备同步"}</small></span><input type="checkbox" checked={notificationEnabled} disabled={notificationPreferenceSyncing} onChange={(event) => onNotification(event.target.checked)} /><i /></label><div className={styles.settingsActions}><button type="button" onClick={onPrivacy}><FiEye /> 隐私与资料可见范围</button><button type="button" onClick={onRelationships}><FiUsers /> 好友与申请</button><button type="button" onClick={() => { setPanel("blocklist"); void onRefreshBlockedUsers().catch(() => undefined); }}><FiShield /> 黑名单</button><button type="button" onClick={onSafety}><FiLock /> 账号安全</button><button type="button" onClick={onReboard}><FiSliders /> 重新完善资料</button><button type="button" onClick={() => setPanel("closure")}><FiTrash2 /> 数据导出与注销账号</button><button type="button" onClick={onLogout}><FiLogOut /> 退出登录</button></div><p className={styles.sheetSafety}><FiShield /> 站内通知历史和账号偏好由服务端保存；网页关闭后的系统级推送仍取决于浏览器权限。</p></ProfilePanelShell> : null}
+    {panel === "settings" ? <ProfilePanelShell title="更多设置" onClose={() => setPanel(null)}><label className={styles.switchRow}><span><strong>实时通知</strong><small>{notificationPreferenceSyncing ? "正在同步账号偏好…" : "私信、互动和系统提醒跨设备同步"}</small></span><input type="checkbox" checked={notificationEnabled} disabled={notificationPreferenceSyncing} onChange={(event) => onNotification(event.target.checked)} /><i /></label><div className={styles.settingsActions}><button type="button" onClick={onPrivacy}><FiEye /> 隐私与资料可见范围</button><button type="button" onClick={onRelationships}><FiUsers /> 好友与申请</button><button type="button" onClick={openAuthSessions}><FiMonitor /> 登录设备</button><button type="button" onClick={() => { setPanel("blocklist"); void onRefreshBlockedUsers().catch(() => undefined); }}><FiShield /> 黑名单</button><button type="button" onClick={onSafety}><FiLock /> 账号安全</button><button type="button" onClick={onReboard}><FiSliders /> 重新完善资料</button><button type="button" onClick={() => setPanel("closure")}><FiTrash2 /> 数据导出与注销账号</button><button type="button" onClick={onLogout}><FiLogOut /> 退出登录</button></div><p className={styles.sheetSafety}><FiShield /> 站内通知历史和账号偏好由服务端保存；网页关闭后的系统级推送仍取决于浏览器权限。</p></ProfilePanelShell> : null}
+
+    {panel === "sessions" ? <ProfilePanelShell title="登录设备" onClose={() => setPanel(null)}><p className={styles.sheetLead}>这里展示仍持有有效刷新凭证的设备。退出其他设备不会影响当前网页。</p>{authSessionsLoading && !authSessions.length ? <section className={styles.blocklistEmpty}><FiRefreshCw /><strong>正在读取登录设备</strong><p>从 FitMeet 服务端核对当前有效会话。</p></section> : authSessionsError ? <section className={styles.blocklistEmpty}><FiAlertCircle /><strong>登录设备暂时无法读取</strong><p>{authSessionsError}</p><button type="button" onClick={() => void refreshAuthSessions()}><FiRefreshCw /> 重新加载</button></section> : authSessions.length ? <div className={`${styles.profileDataList} ${styles.authSessionList}`}>{authSessions.map((item) => <article key={item.id}><span><FiMonitor /></span><div><strong>{authSessionPlatformLabel(item)}{item.isCurrent ? " · 当前设备" : ""}</strong><small>{item.appVersion ? `版本 ${item.appVersion} · ` : ""}最近活动 {authSessionTime(item.lastActiveAt)}</small></div>{item.isCurrent ? <b>当前</b> : <button type="button" disabled={Boolean(revokingSessionId)} aria-label={`退出${authSessionPlatformLabel(item)}`} onClick={() => void revokeAuthSession(item)}>{revokingSessionId === item.id ? <FiRefreshCw /> : <FiLogOut />}</button>}</article>)}</div> : <section className={styles.blocklistEmpty}><FiMonitor /><strong>没有其他有效设备</strong><p>当前账号只保留了这个登录会话。</p></section>}<button type="button" className={styles.secondaryButton} disabled={authSessionsLoading} onClick={() => void refreshAuthSessions()}><FiRefreshCw /> {authSessionsLoading ? "正在刷新…" : "刷新设备列表"}</button><p className={styles.sheetSafety}><FiShield /> 撤销后，该设备下次刷新凭证时会被要求重新登录。</p></ProfilePanelShell> : null}
 
     {panel === "blocklist" ? <ProfilePanelShell title="黑名单" onClose={() => setPanel(null)}>{blockedUsersLoading && !blockedUsers.length ? <section className={styles.blocklistEmpty}><FiRefreshCw /><strong>正在读取黑名单</strong><p>从 FitMeet 服务端恢复已生效的拉黑关系。</p></section> : blockedUsersError ? <section className={styles.blocklistEmpty}><FiShield /><strong>黑名单暂时无法读取</strong><p>当前不会把空列表当成真实状态。</p><button type="button" onClick={() => void onRefreshBlockedUsers().catch(() => undefined)}><FiRefreshCw /> 重新加载</button></section> : blockedUsers.length ? <div className={styles.profileDataList}>{blockedUsers.map((user) => <article key={user.id}>{user.avatar ? <img src={user.avatar} alt={`${user.name}头像`} /> : <span>{user.name.slice(0, 1)}</span>}<div><strong>{user.name}</strong><small>{new Date(user.blockedAt).toLocaleDateString("zh-CN")} · 服务端已确认</small></div><button type="button" aria-label={`解除拉黑 ${user.name}`} onClick={() => void onUnblockUser(user)}><FiX /></button></article>)}</div> : <section className={styles.blocklistEmpty}><FiShield /><strong>暂无生效中的拉黑关系</strong><p>这里不会插入本地记录或模拟用户。</p></section>}<div className={styles.detailRows}><div><span>状态来源</span><b>FitMeet 服务端</b></div><div><span>解除后</span><b>旧关系与会话不恢复</b></div></div><p className={styles.sheetSafety}><FiShield /> 拉黑和解除都以服务端回执为准，并在 Web 与 iOS 之间保持一致。</p></ProfilePanelShell> : null}
 

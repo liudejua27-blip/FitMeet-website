@@ -5269,6 +5269,18 @@
   background: #fff1f2;
   color: #d75e68;
 }
+.authSessionList article > b {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eaf8f4;
+  color: #17856f;
+  font-size: 9px;
+  font-weight: 750;
+}
+.authSessionList article > button:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
 .profileRecordActions {
   display: flex;
   gap: 5px;

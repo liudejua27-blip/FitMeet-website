@@ -27,6 +27,8 @@ export const fitMeetPaths = {
     wechatLogin: "/auth/wechat/login",
     refresh: "/auth/refresh",
     profile: "/auth/profile",
+    sessions: "/auth/sessions",
+    session: (id: string) => `/auth/sessions/${encodeURIComponent(id)}`,
   },
   users: {
     profile: "/users/profile",
@@ -176,6 +178,21 @@ export type AuthSession = {
   refreshToken?: string;
   user: FitMeetUser;
   requiresPhoneVerification?: boolean;
+};
+
+export type FitMeetAuthSessionRecord = {
+  id: string;
+  platform: string;
+  appVersion: string | null;
+  createdAt: string;
+  lastActiveAt: string;
+  expiresAt: string | null;
+  isCurrent: boolean;
+};
+
+export type FitMeetAuthSessionPage = {
+  items: FitMeetAuthSessionRecord[];
+  total: number;
 };
 
 export type RawAuthSession = {

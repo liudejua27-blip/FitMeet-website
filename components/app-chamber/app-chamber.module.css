@@ -121,7 +121,7 @@
 .storeSection h2 { margin: 18px 0 0; font-size: clamp(3.3rem,4.5vw,5.4rem); font-weight: 760; letter-spacing: -.065em; }.storeSection p { margin: 20px 0 0; color: var(--muted); font-size: .78rem; }
 .storeActions { justify-self: end; width: min(500px,100%); border-top: 1px solid rgba(8,9,11,.2); }
 .storeActions > span { display: grid; min-height: 64px; grid-template-columns: 30px 1fr auto; align-items: center; gap: 12px; border-bottom: 1px solid rgba(8,9,11,.14); }.storeActions > span svg { width: 22px; height: 22px; }.storeActions > span strong { font-size: .72rem; }.storeActions > span small { color: var(--muted); font-size: .59rem; }
-.storeActions > a { display: inline-flex; min-height: 46px; align-items: center; gap: 9px; margin-top: 24px; padding: 0 18px; background: var(--ink); color: #fff; font-size: .66rem; font-weight: 780; transition: background 200ms ease, color 200ms ease; }.storeActions > a:hover { background: var(--cyan); color: var(--ink); }
+.storeActions > a { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 9px; margin-top: 24px; padding: 0 18px; border: 1px solid var(--ink); background: var(--ink); color: #fff; font-size: .66rem; font-weight: 780; transition: background 200ms ease, color 200ms ease; }.storeActions > a + a { margin-top: 8px; background: transparent; color: var(--ink); }.storeActions > a:hover { background: var(--cyan); color: var(--ink); }
 
 @media (max-width: 1280px) {
   .launchHero { padding-inline: 50px; }

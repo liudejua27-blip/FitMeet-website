@@ -55,6 +55,14 @@ const untouchedFields: TouchedFields = {
   passwordConfirmation: false,
 };
 
+function authCooldownLabel(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes > 0
+    ? `${minutes} 分 ${String(remainder).padStart(2, "0")} 秒`
+    : `${remainder} 秒`;
+}
+
 export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, initialError }: FitMeetLoginProps) {
   const [mode, setMode] = useState<FitMeetAuthMode>("login");
   const [name, setName] = useState("");
@@ -70,6 +78,7 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState(0);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
   const registering = mode === "register";
@@ -83,6 +92,24 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
     setError(initialError || "");
   }, [initialError]);
 
+  useEffect(() => {
+    if (retryAfterSeconds <= 0) return;
+    const timer = window.setTimeout(
+      () => setRetryAfterSeconds((current) => Math.max(0, current - 1)),
+      1_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [retryAfterSeconds]);
+
+  const authErrorMessage = (reason: unknown, fallback: string) => {
+    if (reason instanceof FitMeetApiError && reason.status === 429) {
+      const seconds = reason.retryAfterSeconds ?? 60;
+      setRetryAfterSeconds(seconds);
+      return `尝试次数过多，请在 ${authCooldownLabel(seconds)} 后重试。`;
+    }
+    return reason instanceof Error ? reason.message : fallback;
+  };
+
   const switchMode = (nextMode: FitMeetAuthMode) => {
     if (nextMode === mode || submitting) return;
     setMode(nextMode);
@@ -95,11 +122,16 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
     setError("");
     setNotice("");
     setVerificationEmail("");
+    setRetryAfterSeconds(0);
     window.requestAnimationFrame(() => emailInputRef.current?.focus());
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (retryAfterSeconds > 0) {
+      setError(`尝试次数过多，请在 ${authCooldownLabel(retryAfterSeconds)} 后重试。`);
+      return;
+    }
     setTouched({
       name: registering,
       email: true,
@@ -139,31 +171,31 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
       } else {
         await onLogin(normalizedEmail, password);
       }
+      setRetryAfterSeconds(0);
     } catch (reason) {
       if (reason instanceof FitMeetApiError && reason.code === "EMAIL_NOT_VERIFIED") {
         setVerificationEmail(normalizeFitMeetEmail(email));
       }
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : registering
-            ? "暂时无法创建账号，请稍后重试。"
-            : "登录暂时不可用，请稍后重试。",
-      );
+      setError(authErrorMessage(
+        reason,
+        registering
+          ? "暂时无法创建账号，请稍后重试。"
+          : "登录暂时不可用，请稍后重试。",
+      ));
     } finally {
       setSubmitting(false);
     }
   };
 
   const resendVerification = async () => {
-    if (!verificationEmail || resending || submitting) return;
+    if (!verificationEmail || resending || submitting || retryAfterSeconds > 0) return;
     setResending(true);
     setError("");
     try {
       await onResendEmailVerification(verificationEmail);
       setNotice("如果该邮箱仍待验证，新的验证邮件已发送。请检查收件箱和垃圾邮件目录。");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "验证邮件暂时无法发送，请稍后重试。");
+      setError(authErrorMessage(reason, "验证邮件暂时无法发送，请稍后重试。"));
     } finally {
       setResending(false);
     }
@@ -402,10 +434,14 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
                   <button
                     className={styles.loginNoticeAction}
                     type="button"
-                    disabled={submitting || resending}
+                    disabled={submitting || resending || retryAfterSeconds > 0}
                     onClick={() => void resendVerification()}
                   >
-                    <FiRefreshCw /> {resending ? "正在重新发送…" : "重新发送验证邮件"}
+                    <FiRefreshCw /> {resending
+                      ? "正在重新发送…"
+                      : retryAfterSeconds > 0
+                        ? `${authCooldownLabel(retryAfterSeconds)}后重试`
+                        : "重新发送验证邮件"}
                   </button>
                 ) : null}
               </div>
@@ -421,10 +457,14 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
                   <button
                     className={styles.loginNoticeAction}
                     type="button"
-                    disabled={submitting || resending}
+                    disabled={submitting || resending || retryAfterSeconds > 0}
                     onClick={() => void resendVerification()}
                   >
-                    <FiRefreshCw /> {resending ? "正在重新发送…" : "没有收到？重新发送"}
+                    <FiRefreshCw /> {resending
+                      ? "正在重新发送…"
+                      : retryAfterSeconds > 0
+                        ? `${authCooldownLabel(retryAfterSeconds)}后重试`
+                        : "没有收到？重新发送"}
                   </button>
                 ) : null}
               </div>
@@ -433,11 +473,15 @@ export function FitMeetLogin({ onLogin, onRegister, onResendEmailVerification, i
             <button
               type="submit"
               className={`${styles.primaryButton} ${submitting ? styles.spinIcon : ""}`}
-              disabled={submitting}
+              disabled={submitting || retryAfterSeconds > 0}
             >
               {submitting ? (
                 <>
                   <FiRefreshCw /> {registering ? "正在创建账号…" : "正在安全登录…"}
+                </>
+              ) : retryAfterSeconds > 0 ? (
+                <>
+                  <FiLock /> {authCooldownLabel(retryAfterSeconds)}后重试
                 </>
               ) : (
                 <>

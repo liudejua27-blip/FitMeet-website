@@ -258,3 +258,47 @@ test('the Agent entry is formal email authentication, never an invite-code gate'
   assert.match(agentEntry, /FitMeetCompleteExperience/);
   assert.doesNotMatch(`${agentEntry}\n${workbench}`, /内测邀请码|进入内测|邀请码|invite.?code/i);
 });
+
+test('public website CTAs lead to the formal Web Agent and Nginx owns one canonical host', () => {
+  const homepage = readFileSync(
+    new URL('../components/social-world/SocialWorldHomepage.tsx', import.meta.url),
+    'utf8',
+  );
+  const agentPage = readFileSync(
+    new URL('../components/agent-semantic/AgentSemanticPage.tsx', import.meta.url),
+    'utf8',
+  );
+  const appPage = readFileSync(
+    new URL('../components/app-chamber/AppChamberPage.tsx', import.meta.url),
+    'utf8',
+  );
+  const nginx = readFileSync(
+    new URL('../deploy/nginx/fitmeet.cn.conf', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(homepage, /href="\/agent\/try">立即使用 Agent/);
+  assert.match(agentPage, /href="\/agent\/try">立即使用 Agent/);
+  assert.match(agentPage, /href="\/agent\/try">立即使用 Web Agent/);
+  assert.match(appPage, /href="\/agent\/try">使用 Web Agent/);
+  assert.match(nginx, /server_name www\.fitmeet\.cn;[\s\S]*return 301 https:\/\/fitmeet\.cn\$request_uri;/);
+  assert.match(nginx, /server_name fitmeet\.cn;/);
+  assert.doesNotMatch(nginx, /add_header/);
+});
+
+test('formal login exposes server cooldown guidance and account settings expose active sessions', () => {
+  const login = readFileSync(
+    new URL('../components/fitmeet-app/FitMeetLogin.tsx', import.meta.url),
+    'utf8',
+  );
+  const profile = readFileSync(
+    new URL('../components/fitmeet-app/ProfileExperience.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(login, /reason\.retryAfterSeconds \?\? 60/);
+  assert.match(login, /尝试次数过多，请在/);
+  assert.match(profile, /api\.listAuthSessions\(\)/);
+  assert.match(profile, /api\.revokeAuthSession\(session\.id\)/);
+  assert.match(profile, /登录设备/);
+});

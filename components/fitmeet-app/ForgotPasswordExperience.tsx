@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FiAlertCircle, FiArrowRight, FiCheck, FiMail, FiRefreshCw } from 'react-icons/fi';
-import { FitMeetApiClient } from '@/lib/fitmeet-api-client';
+import { FitMeetApiClient, FitMeetApiError } from '@/lib/fitmeet-api-client';
 import { isValidFitMeetEmail, normalizeFitMeetEmail } from '@/lib/fitmeet-login-state';
 import { EmailActionShell } from './EmailActionShell';
 import styles from './email-action.module.css';
@@ -14,9 +14,23 @@ export function ForgotPasswordExperience() {
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState(0);
+
+  useEffect(() => {
+    if (retryAfterSeconds <= 0) return;
+    const timer = window.setTimeout(
+      () => setRetryAfterSeconds((current) => Math.max(0, current - 1)),
+      1_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [retryAfterSeconds]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (retryAfterSeconds > 0) {
+      setError(`请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。`);
+      return;
+    }
     if (!isValidFitMeetEmail(email)) {
       setError('请输入有效邮箱地址。');
       return;
@@ -27,7 +41,13 @@ export function ForgotPasswordExperience() {
       await apiRef.current.requestWebPasswordReset(normalizeFitMeetEmail(email));
       setSent(true);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '暂时无法发送重置邮件，请稍后重试。');
+      if (reason instanceof FitMeetApiError && reason.status === 429) {
+        const seconds = reason.retryAfterSeconds ?? 60;
+        setRetryAfterSeconds(seconds);
+        setError(`请求过于频繁，请在 ${seconds} 秒后重试。`);
+      } else {
+        setError(reason instanceof Error ? reason.message : '暂时无法发送重置邮件，请稍后重试。');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -86,8 +106,12 @@ export function ForgotPasswordExperience() {
               <FiAlertCircle aria-hidden="true" /> {error}
             </p>
           ) : null}
-          <button className={styles.primaryAction} type="submit" disabled={submitting}>
-            {submitting ? <><FiRefreshCw aria-hidden="true" /> 正在发送…</> : <>发送重置邮件 <FiArrowRight aria-hidden="true" /></>}
+          <button className={styles.primaryAction} type="submit" disabled={submitting || retryAfterSeconds > 0}>
+            {submitting
+              ? <><FiRefreshCw aria-hidden="true" /> 正在发送…</>
+              : retryAfterSeconds > 0
+                ? <><FiRefreshCw aria-hidden="true" /> {retryAfterSeconds} 秒后重试</>
+                : <>发送重置邮件 <FiArrowRight aria-hidden="true" /></>}
           </button>
         </form>
       )}

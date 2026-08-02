@@ -135,8 +135,8 @@ function CinematicHero({
           <p>让社交更简单</p>
           <strong>FitMeet助你社交成功</strong>
           <div>
-            <Link href="/agent">了解社交助手如何辅助 <FiArrowUpRight aria-hidden="true" /></Link>
-            <Link href="/app">查看 FitMeet 应用</Link>
+            <Link href="/agent/try">立即使用 Agent <FiArrowUpRight aria-hidden="true" /></Link>
+            <Link href="/agent">了解 Agent 如何工作</Link>
           </div>
         </div>
         <p className={styles.cinematicCopy} data-cinematic-copy>社交就来FitMeet</p>

@@ -28,6 +28,7 @@ import {
   type AgentMemoryUseScope,
   type FitMeetConversation,
   type FitMeetAppConfig,
+  type FitMeetAuthSessionPage,
   type FitMeetConversationHistoryPage,
   type FitMeetConversationMessage,
   type FitMeetDemand,
@@ -66,19 +67,44 @@ import {
 } from './fitmeet-api-contract.ts';
 import type { FitMeetRegistrationConsent } from './fitmeet-registration-consent.ts';
 
-type ApiErrorPayload = { code?: string; message?: string; details?: unknown };
+type ApiErrorPayload = {
+  code?: string;
+  message?: string;
+  details?: unknown;
+  retryAfterSeconds?: number;
+};
+
+function retryAfterSecondsFrom(response: Response, payload?: ApiErrorPayload) {
+  if (Number.isFinite(payload?.retryAfterSeconds) && Number(payload?.retryAfterSeconds) > 0)
+    return Math.ceil(Number(payload?.retryAfterSeconds));
+  const raw = response.headers.get('retry-after');
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds);
+  const date = Date.parse(raw);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.max(1, Math.ceil((date - Date.now()) / 1_000));
+}
 
 export class FitMeetApiError extends Error {
   readonly status: number;
   readonly code?: string;
   readonly details?: unknown;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, status: number, code?: string, details?: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    details?: unknown,
+    retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = 'FitMeetApiError';
     this.status = status;
     this.code = code;
     this.details = details;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -187,6 +213,7 @@ export class FitMeetApiClient {
         response.status,
         error.code,
         error.details,
+        retryAfterSecondsFrom(response, error),
       );
     }
     return unwrap<T>(payload);
@@ -210,6 +237,7 @@ export class FitMeetApiClient {
         response.status,
         error.code,
         error.details,
+        retryAfterSecondsFrom(response, error),
       );
     }
     return payload as T;
@@ -252,6 +280,7 @@ export class FitMeetApiClient {
         response.status,
         error.code,
         error.details,
+        retryAfterSecondsFrom(response, error),
       );
     }
     return normalizeAuthSession(unwrap<RawAuthSession>(payload));
@@ -329,6 +358,7 @@ export class FitMeetApiClient {
         response.status,
         error.code,
         error.details,
+        retryAfterSecondsFrom(response, error),
       );
     }
     return unwrap<T>(payload);
@@ -380,6 +410,18 @@ export class FitMeetApiClient {
 
   getAuthProfile() {
     return this.request<AuthSession['user']>({ method: 'GET', path: fitMeetPaths.auth.profile });
+  }
+  listAuthSessions() {
+    return this.request<FitMeetAuthSessionPage>({
+      method: 'GET',
+      path: fitMeetPaths.auth.sessions,
+    });
+  }
+  revokeAuthSession(sessionId: string) {
+    return this.request<{ id: string; status: 'revoked'; revokedCount: number }>({
+      method: 'DELETE',
+      path: fitMeetPaths.auth.session(sessionId),
+    });
   }
   getOnboardingStatus() {
     return this.request<OnboardingStatus>({
