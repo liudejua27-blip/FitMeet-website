@@ -775,10 +775,23 @@ export type AgentThread = {
   title: string;
   status: "active" | "deleted" | string;
   lastSequence: number;
+  stateVersion?: number;
   preview?: string | null;
   messageCount?: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentApproval = {
+  id: string;
+  runId: string;
+  threadId: string;
+  proposalId: string | null;
+  toolName: string;
+  status: string;
+  stateVersion: number;
+  arguments: Record<string, unknown>;
+  expiresAt: string;
 };
 
 export type AgentThreadEntry = {
@@ -800,6 +813,7 @@ export type AgentThreadDetail = {
   thread: AgentThread;
   entries: AgentThreadEntry[];
   activeDraft: DemandDraftSession | null;
+  pendingApprovals?: AgentApproval[];
   toolManifest: unknown[];
 };
 

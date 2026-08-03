@@ -118,6 +118,14 @@ test("finds the latest actionable server proposal", () => {
   assert.equal(proposal?.id, "new");
 });
 
+test("does not treat a failed or stale proposal as actionable", () => {
+  const proposal = latestAgentToolProposal([
+    { id: "failed", threadId: "thread-1", sequence: 8, kind: "tool_proposal", role: null, content: null, toolName: "press_demand_card_button", toolStatus: "failed", payload: {}, clientTurnId: null, createdAt: "", updatedAt: "" },
+    { id: "stale", threadId: "thread-1", sequence: 9, kind: "tool_proposal", role: null, content: null, toolName: "press_demand_card_button", toolStatus: "stale", payload: {}, clientTurnId: null, createdAt: "", updatedAt: "" },
+  ], "press_demand_card_button");
+  assert.equal(proposal, null);
+});
+
 test("repairs a direct answer to the server's current missing field without reclassifying", () => {
   const before = { ...draft, missingFields: ["搭子要求"], canGenerateCard: false, status: "collecting" };
   const prompt = "搭子要求是年龄相近、节奏轻松，尊重彼此边界。";

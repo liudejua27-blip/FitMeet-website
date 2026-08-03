@@ -437,7 +437,7 @@ export function reconcileExplicitDraftAnswer(
 export function latestAgentToolProposal(
   entries: AgentThreadEntry[],
   toolName: string,
-  statuses: string[] = ["awaiting_confirmation", "ready_for_review", "failed"],
+  statuses: string[] = ["awaiting_confirmation", "ready_for_review"],
 ) {
   const acceptedStatuses = new Set(statuses);
   return [...entries]

@@ -371,6 +371,12 @@ function isGroupConversation(conversation: FitMeetConversation | null | undefine
 
 function agentEntriesForDetail(detail: AgentThreadDetail) {
   const draft = detail.activeDraft;
+  const hasApprovalProjection = Array.isArray(detail.pendingApprovals);
+  const pendingProposalIds = new Set(
+    (detail.pendingApprovals || [])
+      .map((approval) => approval.proposalId)
+      .filter((proposalId): proposalId is string => Boolean(proposalId)),
+  );
   const latestAssistantSequence = detail.entries.reduce(
     (latest, entry) =>
       entry.kind === 'message' && entry.role === 'assistant'
@@ -379,6 +385,14 @@ function agentEntriesForDetail(detail: AgentThreadDetail) {
     -1,
   );
   const normalizedEntries = detail.entries.map((entry) => {
+    if (
+      entry.kind === 'tool_proposal' &&
+      ['awaiting_confirmation', 'failed'].includes(entry.toolStatus || '') &&
+      hasApprovalProjection &&
+      !pendingProposalIds.has(entry.id)
+    ) {
+      return { ...entry, toolStatus: 'stale' };
+    }
     if (
       draft &&
       entry.kind === 'message' &&
@@ -627,6 +641,7 @@ function FitMeetAuthenticatedExperience({
   const activeAgentThreadIdRef = useRef<string | null>(null);
   const agentThreadLoadRequestRef = useRef(0);
   const agentThreadSwitchingRef = useRef(false);
+  const demandLifecyclePreparingRef = useRef(false);
   const agentInboxLoadRequestRef = useRef(0);
   const agentInboxScopeRef = useRef<AgentInboxScope>('unread');
   const memoryOwnerIdRef = useRef<string | null>(memoryOwnerId);
@@ -1480,10 +1495,23 @@ function FitMeetAuthenticatedExperience({
   };
 
   const requestAgentDemandLifecycle = async (action: DemandLifecycleAction) => {
-    if (agentSending) return;
+    if (agentSending || demandLifecyclePreparingRef.current) return;
+    demandLifecyclePreparingRef.current = true;
     setAgentSending(true);
     try {
       const thread = await ensureAgentThread();
+      let detail = await loadAgentThread(thread.id, true);
+      const existingProposal = latestAgentToolProposal(
+        detail.entries,
+        'press_demand_card_button',
+        ['awaiting_confirmation'],
+      );
+      if (existingProposal && proposalArguments(existingProposal).action === action) {
+        setSelectedToolProposal(existingProposal);
+        setOverlay('toolApproval');
+        notice('这一步已经在等待确认；没有重复创建新的操作。');
+        return;
+      }
       const stableDraft = activeDraftSession
         ? {
             ...activeDraftSession,
@@ -1496,7 +1524,7 @@ function FitMeetAuthenticatedExperience({
         await api.updateDemandDraftSession(activeDraftSession.id, canonical);
       }
       await api.sendAgentThreadTurn(thread.id, demandLifecyclePrompt(action));
-      let detail = await api.getAgentThread(thread.id);
+      detail = await api.getAgentThread(thread.id);
       const repair = repairDraftAfterLifecycleTurn(stableDraft, detail.activeDraft);
       if (repair && detail.activeDraft) {
         await api.updateDemandDraftSession(detail.activeDraft.id, repair);
@@ -1504,7 +1532,6 @@ function FitMeetAuthenticatedExperience({
       detail = await loadAgentThread(thread.id, true);
       const proposal = latestAgentToolProposal(detail.entries, 'press_demand_card_button', [
         'awaiting_confirmation',
-        'failed',
       ]);
       if (!proposal) {
         const lastAssistant = [...detail.entries]
@@ -1518,6 +1545,7 @@ function FitMeetAuthenticatedExperience({
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : '小福暂时无法准备这项操作。');
     } finally {
+      demandLifecyclePreparingRef.current = false;
       setAgentSending(false);
     }
   };
@@ -2743,7 +2771,28 @@ function FitMeetAuthenticatedExperience({
         decision === 'approve' ? 'success' : 'info',
       );
     } catch (reason) {
-      await loadAgentThread(activeAgentThread.id).catch(() => undefined);
+      const detail = await loadAgentThread(activeAgentThread.id, true).catch(() => null);
+      if (
+        reason instanceof FitMeetApiError &&
+        ['APPROVAL_STATE_STALE', 'APPROVAL_EXPIRED', 'APPROVAL_ALREADY_RESOLVED'].includes(
+          reason.code || '',
+        )
+      ) {
+        const replacement = detail
+          ? latestAgentToolProposal(detail.entries, selectedToolProposal.toolName || '', [
+              'awaiting_confirmation',
+            ])
+          : null;
+        if (replacement) {
+          setSelectedToolProposal(replacement);
+          notice('确认内容已更新，请检查当前最新版本后再确认。', 'warning');
+        } else {
+          setOverlay(null);
+          setSelectedToolProposal(null);
+          notice('这项确认已失效，页面已经同步到当前状态。', 'warning');
+        }
+        return;
+      }
       notice(
         reason instanceof Error ? reason.message : '这项操作没有成功提交；请检查后重试。',
         'error',
@@ -3888,6 +3937,7 @@ function toolTitle(toolName: string | null, status: string | null) {
     patch_social_profile: '更新资料',
   };
   if (status === 'failed') return `${titles[toolName || ''] || '操作'}未提交`;
+  if (status === 'stale' || status === 'expired') return `${titles[toolName || ''] || '操作'}已更新`;
   return titles[toolName || ''] || '小福整理的下一步';
 }
 
@@ -3904,8 +3954,7 @@ function AgentToolTimelineCard({
   const args = proposalArguments(entry);
   const disclosure = agentToolDisclosure(entry.toolName, args);
   const resultLink = agentToolResultLink(entry.payload || {});
-  const awaitingConfirmation =
-    isProposal && ['awaiting_confirmation', 'failed'].includes(entry.toolStatus || '');
+  const awaitingConfirmation = isProposal && entry.toolStatus === 'awaiting_confirmation';
   const readyForReview =
     isProposal &&
     entry.toolName === 'generate_demand_card' &&
@@ -3929,8 +3978,12 @@ function AgentToolTimelineCard({
                 ? '已整理'
                 : entry.toolStatus === 'declined'
                   ? '你选择了不执行'
-                  : entry.toolStatus === 'failed'
+                : entry.toolStatus === 'failed'
                     ? '没有提交成功'
+                    : entry.toolStatus === 'stale'
+                      ? '已有更新版本，请确认最新操作'
+                      : entry.toolStatus === 'expired'
+                        ? '确认已过期'
                     : isCompleted
                       ? '已完成'
                       : '已同步';
@@ -3983,10 +4036,10 @@ function AgentToolTimelineCard({
       {awaitingConfirmation ? (
         <button
           type="button"
-          className={entry.toolStatus === 'failed' ? styles.secondaryButton : styles.primaryButton}
+          className={styles.primaryButton}
           onClick={onOpenProposal}
         >
-          {entry.toolStatus === 'failed' ? '检查后重试' : '查看并确认'} <FiChevronRight />
+          查看并确认 <FiChevronRight />
         </button>
       ) : null}
     </article>
