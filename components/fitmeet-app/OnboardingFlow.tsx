@@ -1,10 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiArrowLeft, FiArrowRight, FiCalendar, FiCheck, FiCompass, FiHeart, FiHome, FiImage, FiMapPin, FiMessageCircle, FiPlus, FiSettings, FiShield, FiStar, FiUsers, FiX } from "react-icons/fi";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { FiActivity, FiArrowLeft, FiArrowRight, FiBookOpen, FiBriefcase, FiCalendar, FiCamera, FiCheck, FiCode, FiCoffee, FiCompass, FiFeather, FiFilm, FiFlag, FiGlobe, FiHeart, FiHome, FiImage, FiLayers, FiMapPin, FiMessageCircle, FiMic, FiMonitor, FiPlus, FiSettings, FiShield, FiShoppingBag, FiStar, FiSun, FiTool, FiTruck, FiUsers, FiX, FiZap } from "react-icons/fi";
 import type { FitMeetProfilePhoto, OnboardingPayload, OnboardingStatus, SocialProfile, SocialPurpose } from "@/lib/fitmeet-api-contract";
 import { FitMeetBrandIcon } from "./FitMeetBrandIcon";
 import styles from "./fitmeet-complete.module.css";
+
+gsap.registerPlugin(useGSAP);
 
 type DraftPhoto = { file: File; preview: string };
 type Draft = Omit<OnboardingPayload, "expectedProfileVersion" | "photoIds" | "coverPhotoId"> & { photos: DraftPhoto[] };
@@ -49,32 +53,54 @@ const onboardingStages = [
   },
 ] as const;
 
-type InitialPurpose = "friends" | "dating" | "workout" | "buddy" | "travel" | "service" | "housing" | "activity" | "help" | "other";
+type InitialPurposeOptionShape = {
+  value: string;
+  title: string;
+  subtitle: string;
+  icon: typeof FiUsers;
+  socialPurpose?: SocialPurpose;
+  interestTags?: readonly string[];
+};
 
-const initialPurposeGroups: Array<{ title: string; subtitle: string; options: Array<{ value: InitialPurpose; title: string; subtitle: string; icon: typeof FiUsers; socialPurpose?: SocialPurpose }> }> = [
-  {
-    title: "真人连接类",
-    subtitle: "涉及交友、恋爱、约练、搭子或同行时，先补齐社交档案。",
-    options: [
-      { value: "friends", title: "交友", subtitle: "认识新朋友，先聊天，再看是否合适。", icon: FiUsers, socialPurpose: "newFriends" },
-      { value: "dating", title: "恋爱", subtitle: "以认真关系或约会为目标。", icon: FiHeart, socialPurpose: "seriousDating" },
-      { value: "workout", title: "约练", subtitle: "找运动伙伴、健身搭子、跑步搭子。", icon: FiStar, socialPurpose: "sportsPartner" },
-      { value: "buddy", title: "搭子", subtitle: "饭搭子、电影搭子、展览搭子、学习搭子。", icon: FiCompass, socialPurpose: "activityPartner" },
-      { value: "travel", title: "找旅伴", subtitle: "一起旅行、周边游、短途出行。", icon: FiMapPin, socialPurpose: "activityPartner" },
-    ],
-  },
-  {
-    title: "生活需求类",
-    subtitle: "不需要先建社交档案，直接进入 Agent 帮你整理需求。",
-    options: [
-      { value: "service", title: "找服务", subtitle: "维修、搬家、摄影、课程或技能服务。", icon: FiSettings },
-      { value: "housing", title: "找房", subtitle: "租房、合租、室友、看房或房源筛选。", icon: FiHome },
-      { value: "activity", title: "找活动", subtitle: "周末活动、展览、演出、运动局、线下局。", icon: FiCalendar },
-      { value: "help", title: "求助", subtitle: "临时帮忙、信息求助、本地问题或资源求助。", icon: FiShield },
-      { value: "other", title: "其他", subtitle: "让 Agent 先听你说。", icon: FiMessageCircle },
-    ],
-  },
-];
+const initialPurposeOptions = [
+  { value: "friends", title: "交友", subtitle: "认识新朋友，先聊天，再看是否合适。", icon: FiUsers, socialPurpose: "newFriends" },
+  { value: "dating", title: "恋爱", subtitle: "以认真关系或约会为目标。", icon: FiHeart, socialPurpose: "seriousDating" },
+  { value: "workout", title: "约练", subtitle: "找运动伙伴、健身搭子、跑步搭子。", icon: FiStar, socialPurpose: "sportsPartner", interestTags: ["羽毛球", "跑步"] },
+  { value: "travel", title: "找旅伴", subtitle: "一起旅行、周边游或短途出行。", icon: FiMapPin, socialPurpose: "activityPartner", interestTags: ["旅行"] },
+  { value: "buddy", title: "兴趣搭子", subtitle: "从共同兴趣开始，一起做喜欢的事。", icon: FiCompass, socialPurpose: "activityPartner" },
+  { value: "study", title: "学习搭子", subtitle: "读书、自习、语言练习或技能共学。", icon: FiBookOpen, socialPurpose: "activityPartner", interestTags: ["读书"] },
+  { value: "meal", title: "饭搭子", subtitle: "一起探店、吃饭或喝咖啡。", icon: FiCoffee, socialPurpose: "activityPartner", interestTags: ["探店", "咖啡"] },
+  { value: "movie", title: "电影搭子", subtitle: "看电影、聊电影或参加影展。", icon: FiFilm, socialPurpose: "activityPartner", interestTags: ["电影"] },
+  { value: "photo", title: "摄影搭子", subtitle: "扫街、约拍或一起记录城市。", icon: FiCamera, socialPurpose: "activityPartner", interestTags: ["摄影", "Citywalk"] },
+  { value: "fitness", title: "健身搭子", subtitle: "训练、跑步或规律运动。", icon: FiActivity, socialPurpose: "sportsPartner", interestTags: ["健身", "跑步"] },
+  { value: "hiking", title: "徒步露营", subtitle: "徒步、露营、登山或亲近自然。", icon: FiSun, socialPurpose: "activityPartner", interestTags: ["徒步", "旅行"] },
+  { value: "cycling", title: "跑步骑行", subtitle: "城市慢跑、骑行或周末拉练。", icon: FiZap, socialPurpose: "sportsPartner", interestTags: ["跑步", "健身"] },
+  { value: "pets", title: "宠物社交", subtitle: "遛狗、宠物交流或友好聚会。", icon: FiFeather, socialPurpose: "activityPartner" },
+  { value: "music", title: "音乐演出", subtitle: "音乐节、演唱会、Livehouse 或排练。", icon: FiMic, socialPurpose: "activityPartner", interestTags: ["音乐"] },
+  { value: "exhibition", title: "看展逛馆", subtitle: "展览、博物馆、艺术空间或市集。", icon: FiLayers, socialPurpose: "activityPartner", interestTags: ["Citywalk", "摄影"] },
+  { value: "boardgame", title: "桌游电竞", subtitle: "桌游、剧本、主机游戏或电竞组队。", icon: FiMonitor, socialPurpose: "activityPartner" },
+  { value: "ballgames", title: "球类运动", subtitle: "羽毛球、网球、篮球、足球或乒乓球。", icon: FiActivity, socialPurpose: "sportsPartner", interestTags: ["羽毛球", "健身"] },
+  { value: "citywalk", title: "城市漫游", subtitle: "Citywalk、咖啡、街区探索或夜游。", icon: FiGlobe, socialPurpose: "activityPartner", interestTags: ["Citywalk", "咖啡"] },
+  { value: "service", title: "找专业服务", subtitle: "摄影、课程、咨询或技能服务。", icon: FiSettings },
+  { value: "housing", title: "找房室友", subtitle: "租房、合租、室友、看房或房源筛选。", icon: FiHome },
+  { value: "activity", title: "找本地活动", subtitle: "周末活动、展览、演出、运动局或线下局。", icon: FiCalendar },
+  { value: "help", title: "找人帮忙", subtitle: "临时帮忙、信息求助、本地问题或资源求助。", icon: FiShield },
+  { value: "career", title: "求职交流", subtitle: "行业交流、职业经验、面试或求职互助。", icon: FiBriefcase },
+  { value: "business", title: "商务合作", subtitle: "项目合作、供应对接或本地商业连接。", icon: FiShoppingBag },
+  { value: "design", title: "设计创意", subtitle: "视觉、产品、空间、内容或创意协作。", icon: FiLayers },
+  { value: "technology", title: "编程科技", subtitle: "开发、AI、产品、开源或技术交流。", icon: FiCode },
+  { value: "education", title: "教育培训", subtitle: "课程、家教、技能训练或学习咨询。", icon: FiBookOpen },
+  { value: "health", title: "健康陪伴", subtitle: "陪诊、康复、照护或健康生活支持。", icon: FiHeart },
+  { value: "repair", title: "装修维修", subtitle: "家装、维修、安装或设备维护。", icon: FiTool },
+  { value: "moving", title: "搬家跑腿", subtitle: "搬家、运输、跑腿或临时执行。", icon: FiTruck },
+  { value: "homecare", title: "家政照护", subtitle: "保洁、收纳、老人或宠物照护。", icon: FiHome },
+  { value: "events", title: "活动策划", subtitle: "社群活动、品牌活动、婚礼或现场执行。", icon: FiFlag },
+  { value: "volunteer", title: "公益志愿", subtitle: "志愿服务、社区互助或公益活动。", icon: FiUsers },
+  { value: "other", title: "其他需求", subtitle: "让小福先听你说，再一起梳理。", icon: FiMessageCircle },
+] as const satisfies readonly InitialPurposeOptionShape[];
+
+export type InitialPurpose = (typeof initialPurposeOptions)[number]["value"];
+type InitialPurposeOption = InitialPurposeOptionShape & { value: InitialPurpose };
 
 function createInitialDraft(profile?: SocialProfile | null): Draft {
   return {
@@ -200,17 +226,60 @@ function applyRecommendedPreferences(draft: Draft): Draft {
   };
 }
 
-export function OnboardingFlow({ userId, initialProfile, initialStatus, onComplete, onUploadPhotos, onExit, onLifeNeed }: { userId: number; initialProfile?: SocialProfile | null; initialStatus?: OnboardingStatus | null; onComplete: (payload: OnboardingPayload) => Promise<void>; onUploadPhotos: (files: File[]) => Promise<FitMeetProfilePhoto[]>; onExit: () => Promise<void>; onLifeNeed: (purpose: InitialPurpose) => void }) {
+export function OnboardingFlow({ userId, initialProfile, initialStatus, onComplete, onUploadPhotos, onExit, onLifeNeed }: { userId: number; initialProfile?: SocialProfile | null; initialStatus?: OnboardingStatus | null; onComplete: (payload: OnboardingPayload) => Promise<void>; onUploadPhotos: (files: File[]) => Promise<FitMeetProfilePhoto[]>; onExit: () => Promise<void>; onLifeNeed: (labels: string[]) => void }) {
   const [entry, setEntry] = useState<"initialPurpose" | "onboarding">("initialPurpose");
+  const [selectedInitialPurposes, setSelectedInitialPurposes] = useState<InitialPurpose[]>([]);
   const [stage, setStage] = useState(0);
   const [draft, setDraft] = useState<Draft>(() => readStoredDraft(userId, initialProfile));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [exiting, setExiting] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const purposeWorkspaceRef = useRef<HTMLElement>(null);
+  const purposeCloudRef = useRef<HTMLDivElement>(null);
   const currentStage = onboardingStages[stage];
   const currentHint = useMemo(() => validationHint(stage, draft), [draft, stage]);
   const canContinue = currentHint === null;
+
+  useGSAP(() => {
+    if (!purposeCloudRef.current) return;
+    const tiles = gsap.utils.toArray<HTMLElement>("[data-purpose-tile]", purposeCloudRef.current);
+    const media = gsap.matchMedia();
+    media.add(
+      {
+        desktop: "(min-width: 721px)",
+        reduceMotion: "(prefers-reduced-motion: reduce)",
+      },
+      (context) => {
+        const conditions = context.conditions as { desktop?: boolean; reduceMotion?: boolean };
+        if (!conditions.desktop || conditions.reduceMotion) return;
+
+        gsap.from(tiles, {
+          autoAlpha: 0,
+          y: 22,
+          scale: 0.96,
+          duration: 0.65,
+          ease: "power3.out",
+          stagger: { amount: 0.46, from: "random" },
+        });
+
+        tiles.forEach((tile, index) => {
+          const direction = index % 2 === 0 ? 1 : -1;
+          gsap.to(tile, {
+            x: direction * (3 + (index % 3)),
+            y: direction * (4 + (index % 4)),
+            rotation: direction * (0.25 + (index % 3) * 0.12),
+            duration: 3.4 + (index % 5) * 0.32,
+            delay: (index % 7) * 0.08,
+            repeat: -1,
+            yoyo: true,
+            ease: "sine.inOut",
+          });
+        });
+      },
+    );
+    return () => media.revert();
+  }, { scope: purposeWorkspaceRef, dependencies: [entry], revertOnUpdate: true });
 
   const exit = async () => {
     if (exiting) return;
@@ -226,7 +295,7 @@ export function OnboardingFlow({ userId, initialProfile, initialStatus, onComple
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 0 });
-  }, [stage]);
+  }, [entry, stage]);
 
   useEffect(() => {
     if (!userId) return;
@@ -289,33 +358,102 @@ export function OnboardingFlow({ userId, initialProfile, initialStatus, onComple
     });
   };
 
-  const selectInitialPurpose = (option: (typeof initialPurposeGroups)[number]["options"][number]) => {
-    if (!option.socialPurpose) {
-      onLifeNeed(option.value);
+  const toggleInitialPurpose = (purpose: InitialPurpose) => {
+    setError(null);
+    setSelectedInitialPurposes((current) => toggle(current, purpose));
+  };
+
+  const continueFromInitialPurpose = () => {
+    if (!selectedInitialPurposes.length) {
+      setError("请先选择至少一个目标");
       return;
     }
-    setDraft((current) => ({ ...current, primaryPurpose: option.socialPurpose ?? current.primaryPurpose, purposes: current.purposes.includes(option.socialPurpose!) ? current.purposes : [option.socialPurpose!, ...current.purposes] }));
+    const selectedOptions: InitialPurposeOption[] = selectedInitialPurposes.flatMap((purpose) => {
+      const option = initialPurposeOptions.find((candidate) => candidate.value === purpose);
+      return option ? [option as InitialPurposeOption] : [];
+    });
+    const socialPurposes = selectedOptions
+      .map((option) => option.socialPurpose)
+      .filter((purpose): purpose is SocialPurpose => Boolean(purpose))
+      .filter((purpose, index, values) => values.indexOf(purpose) === index);
+    if (!socialPurposes.length) {
+      onLifeNeed(selectedOptions.map((option) => option.title));
+      return;
+    }
+    const selectedInterests = selectedOptions.flatMap((option) => option.interestTags ?? []);
+    setDraft((current) => ({
+      ...current,
+      primaryPurpose: socialPurposes[0],
+      purposes: socialPurposes,
+      interestTags: [...new Set([...current.interestTags, ...selectedInterests])],
+    }));
     setEntry("onboarding");
   };
 
   if (entry === "initialPurpose") {
-    return <main className={styles.onboardingPage}><section className={styles.mobileSurface} aria-label="FitMeet 初始需求选择"><div className={styles.initialPurposeBody}><div className={styles.onboardingBrand}><FitMeetBrandIcon size={64} priority /></div><h1>你想让 FitMeet 先帮你做什么？</h1><p>先判断需求，再决定是否建档。只有涉及真人连接、亲密关系、线下同行或被推荐给别人时，才进入社交资料完善。</p>{initialPurposeGroups.map((group) => <section key={group.title} className={styles.initialPurposeGroup}><h2>{group.title}</h2><small>{group.subtitle}</small><div>{group.options.map((option) => { const Icon = option.icon; return <button type="button" key={option.value} onClick={() => selectInitialPurpose(option)}><span><Icon /></span><i><strong>{option.title}</strong><em>{option.subtitle}</em></i><FiArrowRight /></button>; })}</div></section>)}{error ? <p className={`${styles.footerStatus} ${styles.footerStatusError}`} role="alert">{error}</p> : null}<button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出当前账号"}</button></div></section></main>;
+    return (
+      <main className={styles.onboardingPage}>
+        <section ref={purposeWorkspaceRef} className={`${styles.mobileSurface} ${styles.purposeWorkspace}`} aria-label="FitMeet 初始需求选择">
+          <header className={styles.purposeTopbar}>
+            <FitMeetBrandIcon size={52} priority src="/brand/fitmeet-login-icon.png" />
+            <button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出当前账号"}</button>
+          </header>
+          <div className={styles.initialPurposeBody}>
+            <header className={styles.purposeHero}>
+              <h1>你想让 FitMeet 先帮你做什么？</h1>
+              <p>可以多选。先选择你的目标，再进入下一步。</p>
+            </header>
+            <div ref={purposeCloudRef} className={styles.purposeCloud} role="group" aria-label="选择你的目标">
+              {initialPurposeOptions.map((option) => {
+                const Icon = option.icon;
+                const selected = selectedInitialPurposes.includes(option.value);
+                return (
+                  <button
+                    type="button"
+                    key={option.value}
+                    className={`${styles.purposeTile} ${selected ? styles.purposeTileSelected : ""}`}
+                    data-purpose-tile
+                    aria-pressed={selected}
+                    title={option.subtitle}
+                    onClick={() => toggleInitialPurpose(option.value)}
+                  >
+                    <span><Icon /></span>
+                    <strong>{option.title}</strong>
+                    <em className={styles.purposeTileHint}>{option.subtitle}</em>
+                    {selected ? <i><FiCheck /></i> : null}
+                  </button>
+                );
+              })}
+            </div>
+            {error ? <p className={`${styles.footerStatus} ${styles.footerStatusError}`} role="alert">{error}</p> : null}
+            <div className={styles.purposeActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => onLifeNeed(["其他需求"])}>稍后再说</button>
+              <button type="button" className={styles.primaryButton} onClick={continueFromInitialPurpose}>下一步 <FiArrowRight /></button>
+            </div>
+            <p className={styles.purposePrivacy}><FiShield /> 你的选择仅用于提升推荐准确度，不会公开可见</p>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (
     <main className={styles.onboardingPage}>
-      <section className={styles.mobileSurface} aria-label="FitMeet 完整建档">
+      <section className={`${styles.mobileSurface} ${styles.onboardingWorkspace}`} aria-label="FitMeet 完整建档">
         <header className={styles.flowHeader}>
-          <button type="button" aria-label={stage ? "返回上一阶段" : "返回需求选择"} onClick={stage ? () => { setError(null); setStage((value) => value - 1); } : () => setEntry("initialPurpose")}>{stage ? <FiArrowLeft /> : <FiX />}</button>
+          <div className={styles.flowHeaderLeading}>
+            <button type="button" aria-label={stage ? "返回上一阶段" : "返回需求选择"} onClick={stage ? () => { setError(null); setStage((value) => value - 1); } : () => setEntry("initialPurpose")}>{stage ? <FiArrowLeft /> : <FiX />}</button>
+            <FitMeetBrandIcon size={38} priority src="/brand/fitmeet-login-icon.png" />
+          </div>
           <div><strong>完善你的社交资料</strong><small>{currentStage.title} · {stage + 1} / 3</small></div>
           <button type="button" className={styles.flowExit} onClick={() => void exit()} disabled={exiting}>{exiting ? "正在安全退出…" : "退出建档"}</button>
         </header>
 
         <div ref={bodyRef} className={styles.onboardingBody}>
           <StageProgress stage={stage} title={currentStage.title} subtitle={currentStage.subtitle} summary={currentStage.summary} />
-          {stage === 0 ? <div className={styles.stageSections}><StageSectionTitle title="开始前确认" subtitle="隐私、年龄和内容规则只确认一次。" /><Welcome draft={draft} setDraft={setDraft} /><StageSectionTitle title="基础身份" subtitle="昵称、生日、城市和展示偏好。" /><Identity draft={draft} setDraft={setDraft} /></div> : null}
-          {stage === 1 ? <div className={styles.stageSections}><button type="button" className={styles.quickFillButton} onClick={() => { setError(null); setDraft((current) => applyRecommendedPreferences(current)); }}><span><FiStar /><i><strong>使用小福推荐设置</strong><small>按当前目的补齐兴趣、性格、时间与安全边界，之后仍可修改</small></i></span><FiArrowRight /></button><StageSectionTitle title="社交目的" subtitle="选择主要目的，帮助小福正确理解你的需求。" /><Purpose draft={draft} setDraft={setDraft} /><StageSectionTitle title="兴趣与性格" subtitle="至少选择 3 个兴趣和 2 个性格标签。" /><Interests draft={draft} setDraft={setDraft} /><Personality draft={draft} setDraft={setDraft} /><StageSectionTitle title="节奏与边界" subtitle="见面节奏、聊天方式、距离和安全边界。" /><Preferences draft={draft} setDraft={setDraft} /><Bio draft={draft} setDraft={setDraft} /></div> : null}
-          {stage === 2 ? <div className={styles.stageSections}><StageSectionTitle title="真实照片" subtitle="上传 2–6 张照片，第一张作为封面。" /><Photos photos={draft.photos} onUpload={addPhotos} onRemove={(index) => setDraft((current) => ({ ...current, photos: current.photos.filter((_, item) => item !== index) }))} /><StageSectionTitle title="最终确认" subtitle="确认资料卡摘要后进入首页。" /><Preview draft={draft} /></div> : null}
+          {stage === 0 ? <div className={`${styles.stageSections} ${styles.stageDesktopGrid}`}><div className={styles.stageBlock}><StageSectionTitle title="开始前确认" subtitle="隐私、年龄和内容规则只确认一次。" /><Welcome draft={draft} setDraft={setDraft} /></div><div className={styles.stageBlock}><StageSectionTitle title="基础身份" subtitle="昵称、生日、城市和展示偏好。" /><Identity draft={draft} setDraft={setDraft} /></div></div> : null}
+          {stage === 1 ? <div className={styles.stageSections}><button type="button" className={styles.quickFillButton} onClick={() => { setError(null); setDraft((current) => applyRecommendedPreferences(current)); }}><span><FiStar /><i><strong>使用小福推荐设置</strong><small>按当前目的补齐兴趣、性格、时间与安全边界，之后仍可修改</small></i></span><FiArrowRight /></button><div className={styles.stageDesktopGrid}><div className={styles.stageBlock}><StageSectionTitle title="社交目的" subtitle="选择主要目的，帮助小福正确理解你的需求。" /><Purpose draft={draft} setDraft={setDraft} /></div><div className={styles.stageBlock}><StageSectionTitle title="兴趣与性格" subtitle="至少选择 3 个兴趣和 2 个性格标签。" /><Interests draft={draft} setDraft={setDraft} /><Personality draft={draft} setDraft={setDraft} /></div><div className={`${styles.stageBlock} ${styles.stageBlockWide}`}><StageSectionTitle title="节奏与边界" subtitle="见面节奏、聊天方式、距离和安全边界。" /><div className={styles.stageNestedGrid}><Preferences draft={draft} setDraft={setDraft} /><Bio draft={draft} setDraft={setDraft} /></div></div></div></div> : null}
+          {stage === 2 ? <div className={`${styles.stageSections} ${styles.stageDesktopGrid}`}><div className={styles.stageBlock}><StageSectionTitle title="真实照片" subtitle="上传 2–6 张照片，第一张作为封面。" /><Photos photos={draft.photos} onUpload={addPhotos} onRemove={(index) => setDraft((current) => ({ ...current, photos: current.photos.filter((_, item) => item !== index) }))} /></div><div className={styles.stageBlock}><StageSectionTitle title="最终确认" subtitle="确认资料卡摘要后进入首页。" /><Preview draft={draft} /></div></div> : null}
         </div>
 
         <footer className={styles.flowFooter}>

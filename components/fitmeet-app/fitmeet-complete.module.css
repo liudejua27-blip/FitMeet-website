@@ -358,7 +358,8 @@
 
 .internalLogin :is(button, input, a):focus-visible,
 .emailAuthPage :is(button, a):focus-visible,
-.authenticatedPage :is(button, input, textarea, select, a, [tabindex]):focus-visible {
+.authenticatedPage :is(button, input, textarea, select, a, [tabindex]):focus-visible,
+.onboardingPage :is(button, input, textarea, select, a, [tabindex]):focus-visible {
   outline: 3px solid rgba(66, 113, 232, 0.28);
   outline-offset: 2px;
 }
@@ -2919,14 +2920,19 @@
 /* Onboarding */
 .flowHeader {
   display: grid;
-  grid-template-columns: 38px 1fr auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   min-height: 64px;
   padding: max(5px, env(safe-area-inset-top)) 16px 5px;
   border-bottom: 1px solid rgba(226, 231, 240, 0.82);
   background: rgba(255, 255, 255, 0.96);
 }
-.flowHeader > button:first-child {
+.flowHeaderLeading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.flowHeaderLeading > button {
   display: grid;
   width: 31px;
   height: 31px;
@@ -2936,7 +2942,11 @@
   background: #eef1f7;
   color: #4e5a71;
 }
-.flowHeader > div {
+.flowHeaderLeading .brandIcon {
+  border-radius: 11px;
+  box-shadow: 0 7px 16px rgba(31, 38, 62, 0.14);
+}
+.flowHeader > div:not(.flowHeaderLeading) {
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -4017,6 +4027,468 @@
   width: 100%;
   margin: 8px auto 0;
   padding: 11px;
+}
+
+/* Desktop-first onboarding workspace, based on the approved wide option-cloud direction. */
+.purposeWorkspace {
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 20% 42%, rgba(72, 122, 255, 0.08), transparent 22%),
+    radial-gradient(circle at 78% 70%, rgba(151, 78, 240, 0.08), transparent 21%),
+    #fbfcff;
+}
+.purposeWorkspace::before,
+.purposeWorkspace::after {
+  position: absolute;
+  z-index: -1;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(102, 133, 255, 0.16);
+  box-shadow: 0 0 20px rgba(80, 121, 255, 0.35);
+  content: '';
+  pointer-events: none;
+}
+.purposeWorkspace::before {
+  top: 34%;
+  left: 10%;
+}
+.purposeWorkspace::after {
+  right: 8%;
+  bottom: 31%;
+  background: rgba(158, 88, 239, 0.18);
+}
+.purposeTopbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+}
+.purposeTopbar .brandIcon {
+  border-radius: 14px;
+  box-shadow: 0 9px 22px rgba(22, 30, 54, 0.17);
+}
+.purposeWorkspace .initialPurposeBody {
+  height: calc(100% - 72px);
+  padding: 10px 18px 28px;
+}
+.purposeHero {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+.purposeHero h1 {
+  margin: 0;
+  color: #1d2740;
+  font-size: clamp(28px, 5vw, 44px);
+  line-height: 1.16;
+  letter-spacing: -1.35px;
+}
+.purposeHero p {
+  margin: 11px 0 0;
+  color: #8592aa;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.purposeCloud {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+  width: 100%;
+  margin: 26px auto 0;
+}
+.purposeTile {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 13px;
+  overflow: hidden;
+  border: 1px solid #e4e9f2;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #25324b;
+  box-shadow: 0 10px 25px rgba(50, 63, 99, 0.07);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.purposeTile:hover {
+  border-color: #b7c9f3;
+  box-shadow: 0 15px 32px rgba(56, 81, 142, 0.12);
+}
+.purposeTile > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f3f6fd;
+  color: #477ef1;
+  font-size: 18px;
+}
+.purposeTile > strong {
+  overflow: hidden;
+  font-size: 14px;
+  letter-spacing: -0.15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.purposeTileHint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.purposeTile > i {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  margin-left: auto;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #357cf4, #6258ed);
+  color: #fff;
+  font-size: 14px;
+  font-style: normal;
+  box-shadow: 0 6px 13px rgba(67, 103, 229, 0.27);
+}
+.purposeTileSelected {
+  border-color: #8fb1f8;
+  background: linear-gradient(135deg, rgba(250, 252, 255, 0.98), rgba(242, 248, 255, 0.98));
+  box-shadow: 0 0 0 3px rgba(83, 132, 240, 0.08), 0 14px 33px rgba(76, 110, 196, 0.14), 0 9px 30px rgba(139, 83, 237, 0.08);
+}
+.purposeActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: min(100%, 470px);
+  margin: 30px auto 0;
+}
+.purposeActions :is(.primaryButton, .secondaryButton) {
+  min-height: 54px;
+  border-radius: 15px;
+  font-size: 14px;
+}
+.purposePrivacy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 13px 0 0;
+  color: #8a98b1;
+  font-size: 11px;
+}
+.purposePrivacy svg {
+  color: #6e8bd2;
+}
+.stageBlock {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+.stageNestedGrid {
+  display: grid;
+  gap: 18px;
+}
+
+@media (min-width: 721px) {
+  .onboardingPage {
+    padding: 24px;
+    background:
+      radial-gradient(circle at 9% 14%, rgba(74, 121, 246, 0.075), transparent 28%),
+      radial-gradient(circle at 91% 84%, rgba(139, 83, 236, 0.07), transparent 26%),
+      #f7f9fe;
+  }
+  .onboardingPage .mobileSurface {
+    width: min(100%, 1180px);
+    height: calc(100dvh - 48px);
+    min-height: 720px;
+    border-radius: 28px;
+    background: #f8faff;
+    box-shadow: 0 28px 78px rgba(30, 42, 76, 0.12);
+  }
+  .purposeTopbar {
+    min-height: 84px;
+    padding: 20px 34px;
+  }
+  .purposeWorkspace .initialPurposeBody {
+    height: calc(100% - 84px);
+    padding: 4px 52px 34px;
+  }
+  .purposeHero h1 {
+    font-size: clamp(36px, 3.3vw, 48px);
+  }
+  .purposeHero p {
+    font-size: 16px;
+  }
+  .purposeCloud {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px 22px;
+    max-width: 1050px;
+    margin-top: 28px;
+  }
+  .purposeTile {
+    min-height: 72px;
+    padding: 14px 16px;
+    border-radius: 20px;
+    will-change: transform;
+  }
+  .purposeTile > strong {
+    font-size: 16px;
+  }
+  .purposeActions {
+    margin-top: 30px;
+  }
+  .flowHeader {
+    min-height: 76px;
+    padding: 10px 30px;
+  }
+  .flowHeaderLeading {
+    min-width: 190px;
+  }
+  .flowHeader > div:nth-child(2) {
+    gap: 3px;
+  }
+  .flowHeader strong {
+    font-size: 16px;
+  }
+  .flowHeader small {
+    font-size: 10px;
+  }
+  .flowExit {
+    min-width: 190px;
+    text-align: right;
+  }
+  .onboardingBody {
+    height: calc(100% - 76px);
+    padding: 32px 48px 132px;
+    scroll-padding-bottom: 132px;
+  }
+  .stageProgress {
+    max-width: 1050px;
+    margin: 0 auto;
+    padding: 0 0 32px;
+  }
+  .stageProgress > div:first-child {
+    font-size: 12px;
+  }
+  .stageProgress h1 {
+    margin-top: 6px;
+    font-size: 38px;
+    letter-spacing: -1.2px;
+  }
+  .stageProgress p {
+    max-width: 720px;
+    margin-top: -2px;
+    font-size: 14px;
+  }
+  .stageProgress > small {
+    font-size: 11px;
+  }
+  .stageSections {
+    gap: 24px;
+    max-width: 1050px;
+    margin: 0 auto;
+  }
+  .stageDesktopGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+  .stageBlockWide {
+    grid-column: 1 / -1;
+  }
+  .stageNestedGrid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+    gap: 28px;
+  }
+  .stageSectionTitle {
+    padding: 0 4px;
+  }
+  .stageSectionTitle:not(:first-child) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .stageSectionTitle h2 {
+    font-size: 19px;
+  }
+  .stageSectionTitle p {
+    font-size: 11px;
+  }
+  .quickFillButton {
+    padding: 15px 18px;
+    border-radius: 20px;
+  }
+  .quickFillButton strong {
+    font-size: 14px;
+  }
+  .quickFillButton small {
+    font-size: 10px;
+  }
+  .welcomeStep,
+  .stepSection {
+    padding: 26px;
+    border-radius: 23px;
+    box-shadow: 0 14px 34px rgba(45, 59, 98, 0.055);
+  }
+  .welcomeStep h1,
+  .stepSection h1 {
+    font-size: 25px;
+  }
+  .welcomeStep > p,
+  .stepSection > p {
+    font-size: 13px;
+  }
+  .consentList label {
+    min-height: 48px;
+    align-items: center;
+    padding: 13px 15px;
+    font-size: 12px;
+  }
+  .stepSection .field {
+    margin-top: 18px;
+  }
+  .field input,
+  .field select {
+    min-height: 49px;
+    padding: 11px 13px;
+    font-size: 14px;
+  }
+  .purposeList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .purposeList button {
+    min-height: 70px;
+    padding: 15px;
+  }
+  .purposeList strong {
+    font-size: 14px;
+  }
+  .chipGrid,
+  .choiceRow {
+    gap: 10px;
+  }
+  .chipGrid button,
+  .choiceRow button {
+    min-height: 42px;
+    padding: 10px 14px;
+    border-radius: 13px;
+    font-size: 12px;
+  }
+  .boundaryChoices button {
+    min-height: 50px;
+    padding: 11px 13px;
+    border-radius: 14px;
+    font-size: 11px;
+  }
+  .largeTextarea {
+    min-height: 248px !important;
+  }
+  .photoGrid {
+    gap: 12px;
+  }
+  .photoGrid figure,
+  .photoUpload {
+    border-radius: 17px;
+  }
+  .profilePreviewCard {
+    padding: 19px;
+    border-radius: 20px;
+  }
+  .previewRows {
+    gap: 14px;
+  }
+  .previewRows dd {
+    font-size: 13px;
+  }
+  .flowFooter {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 24px;
+    padding: 13px 48px 14px;
+  }
+  .footerStatus {
+    text-align: left;
+  }
+  .footerActions {
+    width: auto;
+  }
+  .footerActions .secondaryButton {
+    flex-basis: 150px;
+  }
+  .footerActions .primaryButton {
+    min-width: 250px;
+  }
+}
+
+@media (min-width: 1050px) {
+  .purposeCloud {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 16px 18px;
+    max-width: 1100px;
+  }
+  .purposeTile {
+    min-height: 62px;
+    padding: 12px 13px;
+  }
+  .purposeTile > strong {
+    font-size: 14px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 980px) {
+  .purposeCloud {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .stageNestedGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .flowHeaderLeading .brandIcon {
+    display: none;
+  }
+  .flowHeaderLeading {
+    gap: 0;
+  }
+  .stageDesktopGrid,
+  .stageNestedGrid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+  .purposeTopbar {
+    position: sticky;
+    top: 0;
+    background: rgba(251, 252, 255, 0.9);
+    backdrop-filter: blur(14px);
+  }
+  .purposeCloud {
+    padding-bottom: 2px;
+  }
+  .purposeActions {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    padding: 12px 0 max(8px, env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(251, 252, 255, 0), #fbfcff 22%);
+  }
 }
 
 /* iOS-parity candidate deck */

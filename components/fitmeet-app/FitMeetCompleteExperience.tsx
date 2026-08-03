@@ -3042,32 +3042,21 @@ function FitMeetAuthenticatedExperience({
         onComplete={completeOnboarding}
         onUploadPhotos={uploadProfilePhotos}
         onExit={session.logout}
-        onLifeNeed={(purpose) => {
-          const labels = {
-            friends: '交友',
-            dating: '恋爱',
-            workout: '约练',
-            buddy: '找搭子',
-            travel: '找旅伴',
-            service: '找服务',
-            housing: '找房',
-            activity: '找活动',
-            help: '求助',
-            other: '其他需求',
-          };
+        onLifeNeed={(selectedLabels) => {
+          const selectedSummary = selectedLabels.join('、');
           setAgentOnlyMode(true);
           setSurface('main');
           setActiveTab('home');
           void (async () => {
             try {
               const thread = await ensureAgentThread();
-              await api.sendAgentThreadTurn(thread.id, `我想先${labels[purpose]}。`);
+              await api.sendAgentThreadTurn(thread.id, `我想先处理这些目标：${selectedSummary}。请帮我一起梳理。`);
               await loadAgentThread(thread.id, true);
             } catch {
               notice('小福工作台已准备好；你可以从一个模糊的想法开始。 ');
             }
           })();
-          notice(`已进入 ${labels[purpose]} 的小福工作台；暂不要求建立社交资料。`);
+          notice(`已进入 ${selectedSummary} 的小福工作台；暂不要求建立社交资料。`);
         }}
       />
     );
