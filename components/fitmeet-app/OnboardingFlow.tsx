@@ -5,6 +5,7 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { FiActivity, FiArrowLeft, FiArrowRight, FiBookOpen, FiBriefcase, FiCalendar, FiCamera, FiCheck, FiCode, FiCoffee, FiCompass, FiFeather, FiFilm, FiFlag, FiGlobe, FiHeart, FiHome, FiImage, FiLayers, FiMapPin, FiMessageCircle, FiMic, FiMonitor, FiPlus, FiSettings, FiShield, FiShoppingBag, FiStar, FiSun, FiTool, FiTruck, FiUsers, FiX, FiZap } from "react-icons/fi";
 import type { FitMeetProfilePhoto, OnboardingPayload, OnboardingStatus, SocialProfile, SocialPurpose } from "@/lib/fitmeet-api-contract";
+import { FITMEET_CURRENT_REGISTRATION_POLICY } from "@/lib/fitmeet-registration-consent";
 import { FitMeetBrandIcon } from "./FitMeetBrandIcon";
 import styles from "./fitmeet-complete.module.css";
 
@@ -129,8 +130,7 @@ function createInitialDraft(profile?: SocialProfile | null): Draft {
   fuzzyLatitude: null,
   fuzzyLongitude: null,
   consents: {
-    termsVersion: "2026-07-02",
-    privacyVersion: "2026-07-02",
+    ...FITMEET_CURRENT_REGISTRATION_POLICY,
     adultAttestation: false,
     photoPermissionAcknowledged: false,
     contentRulesAccepted: false,
@@ -158,7 +158,14 @@ function readStoredDraft(userId: number, profile?: SocialProfile | null): Draft 
       personalityTags: Array.isArray(stored.personalityTags) ? stored.personalityTags : base.personalityTags,
       availableTimes: Array.isArray(stored.availableTimes) ? stored.availableTimes : base.availableTimes,
       interestTags: Array.isArray(stored.interestTags) ? stored.interestTags : base.interestTags,
-      consents: { ...base.consents, ...(stored.consents ?? {}) },
+      // A saved onboarding draft may outlive a legal-policy release. Preserve
+      // the user's explicit choices, but always submit the current canonical
+      // policy versions shared with registration instead of stale draft data.
+      consents: {
+        ...base.consents,
+        ...(stored.consents ?? {}),
+        ...FITMEET_CURRENT_REGISTRATION_POLICY,
+      },
       photos: [],
     };
   } catch {

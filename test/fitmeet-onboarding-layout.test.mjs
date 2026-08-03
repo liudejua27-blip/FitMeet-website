@@ -55,3 +55,13 @@ test('onboarding has wide desktop grids while retaining a one-column mobile fall
   assert.match(onboardingStyles, /@media \(max-width: 720px\)[\s\S]*grid-template-columns: 1fr/);
   assert.match(onboardingStyles, /\.onboardingPage :is\(button, input, textarea, select, a, \[tabindex\]\):focus-visible/);
 });
+
+test('onboarding reuses the current registration policy and repairs stale saved versions', () => {
+  assert.match(
+    onboardingSource,
+    /import \{ FITMEET_CURRENT_REGISTRATION_POLICY \} from "@\/lib\/fitmeet-registration-consent"/,
+  );
+  assert.match(onboardingSource, /consents: \{[\s\S]*\.\.\.FITMEET_CURRENT_REGISTRATION_POLICY/);
+  assert.doesNotMatch(onboardingSource, /termsVersion: "2026-07-02"/);
+  assert.doesNotMatch(onboardingSource, /privacyVersion: "2026-07-02"/);
+});
