@@ -96,6 +96,7 @@ import {
   agentReplySuggestions,
   agentTurnNotice,
   canonicalAgentDraftCardPatch,
+  compactAgentTimelineEntries,
   demandForAgentThread,
   demandLifecyclePrompt,
   editableDefaultDraftPatch,
@@ -414,12 +415,12 @@ function agentEntriesForDetail(detail: AgentThreadDetail) {
     !draft?.userConfirmedGenerate ||
     normalizedEntries.some((entry) => entry.toolName === 'generate_demand_card')
   )
-    return normalizedEntries;
+    return compactAgentTimelineEntries(normalizedEntries);
   const latestSequence = normalizedEntries.reduce(
     (maximum, entry) => Math.max(maximum, entry.sequence || 0),
     0,
   );
-  return [
+  return compactAgentTimelineEntries([
     ...normalizedEntries,
     {
       id: `derived-demand-card-${draft.id}-${draft.updatedAt}`,
@@ -435,7 +436,7 @@ function agentEntriesForDetail(detail: AgentThreadDetail) {
       createdAt: draft.updatedAt,
       updatedAt: draft.updatedAt,
     } satisfies AgentThreadEntry,
-  ];
+  ]);
 }
 
 function Avatar({

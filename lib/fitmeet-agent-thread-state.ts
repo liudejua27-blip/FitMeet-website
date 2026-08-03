@@ -449,6 +449,72 @@ export function latestAgentToolProposal(
     )) || null;
 }
 
+function normalizedTimelineContent(value: string | null | undefined) {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
+function timelineToolTarget(entry: AgentThreadEntry) {
+  const args = entry.payload?.arguments;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "";
+  const values = args as Record<string, unknown>;
+  return ["action", "cardId", "demandId", "candidateId", "userId"]
+    .flatMap((key) => {
+      const value = values[key];
+      return typeof value === "string" || typeof value === "number"
+        ? [`${key}:${value}`]
+        : [];
+    })
+    .join("|");
+}
+
+export function compactAgentTimelineEntries(entries: AgentThreadEntry[]) {
+  let fallbackTurn = 0;
+  const annotated = entries.map((entry, index) => {
+    if (entry.kind === "message" && entry.role === "user") fallbackTurn += 1;
+    return {
+      entry,
+      index,
+      turn: entry.clientTurnId || `local-turn-${fallbackTurn}`,
+    };
+  });
+  const meaningfulTurns = new Set(
+    annotated
+      .filter(({ entry }) => (
+        (entry.kind === "message" && entry.role === "assistant" && normalizedTimelineContent(entry.content))
+        || Boolean(entry.toolName)
+      ))
+      .map(({ turn }) => turn),
+  );
+  const keep = new Set<number>();
+  const latestMessage = new Map<string, number>();
+  const latestToolState = new Map<string, number>();
+  const latestGenericTool = new Map<string, number>();
+
+  for (const item of annotated) {
+    const { entry, index, turn } = item;
+    if (entry.kind === "message" && entry.role === "user") {
+      keep.add(index);
+      continue;
+    }
+    if (entry.kind === "message") {
+      const content = normalizedTimelineContent(entry.content);
+      if (!content) continue;
+      latestMessage.set(`${turn}|${entry.role || "unknown"}|${content}`, index);
+      continue;
+    }
+    if (!entry.toolName) {
+      if (!meaningfulTurns.has(turn)) latestGenericTool.set(turn, index);
+      continue;
+    }
+    latestToolState.set(`${turn}|${entry.toolName}|${timelineToolTarget(entry)}`, index);
+  }
+
+  for (const index of latestMessage.values()) keep.add(index);
+  for (const index of latestToolState.values()) keep.add(index);
+  for (const index of latestGenericTool.values()) keep.add(index);
+  return annotated.filter(({ index }) => keep.has(index)).map(({ entry }) => entry);
+}
+
 export type DemandLifecycleAction = "publish" | "hide" | "cancel";
 
 export function demandLifecyclePrompt(action: DemandLifecycleAction) {

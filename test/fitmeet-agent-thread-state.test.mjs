@@ -6,6 +6,7 @@ import {
   agentReplySuggestions,
   agentTurnNotice,
   canonicalAgentDraftCardPatch,
+  compactAgentTimelineEntries,
   deduplicateAgentCardFields,
   demandForAgentThread,
   demandLifecyclePrompt,
@@ -124,6 +125,48 @@ test("does not treat a failed or stale proposal as actionable", () => {
     { id: "stale", threadId: "thread-1", sequence: 9, kind: "tool_proposal", role: null, content: null, toolName: "press_demand_card_button", toolStatus: "stale", payload: {}, clientTurnId: null, createdAt: "", updatedAt: "" },
   ], "press_demand_card_button");
   assert.equal(proposal, null);
+});
+
+test("compacts repeated Agent execution states while preserving user turns and final outcomes", () => {
+  const base = { threadId: "thread-1", role: null, payload: {}, createdAt: "", updatedAt: "" };
+  const entries = [
+    { ...base, id: "user-1", sequence: 1, kind: "message", role: "user", content: "发布需求", toolName: null, toolStatus: null, clientTurnId: "turn-1" },
+    { ...base, id: "noise-1", sequence: 2, kind: "tool_resolution", content: null, toolName: null, toolStatus: "completed", clientTurnId: "turn-1" },
+    { ...base, id: "classify-collecting", sequence: 3, kind: "tool_resolution", content: "正在整理", toolName: "classify_demand", toolStatus: "collecting", clientTurnId: "turn-1" },
+    { ...base, id: "classify-completed", sequence: 4, kind: "tool_resolution", content: "已归类", toolName: "classify_demand", toolStatus: "completed", clientTurnId: "turn-1" },
+    { ...base, id: "assistant-duplicate-1", sequence: 5, kind: "message", role: "assistant", content: " 已经整理完成。 ", toolName: null, toolStatus: null, clientTurnId: "turn-1" },
+    { ...base, id: "assistant-duplicate-2", sequence: 6, kind: "message", role: "assistant", content: "已经整理完成。", toolName: null, toolStatus: null, clientTurnId: "turn-1" },
+    { ...base, id: "proposal-stale", sequence: 7, kind: "tool_proposal", content: null, toolName: "press_demand_card_button", toolStatus: "stale", payload: { arguments: { action: "publish" } }, clientTurnId: "turn-1" },
+    { ...base, id: "proposal-current", sequence: 8, kind: "tool_proposal", content: null, toolName: "press_demand_card_button", toolStatus: "awaiting_confirmation", payload: { arguments: { action: "publish" } }, clientTurnId: "turn-1" },
+    { ...base, id: "user-2", sequence: 9, kind: "message", role: "user", content: "再说明一次", toolName: null, toolStatus: null, clientTurnId: "turn-2" },
+    { ...base, id: "assistant-turn-2", sequence: 10, kind: "message", role: "assistant", content: "已经整理完成。", toolName: null, toolStatus: null, clientTurnId: "turn-2" },
+  ];
+
+  assert.deepEqual(compactAgentTimelineEntries(entries).map((entry) => entry.id), [
+    "user-1",
+    "classify-completed",
+    "assistant-duplicate-2",
+    "proposal-current",
+    "user-2",
+    "assistant-turn-2",
+  ]);
+});
+
+test("keeps one generic status when a turn has no user-facing Agent result", () => {
+  const entries = [
+    { id: "status-old", threadId: "thread-1", sequence: 1, kind: "tool_resolution", role: null, content: null, toolName: null, toolStatus: "collecting", payload: {}, clientTurnId: null, createdAt: "", updatedAt: "" },
+    { id: "status-new", threadId: "thread-1", sequence: 2, kind: "tool_resolution", role: null, content: null, toolName: null, toolStatus: "completed", payload: {}, clientTurnId: null, createdAt: "", updatedAt: "" },
+  ];
+  assert.deepEqual(compactAgentTimelineEntries(entries).map((entry) => entry.id), ["status-new"]);
+});
+
+test("does not merge independent card operations that share the same action", () => {
+  const base = { threadId: "thread-1", sequence: 1, kind: "tool_proposal", role: null, content: null, toolName: "press_demand_card_button", toolStatus: "awaiting_confirmation", clientTurnId: "turn-1", createdAt: "", updatedAt: "" };
+  const entries = [
+    { ...base, id: "card-1", payload: { arguments: { action: "publish", cardId: "card-1" } } },
+    { ...base, id: "card-2", sequence: 2, payload: { arguments: { action: "publish", cardId: "card-2" } } },
+  ];
+  assert.deepEqual(compactAgentTimelineEntries(entries).map((entry) => entry.id), ["card-1", "card-2"]);
 });
 
 test("repairs a direct answer to the server's current missing field without reclassifying", () => {
