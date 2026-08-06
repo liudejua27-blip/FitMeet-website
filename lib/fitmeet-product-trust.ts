@@ -16,6 +16,12 @@ export type CandidateTrustInput = {
   requiresConfirmation?: boolean | null;
 };
 
+export type CandidateFitInput = {
+  score?: number | null;
+  evidenceCount?: number | null;
+  missingEvidenceCount?: number | null;
+};
+
 function uniqueText(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
 }
@@ -43,6 +49,44 @@ export function candidateTrustEvidence(input: CandidateTrustInput) {
     safeFirstStep: input.safeFirstStep?.trim() || '',
     nextActionSuggestion: input.nextActionSuggestion?.trim() || '',
     requiresConfirmation: input.requiresConfirmation !== false,
+  };
+}
+
+// Matching scores are useful for ordering candidates, but they are not a
+// calibrated probability that two people will get along. Present a stable,
+// qualitative fit band instead of turning the ranking score into a fake
+// percentage. Missing evidence always lowers the strength of the claim.
+export function candidateFitPresentation(
+  input: CandidateFitInput,
+): { label: string; tone: TrustTone; detail: string } {
+  const rawScore = typeof input.score === 'number' && Number.isFinite(input.score)
+    ? input.score
+    : null;
+  const normalizedScore = rawScore === null ? null : rawScore > 1 ? rawScore / 100 : rawScore;
+  const score = normalizedScore !== null && normalizedScore >= 0 && normalizedScore <= 1
+    ? normalizedScore
+    : null;
+  const evidenceCount = Math.max(0, Math.round(input.evidenceCount || 0));
+  const missingEvidenceCount = Math.max(0, Math.round(input.missingEvidenceCount || 0));
+
+  if (score === null || evidenceCount === 0 || missingEvidenceCount >= 2) {
+    return {
+      label: '信息不足，建议先确认',
+      tone: 'caution',
+      detail: '当前资料不足以给出可靠结论',
+    };
+  }
+  if (score >= 0.82 && evidenceCount >= 2 && missingEvidenceCount === 0) {
+    return {
+      label: '高度符合',
+      tone: 'positive',
+      detail: '多项已核验条件一致',
+    };
+  }
+  return {
+    label: '基本符合',
+    tone: 'neutral',
+    detail: missingEvidenceCount ? '部分条件仍需双方确认' : '主要条件一致',
   };
 }
 

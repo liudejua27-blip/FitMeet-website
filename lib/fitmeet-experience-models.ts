@@ -8,6 +8,7 @@ export type DemandViewModel = {
   id: string;
   title: string;
   summary: string;
+  demandType?: string;
   activityType: string;
   timeWindow: string;
   locationText: string;
@@ -15,7 +16,19 @@ export type DemandViewModel = {
   durationText: string;
   privacyBoundary: string;
   status: DemandViewStatus;
-  fields?: Array<{ title: string; value: string }>;
+  publishable?: boolean;
+  completeness?: number;
+  revision?: number;
+  fields?: Array<{
+    title: string;
+    value: string;
+    key?: string;
+    state?: "confirmed" | "inferred" | "defaulted" | "missing";
+    requirement?: "required" | "preferred" | "context";
+    visibility?: "public" | "matching_only";
+    editable?: boolean;
+    evidence?: Array<{ source: string; quote: string }>;
+  }>;
 };
 
 export type CandidateViewModel = {

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { FitMeetApiClient, FitMeetApiError } from '../lib/fitmeet-api-client.ts';
+import {
+  FitMeetApiClient,
+  FitMeetApiError,
+  fitMeetUserFacingErrorMessage,
+} from '../lib/fitmeet-api-client.ts';
 import { fitMeetRegistrationConsentFromExplicitChoice } from '../lib/fitmeet-registration-consent.ts';
 
 const baseUrl = 'https://contract.fitmeet.test/api';
@@ -538,6 +542,168 @@ test('API errors expose authoritative status, code and details instead of fake s
         return true;
       },
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('database/provider JSON diagnostics are converted to a useful retry message', async () => {
+  assert.match(
+    fitMeetUserFacingErrorMessage('invalid input syntax for type json', 'TOOL_EXECUTION_FAILED'),
+    /原始内容不会丢失.*重新确认/,
+  );
+  assert.equal(
+    fitMeetUserFacingErrorMessage('双方尚未成为好友', 'RELATIONSHIP_REQUIRED'),
+    '双方尚未成为好友',
+  );
+});
+
+test('Agent SSE returns immediately when a real action is waiting for confirmation', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let streamCanceled = false;
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    if (calls.length === 1) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode([
+            'event: agent.entry',
+            `data: ${JSON.stringify({
+              id: 'proposal-1',
+              threadId: 'thread-1',
+              sequence: 9,
+              kind: 'tool_proposal',
+              role: null,
+              content: null,
+              toolName: 'publish_demand',
+              toolStatus: 'awaiting_confirmation',
+              payload: {},
+              clientTurnId: 'turn-1',
+              createdAt: '2026-08-03T00:00:00.000Z',
+              updatedAt: '2026-08-03T00:00:00.000Z',
+            })}`,
+            '',
+            '',
+          ].join('\n')));
+        },
+        cancel() {
+          streamCanceled = true;
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
+    return response({
+      run: {
+        id: 'run-1',
+        threadId: 'thread-1',
+        userId: 7,
+        clientTurnId: 'turn-1',
+        status: 'waiting_approval',
+        stage: 'waiting_approval',
+        executionMode: 'fulfillment_v2',
+        createdAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T00:00:01.000Z',
+      },
+    });
+  };
+  try {
+    const events = [];
+    const api = new FitMeetApiClient(() => 'contract-token', baseUrl);
+    const run = await api.waitForAgentRun('run-1', {
+      timeoutMs: 5_000,
+      onEvent: (event) => events.push(event),
+    });
+    assert.equal(run.status, 'waiting_approval');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].sequence, 9);
+    assert.equal(streamCanceled, true);
+    assert.deepEqual(calls.map((call) => call.url.replace(baseUrl, '')), [
+      '/users/me/agent-runs/run-1/events?stream=true&afterSequence=0&afterLiveSequence=0',
+      '/users/me/agent-runs/run-1',
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Agent SSE resumes live response deltas from the last live cursor after reconnect', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const runningRun = {
+    id: 'run-live-1',
+    threadId: 'thread-live-1',
+    clientTurnId: 'turn-live-1',
+    status: 'running',
+    createdAt: '2026-08-04T00:00:00.000Z',
+    updatedAt: '2026-08-04T00:00:01.000Z',
+  };
+  const completedRun = { ...runningRun, status: 'completed', updatedAt: '2026-08-04T00:00:02.000Z' };
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    if (calls.length === 1) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode([
+            'event: agent.entry',
+            `data: ${JSON.stringify({
+              id: 'live-run-live-1-1',
+              threadId: 'thread-live-1',
+              sequence: -1,
+              kind: 'response.delta',
+              role: 'assistant',
+              content: '我已',
+              toolName: null,
+              toolStatus: null,
+              payload: { delta: '我已', live: true, liveSequence: 1 },
+              clientTurnId: 'turn-live-1',
+              createdAt: '2026-08-04T00:00:00.000Z',
+              updatedAt: '2026-08-04T00:00:00.000Z',
+            })}`,
+            '',
+            '',
+          ].join('\n')));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }
+    if (calls.length === 2) return response({ run: runningRun });
+    if (calls.length === 3) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode([
+            'event: run.snapshot',
+            `data: ${JSON.stringify(completedRun)}`,
+            '',
+            '',
+          ].join('\n')));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }
+    return response({ run: completedRun });
+  };
+  try {
+    const events = [];
+    const api = new FitMeetApiClient(() => 'contract-token', baseUrl);
+    const run = await api.waitForAgentRun('run-live-1', {
+      timeoutMs: 5_000,
+      onEvent: (event) => events.push(event),
+    });
+    assert.equal(run.status, 'completed');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].payload.liveSequence, 1);
+    assert.deepEqual(calls.map((call) => call.url.replace(baseUrl, '')), [
+      '/users/me/agent-runs/run-live-1/events?stream=true&afterSequence=0&afterLiveSequence=0',
+      '/users/me/agent-runs/run-live-1',
+      '/users/me/agent-runs/run-live-1/events?stream=true&afterSequence=0&afterLiveSequence=1',
+      '/users/me/agent-runs/run-live-1',
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

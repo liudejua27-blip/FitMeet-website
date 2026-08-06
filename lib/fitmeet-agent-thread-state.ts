@@ -1,4 +1,8 @@
-import type { AgentThreadEntry, DemandDraftSession } from "./fitmeet-api-contract";
+import type {
+  AgentThreadEntry,
+  DemandDraftSession,
+  DemandDraftUpdatePayload,
+} from "./fitmeet-api-contract";
 import type { DemandViewModel } from "./fitmeet-experience-models";
 
 const genericDemandCategories = new Set([
@@ -48,24 +52,6 @@ function assistantLabelValue(content: string, labels: string[]) {
   return "";
 }
 
-function firstReplyParagraph(content: string) {
-  const paragraph = content
-    .split(/\n\s*\n/)
-    .map((item) => item.trim())
-    .find(Boolean) || "";
-  return paragraph.trim().slice(0, 220);
-}
-
-function oneQuestion(content: string) {
-  let seenQuestion = false;
-  return Array.from(content).filter((character) => {
-    if (!["?", "？"].includes(character)) return !seenQuestion;
-    if (seenQuestion) return false;
-    seenQuestion = true;
-    return true;
-  }).join("").trim();
-}
-
 // These values deliberately cover only negotiable or safety-oriented fields.
 // Core intent fields (activity, destination, service/request content) and any
 // identity, address or contact detail must still come from the user.
@@ -112,59 +98,9 @@ export function editableDefaultDraftPatch(
     canGenerateCard,
     status: canGenerateCard ? "readyToConfirm" : "collecting",
     lastQuestion: canGenerateCard
-      ? `已用可编辑默认值补全${defaulted.join("、")}；请核对后决定是否生成需求卡。`
+      ? `已用可编辑建议值补全${defaulted.join("、")}；需求草稿会自动更新，发布前仍需确认。`
       : `${missingFields[0]}是这次需求的核心信息，你希望是什么样？`,
   };
-}
-
-export function reconcileAgentReplyWithDraft(
-  content: string | null | undefined,
-  session: DemandDraftSession | null | undefined,
-) {
-  const original = clean(content);
-  if (!original || !session) return original;
-  const rawPrefix = firstReplyParagraph(original);
-
-  if (session.missingFields.length) {
-    const field = session.missingFields[0];
-    const prefix = /齐全|完整|都清楚|可以生成|能生成|准备生成/.test(rawPrefix)
-      ? "我已经接住你的想法，先不急着生成卡片。"
-      : rawPrefix;
-    const rawQuestion = clean(session.lastQuestion);
-    const question = rawQuestion && !/还差[:：]/.test(rawQuestion)
-      ? rawQuestion
-      : `${field}你希望是什么样？`;
-    return oneQuestion([
-      prefix,
-      `我先只确认一个关键点：${question}`,
-    ].filter(Boolean).join("\n\n"));
-  }
-
-  if (session.canGenerateCard && !session.userConfirmedGenerate && session.status !== "cardGenerated") {
-    const defaultedFields = editableDefaultFieldTitles(session);
-    const prefix = /还需要|还差|补充|继续追问|不完整/.test(rawPrefix)
-      ? "我已经把你刚才说的重点整理好了。"
-      : rawPrefix;
-    return [
-      prefix,
-      defaultedFields.length
-        ? `${defaultedFields.join("、")}已先使用卡片中明确标出的可编辑默认值，你随时可以修改。`
-        : "",
-      "现在的信息已经足够整理成一张未发布的需求卡。要我现在生成吗？",
-    ].filter(Boolean).join("\n\n");
-  }
-
-  if (session.status === "cardGenerated") {
-    const prefix = /正在生成|准备生成|还需要|还差|补充/.test(rawPrefix)
-      ? "我已经按你的确认整理好了。"
-      : rawPrefix;
-    return [
-      prefix,
-      "需求卡已经生成，仍未发布。你可以先核对或修改；需要发布时，我会再给你单独的确认操作。",
-    ].filter(Boolean).join("\n\n");
-  }
-
-  return oneQuestion(original);
 }
 
 export function orderedAgentDraftFields(session: DemandDraftSession, limit = 6) {
@@ -336,34 +272,65 @@ export function demandForAgentThread<
 
 export function agentDraftCanRenderCard(session: DemandDraftSession | null | undefined) {
   if (!session) return false;
-  return session.status === "cardGenerated"
-    || Boolean(session.canGenerateCard && session.userConfirmedGenerate);
+  if (["published", "hidden", "canceled", "cancelled"].includes(session.status)) return false;
+  return true;
 }
 
 export function mergeAgentDraftEdits(
   session: DemandDraftSession,
   next: DemandViewModel,
-): Partial<DemandDraftSession> {
+): DemandDraftUpdatePayload {
+  if (session.structuredDraft?.schemaVersion === 2) {
+    const structured = session.structuredDraft;
+    const originals = new Map(structured.facts.map((fact) => [fact.key, fact]));
+    const lightFactKeys = new Set(["goal", "activity", "location", "time", "ability"]);
+    const facts = (next.fields || []).flatMap((field) => {
+      const key = clean(field.key);
+      if (!lightFactKeys.has(key)) return [];
+      const original = originals.get(key);
+      const value = clean(field.value);
+      const label = clean(field.title) || original?.label || "信息";
+      const requirement = key === "goal" ? "context" as const : "preferred" as const;
+      const visibility = "public" as const;
+      // A client-only fallback is already represented by the server's light
+      // card default. Do not turn merely rendering an old draft into a write.
+      if ((!original || !clean(original.value)) && field.state === "defaulted") return [];
+      if (
+        original
+        && original.value === value
+        && original.label === label
+        && original.requirement === requirement
+        && original.visibility === visibility
+      ) return [];
+      return [{ key, label, value, requirement, visibility }];
+    });
+    const title = clean(next.title);
+    const publicSummary = clean(next.summary);
+    const intent = {
+      ...(next.demandType && next.demandType !== structured.intent.demandType ? { demandType: next.demandType } : {}),
+      ...(title && title !== structured.intent.title ? { title } : {}),
+      ...(publicSummary !== structured.intent.publicSummary ? { publicSummary } : {}),
+    };
+    return {
+      baseRevision: structured.revision,
+      structuredPatch: {
+        ...(Object.keys(intent).length ? { intent } : {}),
+        facts,
+      },
+    };
+  }
   const knownFields = { ...(session.knownFields || {}) };
   for (const field of next.fields || []) {
     const title = clean(field.title);
     if (!title) continue;
     knownFields[title] = clean(field.value);
   }
-  const missingFields = (session.missingFields || [])
-    .filter((title) => !clean(knownFields[title]));
-  const canGenerateCard = missingFields.length === 0;
-  const alreadyGenerated = session.status === "cardGenerated";
   return {
     knownFields,
-    missingFields,
-    canGenerateCard,
-    status: alreadyGenerated ? "cardGenerated" : canGenerateCard ? "readyToConfirm" : "collecting",
-    lastQuestion: alreadyGenerated
-      ? "需求卡已更新，仍未发布。请核对后再决定是否开始匹配。"
-      : canGenerateCard
-        ? "信息基本完整了。要我现在为你生成一张需求卡吗？"
-        : `${missingFields[0]}你希望是什么样？`,
+    missingFields: [],
+    canGenerateCard: true,
+    status: "cardGenerated",
+    lastQuestion: "需求卡已更新，仍可编辑并确认发布。",
   };
 }
 
@@ -533,7 +500,7 @@ export function agentTurnNotice(detail: {
 }) {
   const draft = detail.activeDraft;
   if (!draft) {
-    return detail.executionMode === "social_chat_v1"
+    return detail.executionMode === "conversation_v2"
       ? "小福正在陪你聊；没有创建需求卡或执行任何外部操作。"
       : "";
   }
@@ -543,8 +510,8 @@ export function agentTurnNotice(detail: {
   if (draft.canGenerateCard) {
     const defaultedFields = editableDefaultFieldTitles(draft);
     return defaultedFields.length
-      ? `${defaultedFields.join("、")}已使用可编辑默认值；核对后由你确认是否生成需求卡。`
-      : "需求信息已经整理好；只有你明确确认后才会生成需求卡。";
+      ? `${defaultedFields.join("、")}使用了可编辑建议值；需求草稿会自动更新，但尚未发布。`
+      : "需求信息已自动整理为可编辑草稿；发布、联系或邀请仍需你明确确认。";
   }
   return draft.missingFields.length
     ? `草稿已保存；小福接下来只会确认一个关键点：${draft.missingFields[0]}。`
@@ -561,7 +528,7 @@ export function agentReplySuggestions(session: DemandDraftSession | null | undef
   }
   if (session.canGenerateCard && !session.userConfirmedGenerate) {
     return [
-      "我确认生成这张需求卡",
+      "请展示已整理的可编辑需求草稿",
       "我想先修改一下已整理的信息",
     ];
   }

@@ -1,6 +1,6 @@
 import type { DemandDraftSession, FitMeetDemand, FitMeetDemandCandidate } from "./fitmeet-api-contract";
 import type { CandidateViewModel, DemandViewModel } from "./fitmeet-experience-models";
-import { agentDraftActivity, deduplicateAgentCardFields, orderedAgentDraftFields } from "./fitmeet-agent-thread-state";
+import { agentDraftActivity, deduplicateAgentCardFields, orderedAgentDraftFields } from "./fitmeet-agent-thread-state.ts";
 
 export type LiveCandidate = CandidateViewModel & {
   candidateRecordId: number;
@@ -120,24 +120,93 @@ export function displayCandidate(value: FitMeetDemandCandidate): LiveCandidate {
 }
 
 export function displayDraftSession(session: DemandDraftSession): DemandViewModel {
+  const structured = session.structuredDraft;
+  if (structured?.schemaVersion === 2) {
+    const factsByKey = new Map(structured.facts.map((fact) => [fact.key, fact]));
+    const defaults: Record<string, string> = {
+      goal: structured.intent.goal || "找到合适伙伴，一起完成这件事",
+      activity: "新的活动",
+      location: "同城公共场所，具体地点可协商（可编辑默认）",
+      time: "时间可协商（可编辑默认）",
+      ability: "能力不限，轻松参与（可编辑默认）",
+    };
+    const labels: Record<string, string> = {
+      goal: "核心目的",
+      activity: "活动",
+      location: "地点",
+      time: "时间",
+      ability: "能力",
+    };
+    const fieldFor = (key: string) => {
+      const fact = factsByKey.get(key);
+      const hasValue = Boolean(fact?.value?.trim());
+      return {
+        key,
+        title: fact?.label || labels[key],
+        value: fact?.value?.trim() || defaults[key],
+        state: hasValue ? fact?.state || "inferred" : "defaulted",
+        requirement: key === "goal" ? "context" : "preferred",
+        visibility: "public",
+        editable: fact?.editable !== false,
+        evidence: fact?.evidence || [],
+      } as const;
+    };
+    const activity = fieldFor("activity").value;
+    const structuredFields: NonNullable<DemandViewModel["fields"]> = [
+      {
+        key: "public_summary",
+        title: "公开摘要",
+        value: structured.intent.publicSummary.trim() || `希望找到合适的人一起完成“${activity}”。`,
+        state: "inferred",
+        requirement: "context",
+        visibility: "public",
+        editable: true,
+        evidence: [],
+      },
+      ...["goal", "activity", "location", "time", "ability"].map(fieldFor),
+    ];
+    return {
+      id: session.generatedCardId || session.id,
+      title: structured.intent.title,
+      summary: structured.intent.publicSummary || structured.intent.goal,
+      demandType: structured.intent.demandType,
+      activityType: activity,
+      timeWindow: fieldFor("time").value,
+      locationText: fieldFor("location").value,
+      capacityMax: 2,
+      durationText: fieldFor("ability").value,
+      privacyBoundary: "公开场所优先，沟通后再决定",
+      status: "draft",
+      fields: structuredFields,
+      publishable: true,
+      completeness: 100,
+      revision: structured.revision,
+    };
+  }
   const fields = session.knownFields || {};
   const activity = agentDraftActivity(session);
-  const cardFields = orderedAgentDraftFields(session);
-  const timeField = cardFields.find((field) => /时间|日期|期限/.test(field.title) && field.value)?.value;
-  const locationField = cardFields.find((field) => /地点|位置|区域|目的地/.test(field.title) && field.value)?.value;
-  const preferenceField = cardFields.find((field) => /方式|节奏|要求|偏好|水平|边界/.test(field.title) && field.value)?.value;
+  const cardFields: NonNullable<DemandViewModel["fields"]> = [
+    { key: "public_summary", title: "公开摘要", value: `希望找到合适的人一起完成“${activity}”。`, state: "inferred", requirement: "context", visibility: "public", editable: true, evidence: [] },
+    { key: "goal", title: "核心目的", value: fields["核心目的"] || `找到合适伙伴，一起完成“${activity}”`, state: "inferred", requirement: "context", visibility: "public", editable: true, evidence: [] },
+    { key: "activity", title: "活动", value: activity, state: "inferred", requirement: "preferred", visibility: "public", editable: true, evidence: [] },
+    { key: "location", title: "地点", value: fields["地点"] || fields["目的地"] || "同城公共场所，具体地点可协商（可编辑默认）", state: "defaulted", requirement: "preferred", visibility: "public", editable: true, evidence: [] },
+    { key: "time", title: "时间", value: fields["时间"] || "时间可协商（可编辑默认）", state: "defaulted", requirement: "preferred", visibility: "public", editable: true, evidence: [] },
+    { key: "ability", title: "能力", value: fields["能力"] || fields["能力要求"] || fields["水平或偏好"] || "能力不限，轻松参与（可编辑默认）", state: "defaulted", requirement: "preferred", visibility: "public", editable: true, evidence: [] },
+  ];
   return {
     id: session.generatedCardId || session.id,
     title: activity,
-    summary: session.rawUserIntent?.trim() || Object.values(fields).filter(Boolean).join(" · ") || "需求内容待补充",
+    summary: `希望找到合适的人一起完成“${activity}”。`,
     activityType: activity,
-    timeWindow: timeField || fields["时间"] || fields.time || "时间待确认",
-    locationText: locationField || fields["地点"] || fields["目的地"] || fields.location || "大致地点待确认",
+    timeWindow: cardFields.find((field) => field.key === "time")?.value || "时间可协商（可编辑默认）",
+    locationText: cardFields.find((field) => field.key === "location")?.value || "同城公共场所，具体地点可协商（可编辑默认）",
     capacityMax: 2,
-    durationText: preferenceField || fields["水平或偏好"] || fields["搭子要求"] || fields["偏好"] || fields.boundary || "节奏待确认，可继续补充",
-    privacyBoundary: fields["边界"] || fields.boundary || fields["搭子要求"] || fields["偏好"] || "公共场所集合，先聊天再决定",
+    durationText: cardFields.find((field) => field.key === "ability")?.value || "能力不限，轻松参与（可编辑默认）",
+    privacyBoundary: "公开场所优先，沟通后再决定",
     status: "draft",
     fields: cardFields,
+    publishable: true,
+    completeness: 100,
   };
 }
 
@@ -157,15 +226,11 @@ export function demandTypeFor(activityType: string) {
 export function demandMatchingPolicy(demand: DemandViewModel, city: string, radiusKm: number) {
   const demandType = demandTypeFor(demand.activityType);
   const activity = humanDemandActivity(demand.activityType, demand.fields);
-  const hardFilters = demandType === "workout" && activity
-    ? [`运动项目：${activity}`]
-    : [];
   const softPreferences = Array.from(new Set([
     activity ? `活动：${activity}` : "",
     demand.timeWindow && !/待确认/.test(demand.timeWindow) ? `时间：${demand.timeWindow}` : "",
     demand.locationText && !/待确认/.test(demand.locationText) ? `地点：${demand.locationText}` : "",
-    demand.durationText && !/待确认/.test(demand.durationText) ? `方式：${demand.durationText}` : "",
-    demand.privacyBoundary ? `边界：${demand.privacyBoundary}` : "",
+    demand.durationText && !/可编辑默认|待确认/.test(demand.durationText) ? `能力：${demand.durationText}` : "",
   ].filter(Boolean)));
   return {
     demandType,
@@ -173,7 +238,7 @@ export function demandMatchingPolicy(demand: DemandViewModel, city: string, radi
     matchingPolicy: {
       city: city || undefined,
       radiusKm,
-      hardFilters,
+      hardFilters: [],
       softPreferences,
     },
   };

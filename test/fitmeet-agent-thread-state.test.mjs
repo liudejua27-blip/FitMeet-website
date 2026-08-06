@@ -15,11 +15,11 @@ import {
   mergeAgentDraftEdits,
   orderedAgentDraftFields,
   preferredAgentThread,
-  reconcileAgentReplyWithDraft,
   reconcileDraftWithAssistantSummary,
   reconcileExplicitDraftAnswer,
   repairDraftAfterLifecycleTurn,
 } from "../lib/fitmeet-agent-thread-state.ts";
+import { displayDraftSession } from "../lib/fitmeet-agent-domain.ts";
 
 const draft = {
   id: "draft-1",
@@ -43,6 +43,45 @@ const draft = {
   generatedCardId: null,
   createdAt: "2026-07-23T00:00:00.000Z",
   updatedAt: "2026-07-23T00:00:00.000Z",
+};
+
+const structuredDraft = {
+  ...draft,
+  schemaVersion: 2,
+  revision: 7,
+  canGenerateCard: false,
+  status: "collecting",
+  structuredDraft: {
+    schemaVersion: 2,
+    revision: 7,
+    intent: {
+      demandType: "workout",
+      domain: "羽毛球",
+      title: "周六青大羽毛球搭子",
+      goal: "找到合适伙伴一起完成羽毛球约练",
+      publicSummary: "寻找两位伙伴周六下午在青岛大学轻松打羽毛球。",
+    },
+    facts: [
+      { key: "goal", label: "核心目的", value: "找到合适伙伴一起完成羽毛球约练", state: "inferred", requirement: "context", visibility: "public", evidence: [{ source: "user", quote: "找人打羽毛球" }], editable: true, source: "user" },
+      { key: "activity", label: "运动项目", value: "羽毛球", state: "confirmed", requirement: "preferred", visibility: "public", evidence: [{ source: "user", quote: "羽毛球" }], editable: true, source: "user_edit" },
+      { key: "time", label: "时间", value: "周六下午", state: "inferred", requirement: "preferred", visibility: "public", evidence: [{ source: "user", quote: "周六下午" }], editable: true, source: "user" },
+      { key: "location", label: "地点", value: "", state: "missing", requirement: "preferred", visibility: "public", evidence: [], editable: true, source: "missing" },
+      { key: "gender", label: "性别偏好", value: "女生优先", state: "inferred", requirement: "preferred", visibility: "matching_only", evidence: [{ source: "user", quote: "女生优先" }], editable: true, source: "user" },
+    ],
+    sections: {
+      core: ["goal", "activity"],
+      mustHave: [],
+      negotiable: ["time"],
+      matchingOnly: ["gender"],
+    },
+    missingCriticalFacts: ["地点"],
+    publishable: false,
+    location: { city: "青岛", venue: null, radiusKm: 10 },
+    matchingPolicy: {
+      city: "青岛", venue: null, radiusKm: 10, timeWindows: ["周六下午"], activity: "羽毛球",
+      level: null, age: null, gender: "女生优先", boundary: null, hardFilters: [], softPreferences: ["时间：周六下午", "性别偏好：女生优先"],
+    },
+  },
 };
 
 test("keeps dynamic Citywalk fields instead of forcing workout fields", () => {
@@ -82,9 +121,58 @@ test("normalizes model field aliases into the shared demand-card contract", () =
   assert.equal("活动类型" in patch.knownFields, false);
 });
 
-test("a ready draft is not displayed as a generated card before confirmation", () => {
-  assert.equal(agentDraftCanRenderCard(draft), false);
+test("any real draft is displayed as editable without a generation approval", () => {
+  assert.equal(agentDraftCanRenderCard(draft), true);
   assert.equal(agentDraftCanRenderCard({ ...draft, status: "cardGenerated", userConfirmedGenerate: true }), true);
+  assert.equal(agentDraftCanRenderCard({
+    ...draft,
+    missingFields: ["地点", "时间"],
+    canGenerateCard: false,
+    status: "collecting",
+  }), true);
+});
+
+test("an incomplete V2 draft renders as a publishable six-field light card", () => {
+  assert.equal(agentDraftCanRenderCard(structuredDraft), true);
+  const displayed = displayDraftSession(structuredDraft);
+  assert.equal(displayed.title, "周六青大羽毛球搭子");
+  assert.equal(displayed.publishable, true);
+  assert.equal(displayed.revision, 7);
+  assert.deepEqual(displayed.fields?.map((field) => field.key), [
+    "public_summary", "goal", "activity", "location", "time", "ability",
+  ]);
+  assert.equal(displayed.fields?.find((field) => field.key === "location")?.state, "defaulted");
+  assert.equal(displayed.fields?.every((field) => field.visibility === "public"), true);
+});
+
+test("V2 edits submit revision-bound changed facts instead of rebuilding legacy fields", () => {
+  const displayed = displayDraftSession(structuredDraft);
+  const next = {
+    ...displayed,
+    demandType: "activity",
+    title: "周日青大羽毛球搭子",
+    summary: "周日下午在青岛大学找羽毛球伙伴。",
+    fields: displayed.fields?.map((field) => field.key === "time"
+      ? { ...field, value: "周日下午", requirement: "required" }
+      : field),
+  };
+  const patch = mergeAgentDraftEdits(structuredDraft, next);
+  assert.equal(patch.baseRevision, 7);
+  assert.deepEqual(patch.structuredPatch?.intent, {
+    demandType: "activity",
+    title: "周日青大羽毛球搭子",
+    publicSummary: "周日下午在青岛大学找羽毛球伙伴。",
+  });
+  assert.deepEqual(patch.structuredPatch?.facts, [
+    {
+      key: "time",
+      label: "时间",
+      value: "周日下午",
+      requirement: "preferred",
+      visibility: "public",
+    },
+  ]);
+  assert.equal("knownFields" in patch, false);
 });
 
 test("editing a dynamic field does not reclassify the server demand type", () => {
@@ -108,7 +196,7 @@ test("editing a dynamic field does not reclassify the server demand type", () =>
   });
   assert.equal(patch.knownFields?.["时间"], "周日下午");
   assert.equal("demandType" in patch, false);
-  assert.equal(patch.status, "readyToConfirm");
+  assert.equal(patch.status, "cardGenerated");
 });
 
 test("finds the latest actionable server proposal", () => {
@@ -190,33 +278,8 @@ test("repairs a direct answer to the server's current missing field without recl
   assert.equal(patch?.status, "readyToConfirm");
 });
 
-test("uses the remote draft as the single stage when model copy disagrees", () => {
-  const collecting = {
-    ...draft,
-    missingFields: ["搭子要求"],
-    canGenerateCard: false,
-    status: "collecting",
-    lastQuestion: "搭子要求你希望是什么样？",
-  };
-  const corrected = reconcileAgentReplyWithDraft(
-    "太好了，信息已经全部齐全，我现在可以生成卡片。\n\n你还想要什么年龄和性格？你对时间还有要求吗？",
-    collecting,
-  );
-  assert.doesNotMatch(corrected, /全部齐全/);
-  assert.match(corrected, /只确认一个关键点/);
-  assert.match(corrected, /搭子要求/);
-  assert.equal((corrected.match(/[？?]/g) || []).length, 1);
-
-  const ready = reconcileAgentReplyWithDraft(
-    "还需要你补充更精确的位置。",
-    draft,
-  );
-  assert.match(ready, /信息已经足够/);
-  assert.match(ready, /要我现在生成吗/);
-});
-
 test("chat feedback never implies that a demand was created", () => {
-  assert.match(agentTurnNotice({ executionMode: "social_chat_v1", activeDraft: null }), /没有创建需求卡/);
+  assert.match(agentTurnNotice({ executionMode: "conversation_v2", activeDraft: null }), /没有创建需求卡/);
   assert.match(demandLifecyclePrompt("publish"), /不要重新生成卡片/);
 });
 
@@ -243,9 +306,6 @@ test("fills a dating preference with an explicit editable default", () => {
   assert.deepEqual(patch?.missingFields, []);
   assert.equal(patch?.canGenerateCard, true);
   assert.equal(patch?.status, "readyToConfirm");
-  const reply = reconcileAgentReplyWithDraft("还差一个偏好，请继续补充。", { ...collecting, ...patch });
-  assert.match(reply, /可编辑默认值/);
-  assert.match(reply, /要我现在生成吗/);
 });
 
 test("uses safe generic defaults without inventing an exact address", () => {

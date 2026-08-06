@@ -6,6 +6,11 @@ import {
   type AgentThreadDetail,
   type AgentThreadEntry,
   type AgentThreadTurn,
+  type AgentRun,
+  type AgentRunStatusResponse,
+  type AgentRunEventsResponse,
+  type AgentNeedWikiItem,
+  type CapabilityOffering,
   type AgentInboxEventPage,
   type AgentInboxScope,
   type AuthSession,
@@ -15,6 +20,7 @@ import {
   type ConversationMessage,
   type DemandCandidateBehavior,
   type DemandDraftSession,
+  type DemandDraftUpdatePayload,
   type FitMeetConnectionRequest,
   type FeedPage,
   type FeedPost,
@@ -74,6 +80,24 @@ type ApiErrorPayload = {
   retryAfterSeconds?: number;
 };
 
+/**
+ * Keep database/provider diagnostics out of the interaction surface. The
+ * server still returns its authoritative code and details for telemetry, but
+ * a user should get a concrete next step instead of PostgreSQL syntax.
+ */
+export function fitMeetUserFacingErrorMessage(message: string, code?: string) {
+  const raw = String(message || '').trim();
+  if (/invalid input syntax for type json/i.test(raw)) {
+    return code === 'TOOL_EXECUTION_FAILED'
+      ? '需求卡格式暂时没有同步成功，原始内容不会丢失。请重新确认；如果仍失败，请稍后再试。'
+      : '这项内容暂时没有同步成功，原始内容不会丢失，请稍后重试。';
+  }
+  if (/postgres|sql state|column .* does not exist|relation .* does not exist/i.test(raw)) {
+    return '服务暂时无法保存这项操作，原始内容不会丢失，请稍后重试。';
+  }
+  return raw;
+}
+
 function retryAfterSecondsFrom(response: Response, payload?: ApiErrorPayload) {
   if (Number.isFinite(payload?.retryAfterSeconds) && Number(payload?.retryAfterSeconds) > 0)
     return Math.ceil(Number(payload?.retryAfterSeconds));
@@ -91,6 +115,7 @@ export class FitMeetApiError extends Error {
   readonly code?: string;
   readonly details?: unknown;
   readonly retryAfterSeconds?: number;
+  readonly rawMessage: string;
 
   constructor(
     message: string,
@@ -99,12 +124,13 @@ export class FitMeetApiError extends Error {
     details?: unknown,
     retryAfterSeconds?: number,
   ) {
-    super(message);
+    super(fitMeetUserFacingErrorMessage(message, code));
     this.name = 'FitMeetApiError';
     this.status = status;
     this.code = code;
     this.details = details;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.rawMessage = message;
   }
 }
 
@@ -915,7 +941,7 @@ export class FitMeetApiClient {
       path: `${fitMeetPaths.demandDraftSessions.active}${query}`,
     });
   }
-  updateDemandDraftSession(id: string, payload: Partial<DemandDraftSession>) {
+  updateDemandDraftSession(id: string, payload: DemandDraftUpdatePayload) {
     return this.request<DemandDraftSession>({
       method: 'PATCH',
       path: fitMeetPaths.demandDraftSessions.update(id),
@@ -984,6 +1010,148 @@ export class FitMeetApiClient {
       path: fitMeetPaths.agentThreads.turns(id),
       body: { content, clientTurnId },
       idempotencyKey: `web-agent-turn-${clientTurnId}`,
+    });
+  }
+  getAgentRun(id: string) {
+    return this.request<AgentRunStatusResponse>({
+      method: 'GET',
+      path: fitMeetPaths.agentRuns.detail(id),
+    });
+  }
+  listAgentRunEvents(id: string, afterSequence = 0) {
+    const query = new URLSearchParams({ afterSequence: String(Math.max(0, afterSequence)) });
+    return this.request<AgentRunEventsResponse>({
+      method: 'GET',
+      path: `${fitMeetPaths.agentRuns.events(id)}?${query.toString()}`,
+    });
+  }
+  async waitForAgentRun(
+    id: string,
+    options: {
+      afterSequence?: number;
+      afterLiveSequence?: number;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      onEvent?: (event: AgentThreadEntry) => void;
+    } = {},
+  ): Promise<AgentRun> {
+    const terminal = new Set(['completed', 'failed', 'canceled', 'waiting_approval']);
+    const deadline = Date.now() + Math.max(5_000, options.timeoutMs ?? 45_000);
+    let afterSequence = Math.max(0, options.afterSequence ?? 0);
+    let afterLiveSequence = Math.max(0, options.afterLiveSequence ?? 0);
+    let lastRun: AgentRun | null = null;
+
+    while (Date.now() < deadline) {
+      if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('Aborted', 'AbortError');
+      const token = this.getToken();
+      const streamController = new AbortController();
+      const streamBudget = Math.min(27_000, Math.max(1_000, deadline - Date.now()));
+      const timer = globalThis.setTimeout(() => streamController.abort(), streamBudget);
+      const abort = () => streamController.abort(options.signal?.reason);
+      options.signal?.addEventListener('abort', abort, { once: true });
+      try {
+        const query = new URLSearchParams({
+          stream: 'true',
+          afterSequence: String(afterSequence),
+          afterLiveSequence: String(afterLiveSequence),
+        });
+        const response = await fetch(`${this.baseUrl}${fitMeetPaths.agentRuns.events(id)}?${query.toString()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            Accept: 'text/event-stream',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          signal: streamController.signal,
+        });
+        if (!response.ok || !response.body) {
+          const payload: unknown = await response.json().catch(() => ({}));
+          const error = payload && typeof payload === 'object' ? (payload as ApiErrorPayload) : {};
+          throw new FitMeetApiError(
+            error.message || error.code || `运行状态读取失败 (${response.status})`,
+            response.status,
+            error.code,
+            error.details,
+          );
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let shouldResolveStatus = false;
+        const consume = (block: string) => {
+          let eventName = 'message';
+          const data: string[] = [];
+          for (const line of block.split(/\r?\n/)) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+          }
+          if (!data.length) return;
+          const payload = JSON.parse(data.join('\n')) as AgentRun | AgentThreadEntry;
+          if (eventName === 'run.snapshot') {
+            lastRun = payload as AgentRun;
+            shouldResolveStatus = terminal.has(lastRun.status);
+            return;
+          }
+          const event = payload as AgentThreadEntry;
+          afterSequence = Math.max(afterSequence, Number(event.sequence || 0));
+          const liveSequence = Number(event.payload?.liveSequence || 0);
+          if (Number.isFinite(liveSequence) && liveSequence > 0) {
+            afterLiveSequence = Math.max(afterLiveSequence, liveSequence);
+          }
+          options.onEvent?.(event);
+          if (event.kind === 'tool_proposal' && event.toolStatus === 'awaiting_confirmation') {
+            shouldResolveStatus = true;
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          let boundary = buffer.search(/\r?\n\r?\n/);
+          while (boundary >= 0) {
+            const block = buffer.slice(0, boundary);
+            const separator = buffer.slice(boundary).match(/^\r?\n\r?\n/)?.[0] ?? '\n\n';
+            buffer = buffer.slice(boundary + separator.length);
+            if (block.trim() && !block.trimStart().startsWith(':')) consume(block);
+            boundary = buffer.search(/\r?\n\r?\n/);
+          }
+          if (shouldResolveStatus) {
+            await reader.cancel();
+            break;
+          }
+          if (done) break;
+        }
+      } catch (reason) {
+        if (options.signal?.aborted) throw options.signal.reason ?? reason;
+        if (!(reason instanceof DOMException && reason.name === 'AbortError')) throw reason;
+      } finally {
+        globalThis.clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
+      }
+
+      const status = await this.getAgentRun(id);
+      lastRun = status.run;
+      if (terminal.has(status.run.status)) {
+        if (status.run.status === 'failed') {
+          const message = typeof status.run.error === 'string'
+            ? status.run.error
+            : status.run.error?.message;
+          throw new Error(message || '小福这次处理没有完成，请保留原消息后重试。');
+        }
+        if (status.run.status === 'canceled') throw new Error('这次处理已取消。');
+        return status.run;
+      }
+    }
+    if (lastRun) return lastRun;
+    throw new Error('运行状态暂时无法恢复。');
+  }
+  cancelAgentRun(id: string) {
+    return this.request<AgentRunStatusResponse>({
+      method: 'POST',
+      path: fitMeetPaths.agentRuns.cancel(id),
+      body: {},
+      idempotencyKey: `web-agent-run-cancel-${id}`,
     });
   }
   resolveAgentToolProposal(
@@ -1492,6 +1660,74 @@ export class FitMeetApiClient {
       method: 'DELETE',
       path: fitMeetPaths.users.agentMemorySuppression(memoryType),
       idempotencyKey: `web-memory-unsuppress-${memoryType}-${crypto.randomUUID()}`,
+    });
+  }
+  async listAgentNeedWiki(query?: string, limit = 50) {
+    const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(100, limit))) });
+    if (query?.trim()) params.set('query', query.trim());
+    const response = await this.request<{ items: AgentNeedWikiItem[] }>({
+      method: 'GET',
+      path: `${fitMeetPaths.users.agentNeedWiki}?${params.toString()}`,
+    });
+    return response.items;
+  }
+  updateAgentNeedWiki(
+    id: string,
+    patch: { revision: number; title?: string; summary?: string; status?: 'active' | 'archived' },
+  ) {
+    return this.request<{ item: AgentNeedWikiItem }>({
+      method: 'PATCH',
+      path: fitMeetPaths.users.agentNeedWikiItem(id),
+      body: patch,
+      idempotencyKey: `web-need-wiki-update-${id}-${patch.revision}`,
+    });
+  }
+  deleteAgentNeedWiki(id: string, revision: number) {
+    return this.request<{ item: { id: string; status: 'deleted' } }>({
+      method: 'DELETE',
+      path: fitMeetPaths.users.agentNeedWikiItem(id),
+      body: { revision },
+      idempotencyKey: `web-need-wiki-delete-${id}-${revision}`,
+    });
+  }
+  async listCapabilityOfferings() {
+    const response = await this.request<{ items: CapabilityOffering[] }>({
+      method: 'GET',
+      path: fitMeetPaths.users.capabilityOfferings,
+    });
+    return response.items;
+  }
+  createCapabilityOffering(payload: {
+    providerKind: 'person' | 'provider' | 'organization';
+    displayName: string;
+    domain: string;
+    capabilities: string[];
+    serviceModes: string[];
+    city?: string | null;
+    district?: string | null;
+    serviceRadiusKm?: number | null;
+    availability?: Record<string, unknown>;
+    pricing?: Record<string, unknown>;
+    experience?: Record<string, unknown>;
+    credentials?: Record<string, unknown>[];
+    acceptsNewRequests?: boolean;
+  }) {
+    return this.request<CapabilityOffering>({
+      method: 'POST',
+      path: fitMeetPaths.users.capabilityOfferings,
+      body: payload,
+      idempotencyKey: `web-capability-create-${crypto.randomUUID()}`,
+    });
+  }
+  updateCapabilityOffering(
+    id: string,
+    patch: Partial<Pick<CapabilityOffering, 'capabilities' | 'serviceModes' | 'availability' | 'pricing' | 'city' | 'acceptsNewRequests'>> & { revision: number },
+  ) {
+    return this.request<CapabilityOffering>({
+      method: 'PATCH',
+      path: fitMeetPaths.users.capabilityOffering(id),
+      body: patch,
+      idempotencyKey: `web-capability-update-${id}-${patch.revision}`,
     });
   }
 

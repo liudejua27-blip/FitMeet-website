@@ -58,6 +58,12 @@ export const fitMeetPaths = {
       `/users/me/agent-memory/${encodeURIComponent(id)}/suppress`,
     agentMemorySuppression: (memoryType: string) =>
       `/users/me/agent-memory/suppressions/${encodeURIComponent(memoryType)}`,
+    agentNeedWiki: "/users/me/agent-need-wiki",
+    agentNeedWikiItem: (id: string) =>
+      `/users/me/agent-need-wiki/${encodeURIComponent(id)}`,
+    capabilityOfferings: "/users/me/capability-offerings",
+    capabilityOffering: (id: string) =>
+      `/users/me/capability-offerings/${encodeURIComponent(id)}`,
     reminderPreferences: "/social-agent/reminders/preferences",
   },
   feed: {
@@ -131,6 +137,11 @@ export const fitMeetPaths = {
     detail: (id: string) => `/users/me/agent-threads/${encodeURIComponent(id)}`,
     turns: (id: string) => `/users/me/agent-threads/${encodeURIComponent(id)}/turns`,
     resolveProposal: (id: string, proposalId: string) => `/users/me/agent-threads/${encodeURIComponent(id)}/tool-proposals/${encodeURIComponent(proposalId)}/resolve`,
+  },
+  agentRuns: {
+    detail: (id: string) => `/users/me/agent-runs/${encodeURIComponent(id)}`,
+    events: (id: string) => `/users/me/agent-runs/${encodeURIComponent(id)}/events`,
+    cancel: (id: string) => `/users/me/agent-runs/${encodeURIComponent(id)}/cancel`,
   },
   agentInbox: {
     events: "/agent-inbox/events",
@@ -751,6 +762,89 @@ export type ConversationMessage = {
   localStatus?: "sending" | "failed";
 };
 
+export type DemandDraftFactState = "confirmed" | "inferred" | "defaulted" | "missing";
+export type DemandDraftFactRequirement = "required" | "preferred" | "context";
+export type DemandDraftFactVisibility = "public" | "matching_only";
+
+export type DemandDraftEvidenceV2 = {
+  source: string;
+  quote: string;
+};
+
+export type DemandDraftFactV2 = {
+  key: string;
+  label: string;
+  value: string;
+  state: DemandDraftFactState;
+  requirement: DemandDraftFactRequirement;
+  visibility: DemandDraftFactVisibility;
+  evidence: DemandDraftEvidenceV2[];
+  editable: boolean;
+  source: string;
+};
+
+export type StructuredDemandDraftV2 = {
+  schemaVersion: 2;
+  revision: number;
+  intent: {
+    demandType: string;
+    domain: string;
+    title: string;
+    goal: string;
+    publicSummary: string;
+  };
+  facts: DemandDraftFactV2[];
+  sections: {
+    core: string[];
+    mustHave: string[];
+    negotiable: string[];
+    matchingOnly: string[];
+  };
+  missingCriticalFacts: string[];
+  publishable: boolean;
+  location: {
+    city: string | null;
+    venue: string | null;
+    radiusKm: number | null;
+  };
+  matchingPolicy: {
+    city: string | null;
+    venue: string | null;
+    radiusKm: number | null;
+    timeWindows: string[];
+    activity: string | null;
+    level: string | null;
+    age: string | null;
+    gender: string | null;
+    boundary: string | null;
+    people?: string | null;
+    capacityMin?: number | null;
+    capacityMax?: number | null;
+    hardFilters: string[];
+    softPreferences: string[];
+  };
+};
+
+export type DemandDraftStructuredPatchV2 = {
+  intent?: {
+    demandType?: string;
+    title?: string;
+    publicSummary?: string;
+  };
+  facts?: Array<{
+    key: string;
+    label: string;
+    value: string;
+    requirement: DemandDraftFactRequirement;
+    visibility: DemandDraftFactVisibility;
+  }>;
+};
+
+export type DemandDraftUpdatePayload = Partial<DemandDraftSession> & {
+  baseRevision?: number;
+  structuredPatch?: DemandDraftStructuredPatchV2;
+};
+
 export type DemandDraftSession = {
   id: string;
   sourceConversationId: string | null;
@@ -766,6 +860,9 @@ export type DemandDraftSession = {
   userConfirmedGenerate: boolean;
   status: string;
   generatedCardId: string | null;
+  schemaVersion?: number;
+  revision?: number;
+  structuredDraft?: StructuredDemandDraftV2 | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -790,8 +887,27 @@ export type AgentApproval = {
   toolName: string;
   status: string;
   stateVersion: number;
+  confirmationScope?: string | null;
+  confirmationHash?: string | null;
+  envelopeRevision?: number | null;
   arguments: Record<string, unknown>;
   expiresAt: string;
+};
+
+export type AgentRun = {
+  id: string;
+  threadId: string;
+  clientTurnId: string;
+  operationKey?: string | null;
+  status: string;
+  stateVersion: number;
+  checkpoint?: Record<string, unknown>;
+  error?: { code?: string; message?: string } | string | null;
+  cancelRequestedAt?: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  updatedAt: string;
 };
 
 export type AgentThreadEntry = {
@@ -819,11 +935,66 @@ export type AgentThreadDetail = {
 
 export type AgentThreadTurn = {
   thread: AgentThread;
+  run: AgentRun;
   entries: AgentThreadEntry[];
+  approvals?: AgentApproval[];
   activeDraft?: DemandDraftSession | null;
-  executionMode?: "social_chat_v1" | "social_task_v1";
+  processing?: boolean;
+  executionMode?: "conversation_v2" | "knowledge_v1" | "fulfillment_v2" | string | null;
   toolManifest?: unknown[];
   idempotent?: boolean;
+};
+
+export type AgentRunStatusResponse = {
+  run: AgentRun;
+  approvals?: AgentApproval[];
+};
+
+export type AgentRunEventsResponse = {
+  run: AgentRun;
+  events: AgentThreadEntry[];
+  nextSequence: number;
+};
+
+export type AgentNeedWikiItem = {
+  id: string;
+  needKey: string;
+  title: string;
+  summary: string;
+  envelope: Record<string, unknown>;
+  status: "active" | "archived" | string;
+  revision: number;
+  sourceThreadId?: string | null;
+  sourceRunId?: string | null;
+  semanticScore?: number | null;
+  lexicalScore?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type CapabilityOffering = {
+  id: string;
+  providerKind: "person" | "provider" | "organization" | string;
+  displayName: string;
+  domain: string;
+  capabilities: string[];
+  serviceModes: string[];
+  city?: string | null;
+  district?: string | null;
+  serviceRadiusKm?: number | null;
+  availability: Record<string, unknown>;
+  pricing: Record<string, unknown>;
+  experience: Record<string, unknown>;
+  credentials: Record<string, unknown>[];
+  credentialsVerified: boolean;
+  rating?: number | null;
+  completedCount: number;
+  acceptsNewRequests: boolean;
+  status: string;
+  safetyStatus: string;
+  revision: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type FitMeetSearchType = "agent_thread" | "message" | "friend" | "group";

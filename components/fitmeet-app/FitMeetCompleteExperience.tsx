@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -43,6 +43,7 @@ import type {
   AgentInboxEvent,
   AgentInboxEventPage,
   AgentInboxScope,
+  AgentNeedWikiItem,
   AgentMemoryControl,
   AgentMemoryUsageEvent,
   AgentMemoryUsagePage,
@@ -52,6 +53,7 @@ import type {
   AgentThreadEntry,
   BlockedUserRecord,
   ConversationMessage,
+  CapabilityOffering,
   DemandDraftSession,
   FeedPost,
   FitMeetAppConfig,
@@ -95,18 +97,12 @@ import {
   agentDraftCanRenderCard,
   agentReplySuggestions,
   agentTurnNotice,
-  canonicalAgentDraftCardPatch,
   compactAgentTimelineEntries,
   demandForAgentThread,
   demandLifecyclePrompt,
-  editableDefaultDraftPatch,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
   preferredAgentThread,
-  reconcileAgentReplyWithDraft,
-  reconcileDraftWithAssistantSummary,
-  reconcileExplicitDraftAnswer,
-  repairDraftAfterLifecycleTurn,
   type DemandLifecycleAction,
 } from '@/lib/fitmeet-agent-thread-state';
 import { FitMeetApiClient, FitMeetApiError } from '@/lib/fitmeet-api-client';
@@ -134,6 +130,7 @@ import {
   memoryUseScopePresentation,
 } from '@/lib/fitmeet-memory-state';
 import {
+  candidateFitPresentation,
   inboxEventDestination,
   memoryBoundaryNotice,
   memoryConfidenceLabel,
@@ -170,6 +167,7 @@ import {
   FitMeetAgentContextPanel,
   FitMeetAgentShell,
   type FitMeetAppDestination,
+  type FitMeetContextLifecycleStage,
 } from './FitMeetAgentShell';
 import styles from './fitmeet-complete.module.css';
 
@@ -242,6 +240,60 @@ function chatFromAgentEntries(entries: AgentThreadEntry[]): ChatLine[] {
       role: entry.role as 'user' | 'assistant',
       text: entry.content || '',
     }));
+}
+
+// `response.delta` is an in-memory SSE event, intentionally not a durable
+// thread entry. Keep one replaceable local message for it so the web surface
+// can render first tokens immediately and the next authoritative read can
+// replace it with the persisted assistant message without duplication.
+function mergeAgentLiveResponse(
+  entries: AgentThreadEntry[],
+  runId: string,
+  event: AgentThreadEntry,
+): AgentThreadEntry[] {
+  const id = `live-response-${runId}`;
+  if (event.kind === 'response.reset') return entries.filter((entry) => entry.id !== id);
+  if (event.kind !== 'response.delta') return entries;
+  const delta = typeof event.payload?.delta === 'string' ? event.payload.delta : event.content;
+  if (!delta) return entries;
+  const incomingLiveSequence = Number(event.payload?.liveSequence || 0);
+  const index = entries.findIndex((entry) => entry.id === id);
+  if (index >= 0) {
+    const current = entries[index];
+    const currentLiveSequence = Number(current.payload?.liveSequence || 0);
+    if (
+      incomingLiveSequence > 0 &&
+      currentLiveSequence > 0 &&
+      incomingLiveSequence <= currentLiveSequence
+    ) {
+      return entries;
+    }
+    const next = [...entries];
+    next[index] = {
+      ...current,
+      content: `${current.content || ''}${delta}`,
+      payload: { ...current.payload, ...event.payload, live: true },
+      updatedAt: event.updatedAt,
+    };
+    return next;
+  }
+  return [
+    ...entries,
+    {
+      id,
+      threadId: event.threadId,
+      sequence: event.sequence,
+      kind: 'message',
+      role: 'assistant',
+      content: delta,
+      toolName: null,
+      toolStatus: null,
+      payload: { ...event.payload, live: true },
+      clientTurnId: event.clientTurnId,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
+    },
+  ];
 }
 
 function notificationPreferenceKey(userId: number | undefined) {
@@ -378,13 +430,6 @@ function agentEntriesForDetail(detail: AgentThreadDetail) {
       .map((approval) => approval.proposalId)
       .filter((proposalId): proposalId is string => Boolean(proposalId)),
   );
-  const latestAssistantSequence = detail.entries.reduce(
-    (latest, entry) =>
-      entry.kind === 'message' && entry.role === 'assistant'
-        ? Math.max(latest, entry.sequence)
-        : latest,
-    -1,
-  );
   const normalizedEntries = detail.entries.map((entry) => {
     if (
       entry.kind === 'tool_proposal' &&
@@ -393,14 +438,6 @@ function agentEntriesForDetail(detail: AgentThreadDetail) {
       !pendingProposalIds.has(entry.id)
     ) {
       return { ...entry, toolStatus: 'stale' };
-    }
-    if (
-      draft &&
-      entry.kind === 'message' &&
-      entry.role === 'assistant' &&
-      entry.sequence === latestAssistantSequence
-    ) {
-      return { ...entry, content: reconcileAgentReplyWithDraft(entry.content, draft) };
     }
     if (entry.toolName !== 'classify_demand' || !draft?.demandType) return entry;
     const label =
@@ -411,32 +448,7 @@ function agentEntriesForDetail(detail: AgentThreadDetail) {
           : draft.demandType;
     return { ...entry, content: `已按当前远端草稿归类为「${label}」需求。` };
   });
-  if (
-    !draft?.userConfirmedGenerate ||
-    normalizedEntries.some((entry) => entry.toolName === 'generate_demand_card')
-  )
-    return compactAgentTimelineEntries(normalizedEntries);
-  const latestSequence = normalizedEntries.reduce(
-    (maximum, entry) => Math.max(maximum, entry.sequence || 0),
-    0,
-  );
-  return compactAgentTimelineEntries([
-    ...normalizedEntries,
-    {
-      id: `derived-demand-card-${draft.id}-${draft.updatedAt}`,
-      threadId: detail.thread.id,
-      sequence: latestSequence + 1,
-      kind: 'tool_resolution',
-      role: null,
-      content: '需求卡已经按你的明确要求生成；当前仍未发布。',
-      toolName: 'generate_demand_card',
-      toolStatus: 'completed',
-      payload: { derivedFromRemoteDraft: true, draftSessionId: draft.id },
-      clientTurnId: null,
-      createdAt: draft.updatedAt,
-      updatedAt: draft.updatedAt,
-    } satisfies AgentThreadEntry,
-  ]);
+  return compactAgentTimelineEntries(normalizedEntries);
 }
 
 function Avatar({
@@ -569,6 +581,8 @@ function FitMeetAuthenticatedExperience({
   const [toolProposalDecision, setToolProposalDecision] = useState<'approve' | 'decline' | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [agentSending, setAgentSending] = useState(false);
+  const [agentDraftStructuring, setAgentDraftStructuring] = useState(false);
+  const [agentPendingMessage, setAgentPendingMessage] = useState<string | null>(null);
   const [demand, setDemand] = useState<DemandViewModel>(emptyDemandView);
   const [demands, setDemands] = useState<FitMeetDemand[]>([]);
   const [hasDemand, setHasDemand] = useState(false);
@@ -605,6 +619,8 @@ function FitMeetAuthenticatedExperience({
   const [postPublishing, setPostPublishing] = useState(false);
   const [discoverChannel, setDiscoverChannel] = useState<'moments' | 'social' | 'tasks'>('moments');
   const [memories, setMemories] = useState<FitMeetAgentMemory[]>([]);
+  const [needWikiEntries, setNeedWikiEntries] = useState<AgentNeedWikiItem[]>([]);
+  const [capabilityOfferings, setCapabilityOfferings] = useState<CapabilityOffering[]>([]);
   const [memoryControl, setMemoryControl] = useState<AgentMemoryControl | null>(null);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
@@ -642,6 +658,7 @@ function FitMeetAuthenticatedExperience({
   const activeAgentThreadIdRef = useRef<string | null>(null);
   const agentThreadLoadRequestRef = useRef(0);
   const agentThreadSwitchingRef = useRef(false);
+  const agentSendingAfterSequenceRef = useRef(0);
   const demandLifecyclePreparingRef = useRef(false);
   const agentInboxLoadRequestRef = useRef(0);
   const agentInboxScopeRef = useRef<AgentInboxScope>('unread');
@@ -721,6 +738,8 @@ function FitMeetAuthenticatedExperience({
     const requestId = ++memoryRefreshRequestRef.current;
     if (!requestOwnerId) {
       setMemories([]);
+      setNeedWikiEntries([]);
+      setCapabilityOfferings([]);
       setMemoryControl(null);
       setMemoryLoading(false);
       setMemoryError(null);
@@ -730,9 +749,11 @@ function FitMeetAuthenticatedExperience({
     setMemoryLoading(true);
     setMemoryError(null);
     try {
-      const [memoryResult, controlResult] = await Promise.allSettled([
+      const [memoryResult, controlResult, wikiResult, capabilityResult] = await Promise.allSettled([
         api.listAgentMemories(),
         api.getAgentMemoryControl(),
+        api.listAgentNeedWiki(),
+        api.listCapabilityOfferings(),
       ]);
       if (
         !isCurrentMemoryOwner(requestOwnerId) ||
@@ -742,7 +763,9 @@ function FitMeetAuthenticatedExperience({
       if (memoryResult.status === 'fulfilled')
         setMemories(memoryResult.value.items ?? memoryResult.value.data ?? []);
       if (controlResult.status === 'fulfilled') setMemoryControl(controlResult.value);
-      const failure = [memoryResult, controlResult].find(
+      if (wikiResult.status === 'fulfilled') setNeedWikiEntries(wikiResult.value);
+      if (capabilityResult.status === 'fulfilled') setCapabilityOfferings(capabilityResult.value);
+      const failure = [memoryResult, controlResult, wikiResult, capabilityResult].find(
         (result): result is PromiseRejectedResult => result.status === 'rejected',
       );
       if (failure)
@@ -951,36 +974,7 @@ function FitMeetAuthenticatedExperience({
     async (threadId: string, presentDraft = false) => {
       const requestId = ++agentThreadLoadRequestRef.current;
       activeAgentThreadIdRef.current = threadId;
-      let detail = await api.getAgentThread(threadId);
-      if (requestId !== agentThreadLoadRequestRef.current) return detail;
-      const latestAssistant = [...detail.entries]
-        .sort((left, right) => right.sequence - left.sequence)
-        .find((entry) => entry.kind === 'message' && entry.role === 'assistant' && entry.content);
-      const summaryPatch = reconcileDraftWithAssistantSummary(
-        detail.activeDraft,
-        latestAssistant?.content,
-      );
-      if (summaryPatch && detail.activeDraft) {
-        await api.updateDemandDraftSession(detail.activeDraft.id, summaryPatch);
-        detail = await api.getAgentThread(threadId);
-        if (requestId !== agentThreadLoadRequestRef.current) return detail;
-      }
-      const defaultPatch = editableDefaultDraftPatch(detail.activeDraft);
-      if (defaultPatch && detail.activeDraft) {
-        await api.updateDemandDraftSession(detail.activeDraft.id, defaultPatch);
-        detail = await api.getAgentThread(threadId);
-        if (requestId !== agentThreadLoadRequestRef.current) return detail;
-      }
-      if (detail.activeDraft?.status === 'cardGenerated') {
-        const canonical = canonicalAgentDraftCardPatch(detail.activeDraft);
-        const fieldsChanged =
-          JSON.stringify(canonical.knownFields) !== JSON.stringify(detail.activeDraft.knownFields);
-        if (fieldsChanged || canonical.category !== detail.activeDraft.category) {
-          await api.updateDemandDraftSession(detail.activeDraft.id, canonical);
-          detail = await api.getAgentThread(threadId);
-          if (requestId !== agentThreadLoadRequestRef.current) return detail;
-        }
-      }
+      const detail = await api.getAgentThread(threadId);
       if (
         requestId !== agentThreadLoadRequestRef.current ||
         activeAgentThreadIdRef.current !== threadId
@@ -1378,42 +1372,85 @@ function FitMeetAuthenticatedExperience({
   const sendAgentMessage = async (message = chatInput) => {
     const text = message.trim();
     if (!text || agentSending) return;
+    agentSendingAfterSequenceRef.current = agentEntries.reduce(
+      (maximum, entry) => Math.max(maximum, Number(entry.sequence || 0)),
+      0,
+    );
+    setAgentPendingMessage(text);
     setAgentSending(true);
     setChatInput('');
+    let liveResponseId: string | null = null;
     try {
       const thread = await ensureAgentThread();
       const turn = await api.sendAgentThreadTurn(thread.id, text);
-      let detail = await api.getAgentThread(thread.id);
-      const latestAssistant = [...detail.entries]
-        .sort((left, right) => right.sequence - left.sequence)
-        .find((entry) => entry.kind === 'message' && entry.role === 'assistant' && entry.content);
-      const summaryPatch = reconcileDraftWithAssistantSummary(
-        detail.activeDraft,
-        latestAssistant?.content,
+      liveResponseId = `live-response-${turn.run.id}`;
+      const acceptedEntries = compactAgentTimelineEntries([
+        ...agentEntries,
+        ...(turn.entries || []),
+      ]);
+      setAgentPendingMessage(null);
+      setAgentEntries(acceptedEntries);
+      setChat(chatFromAgentEntries(acceptedEntries));
+      const afterSequence = (turn.entries || []).reduce(
+        (maximum, entry) => Math.max(maximum, Number(entry.sequence || 0)),
+        0,
       );
-      if (summaryPatch && detail.activeDraft) {
-        await api.updateDemandDraftSession(detail.activeDraft.id, summaryPatch);
-        detail = await api.getAgentThread(thread.id);
+      const onLiveEvent = (event: AgentThreadEntry) => {
+        if (event.kind === 'draft_skeleton') {
+          setAgentDraftStructuring(true);
+          return;
+        }
+        if (event.kind === 'draft_ready') {
+          setAgentDraftStructuring(false);
+          const liveDraft = event.payload?.draft;
+          if (liveDraft && typeof liveDraft === 'object' && !Array.isArray(liveDraft)) {
+            const nextDraft = liveDraft as DemandDraftSession;
+            setActiveDraftSession(nextDraft);
+            setDemand(displayDraftSession(nextDraft));
+            setHasDemand(true);
+          }
+          return;
+        }
+        if (event.kind !== 'response.delta' && event.kind !== 'response.reset') return;
+        // Keep token rendering outside the urgent input update lane. This
+        // mirrors the native client’s immediate SSE presentation while
+        // preserving the server as the source of final conversation state.
+        startTransition(() => {
+          setAgentEntries((current) => mergeAgentLiveResponse(current, turn.run.id, event));
+        });
+      };
+      const run = await api.waitForAgentRun(turn.run.id, {
+        afterSequence,
+        timeoutMs: 45_000,
+        onEvent: onLiveEvent,
+      });
+      const detail = await loadAgentThread(thread.id, true);
+      if (!['completed', 'waiting_approval'].includes(run.status)) {
+        notice('小福仍在后台处理，结果会自动回到当前对话。', 'info');
+        void api.waitForAgentRun(run.id, { afterSequence, timeoutMs: 120_000, onEvent: onLiveEvent })
+          .then(() => Promise.all([loadAgentThread(thread.id, true), refreshMemoryCenter()]))
+          .catch(() => undefined);
+        return;
       }
-      const answerPatch = reconcileExplicitDraftAnswer(
-        text,
-        activeDraftSession,
-        detail.activeDraft,
-      );
-      if (answerPatch && detail.activeDraft) {
-        await api.updateDemandDraftSession(detail.activeDraft.id, answerPatch);
-      }
-      detail = await loadAgentThread(thread.id, true);
+      await refreshMemoryCenter();
       const feedback = agentTurnNotice({
-        executionMode: turn.executionMode,
+        executionMode:
+          typeof run.checkpoint?.executionMode === 'string'
+            ? run.checkpoint.executionMode
+            : turn.executionMode ?? undefined,
         activeDraft: detail.activeDraft,
       });
       if (feedback) notice(feedback);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '小福暂时无法回复，请稍后再试。';
       notice(message);
-      setChatInput(text);
+      setAgentPendingMessage(null);
+      setChatInput((current) => (current.trim() ? current : text));
+      if (liveResponseId) {
+        setAgentEntries((current) => current.filter((entry) => entry.id !== liveResponseId));
+      }
     } finally {
+      setAgentDraftStructuring(false);
       setAgentSending(false);
     }
   };
@@ -1450,48 +1487,21 @@ function FitMeetAuthenticatedExperience({
       setDemand(displayDraftSession(saved));
       setHasDemand(agentDraftCanRenderCard(saved));
       setOverlay(null);
-      notice(
-        saved.missingFields.length
-          ? `草稿已同步；小福接下来只会确认：${saved.missingFields[0]}。`
-          : saved.status === 'cardGenerated'
-            ? '需求卡已更新；发布前仍可继续修改。'
-            : '信息已整理好；请由你确认是否生成需求卡。',
-      );
+      notice('需求卡已更新；发布前仍可继续修改。');
     } catch (reason) {
+      if (reason instanceof FitMeetApiError && reason.code === 'DRAFT_REVISION_CONFLICT') {
+        const latest = reason.details && typeof reason.details === 'object' && 'currentItem' in reason.details
+          ? (reason.details as { currentItem?: DemandDraftSession | null }).currentItem
+          : null;
+        if (latest) {
+          setActiveDraftSession(latest);
+          setDemand(displayDraftSession(latest));
+          setHasDemand(true);
+        }
+        notice('草稿已在另一台设备更新，已加载最新版本，请确认后再保存。', 'info');
+        return;
+      }
       notice(reason instanceof Error ? reason.message : '需求草稿未能保存。 ');
-    }
-  };
-
-  const confirmDemandCardDraft = async () => {
-    if (!activeDraftSession) return notice('这段需求还没有同步到小福；请先发送一条需求描述。 ');
-    if (!activeDraftSession.canGenerateCard)
-      return notice(
-        `还差：${activeDraftSession.missingFields.join('、')}。补完后再由你决定是否生成需求卡。`,
-      );
-    if (agentSending) return;
-    setAgentSending(true);
-    try {
-      const thread = await ensureAgentThread();
-      const proposal = latestAgentToolProposal(agentEntries, 'generate_demand_card', [
-        'ready_for_review',
-      ]);
-      if (proposal) {
-        await api.resolveAgentToolProposal(thread.id, proposal.id, 'approve');
-      } else {
-        await api.sendAgentThreadTurn(thread.id, '我确认生成这张需求卡。');
-      }
-      const detail = await loadAgentThread(thread.id, true);
-      if (!detail.activeDraft || !agentDraftCanRenderCard(detail.activeDraft)) {
-        throw new Error('服务端尚未确认需求卡已生成，请继续补充小福提出的关键问题。');
-      }
-      setDemand(displayDraftSession(detail.activeDraft));
-      setHasDemand(true);
-      setOverlay('demand');
-      notice('需求卡已生成，仍未发布。请核对后再决定是否开始匹配。');
-    } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '需求卡暂时无法生成。 ');
-    } finally {
-      setAgentSending(false);
     }
   };
 
@@ -1513,23 +1523,12 @@ function FitMeetAuthenticatedExperience({
         notice('这一步已经在等待确认；没有重复创建新的操作。');
         return;
       }
-      const stableDraft = activeDraftSession
-        ? {
-            ...activeDraftSession,
-            knownFields: { ...activeDraftSession.knownFields },
-            missingFields: [...activeDraftSession.missingFields],
-          }
-        : null;
-      if (action === 'publish' && activeDraftSession?.status === 'cardGenerated') {
-        const canonical = canonicalAgentDraftCardPatch(activeDraftSession);
-        await api.updateDemandDraftSession(activeDraftSession.id, canonical);
-      }
-      await api.sendAgentThreadTurn(thread.id, demandLifecyclePrompt(action));
-      detail = await api.getAgentThread(thread.id);
-      const repair = repairDraftAfterLifecycleTurn(stableDraft, detail.activeDraft);
-      if (repair && detail.activeDraft) {
-        await api.updateDemandDraftSession(detail.activeDraft.id, repair);
-      }
+      const turn = await api.sendAgentThreadTurn(thread.id, demandLifecyclePrompt(action));
+      const afterSequence = (turn.entries || []).reduce(
+        (maximum, entry) => Math.max(maximum, Number(entry.sequence || 0)),
+        0,
+      );
+      await api.waitForAgentRun(turn.run.id, { afterSequence, timeoutMs: 45_000 });
       detail = await loadAgentThread(thread.id, true);
       const proposal = latestAgentToolProposal(detail.entries, 'press_demand_card_button', [
         'awaiting_confirmation',
@@ -1577,6 +1576,7 @@ function FitMeetAuthenticatedExperience({
         ...displayDemand(resolvedDemand),
         status: page.candidates.length ? 'matched' : 'matching',
       });
+      setHasDemand(false);
       setCandidates(nextCandidates);
       setSelectedCandidateId(nextCandidates[0]?.id ?? null);
       notice(
@@ -1612,6 +1612,7 @@ function FitMeetAuthenticatedExperience({
         const result = await api.hideDemand(liveDemand.id);
         setDemands((current) => [result, ...current.filter((item) => item.id !== result.id)]);
         setDemand(displayDemand(result));
+        setHasDemand(false);
         notice('匹配已暂停。');
       } catch (reason) {
         notice(reason instanceof Error ? reason.message : '暂停匹配失败，请稍后再试。');
@@ -1622,6 +1623,7 @@ function FitMeetAuthenticatedExperience({
         const result = await api.cancelDemand(liveDemand.id, '用户主动取消');
         setDemands((current) => [result, ...current.filter((item) => item.id !== result.id)]);
         setDemand(displayDemand(result));
+        setHasDemand(false);
         setCandidates([]);
         notice('需求已取消，后续匹配已停止。');
       } catch (reason) {
@@ -2556,6 +2558,80 @@ function FitMeetAuthenticatedExperience({
     return page;
   };
 
+  const updateNeedWiki = async (id: string, title: string, summary: string) => {
+    const current = needWikiEntries.find((item) => item.id === id);
+    if (!current) return false;
+    try {
+      const response = await api.updateAgentNeedWiki(id, {
+        revision: current.revision,
+        title,
+        summary,
+      });
+      setNeedWikiEntries((items) => [
+        response.item,
+        ...items.filter((item) => item.id !== response.item.id),
+      ]);
+      notice('需求 Wiki 已按你的纠正更新。');
+      return true;
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : '需求 Wiki 未能更新，请刷新后重试。');
+      return false;
+    }
+  };
+
+  const deleteNeedWiki = async (id: string) => {
+    const current = needWikiEntries.find((item) => item.id === id);
+    if (!current) return false;
+    try {
+      await api.deleteAgentNeedWiki(id, current.revision);
+      setNeedWikiEntries((items) => items.filter((item) => item.id !== id));
+      notice('这份需求 Wiki 已删除，后续不会再作为语义上下文使用。');
+      return true;
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : '需求 Wiki 未能删除，请刷新后重试。');
+      return false;
+    }
+  };
+
+  const saveCapabilityOffering = async (draft: {
+    id?: string;
+    displayName: string;
+    domain: string;
+    capabilities: string[];
+    serviceModes: string[];
+    city?: string | null;
+    acceptsNewRequests: boolean;
+  }) => {
+    try {
+      const existing = draft.id
+        ? capabilityOfferings.find((item) => item.id === draft.id)
+        : null;
+      const saved = existing
+        ? await api.updateCapabilityOffering(existing.id, {
+            revision: existing.revision,
+            capabilities: draft.capabilities,
+            serviceModes: draft.serviceModes,
+            city: draft.city,
+            acceptsNewRequests: draft.acceptsNewRequests,
+          })
+        : await api.createCapabilityOffering({
+            providerKind: 'person',
+            displayName: draft.displayName,
+            domain: draft.domain,
+            capabilities: draft.capabilities,
+            serviceModes: draft.serviceModes,
+            city: draft.city,
+            acceptsNewRequests: draft.acceptsNewRequests,
+          });
+      setCapabilityOfferings((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+      notice(existing ? '能力档案已更新。' : '能力档案已创建，后续可用于需求—能力匹配。');
+      return true;
+    } catch (reason) {
+      notice(reason instanceof Error ? reason.message : '能力档案未能保存，请稍后再试。');
+      return false;
+    }
+  };
+
   const syncOpenConversation = useCallback(async () => {
     if (
       !liveApi ||
@@ -2794,9 +2870,15 @@ function FitMeetAuthenticatedExperience({
         }
         return;
       }
+      const retryJsonWrite =
+        reason instanceof FitMeetApiError &&
+        (reason.code === 'INVALID_JSONB_PAYLOAD' || /invalid input syntax for type json/i.test(reason.rawMessage));
       notice(
         reason instanceof Error ? reason.message : '这项操作没有成功提交；请检查后重试。',
         'error',
+        retryJsonWrite
+          ? { label: '重新确认', onSelect: () => setOverlay('toolApproval') }
+          : undefined,
       );
     } finally {
       setToolProposalDecision(null);
@@ -2885,23 +2967,35 @@ function FitMeetAuthenticatedExperience({
     : activeDraftSession?.status === 'cardGenerated'
       ? '需求卡未发布'
       : activeDraftSession?.canGenerateCard
-        ? '等待你确认'
+        ? '可编辑草稿 · 未发布'
         : activeDraftSession
           ? '等待补充'
           : undefined;
+  const currentDemandLifecycleStage: FitMeetContextLifecycleStage = !hasDemand
+    ? 'draft'
+    : ['draft'].includes(effectiveDemandStatus(demand, activeCandidates.length))
+      ? 'draft'
+      : ['published', 'matching', 'hidden', 'cancelled'].includes(
+            effectiveDemandStatus(demand, activeCandidates.length),
+          )
+        ? 'published'
+        : 'matching';
   const demandContextPrimary =
-    activeDraftSession && !activeDraftSession.userConfirmedGenerate
-      ? activeDraftSession.canGenerateCard
-        ? '确认生成需求卡'
-        : '继续补充信息'
+    activeDraftSession && !agentDraftCanRenderCard(activeDraftSession)
+      ? '继续补充信息'
       : effectiveDemandStatus(demand, activeCandidates.length) === 'matched'
         ? `查看 ${activeCandidates.length} 位候选人`
         : effectiveDemandStatus(demand, activeCandidates.length) === 'communicating'
           ? '进入聊天'
           : '查看需求与发布状态';
   const openDemandContextPrimary = () => {
-    if (activeDraftSession && !activeDraftSession.userConfirmedGenerate) {
-      if (activeDraftSession.canGenerateCard) void confirmDemandCardDraft();
+    if (activeDraftSession && !agentDraftCanRenderCard(activeDraftSession)) {
+      return;
+    }
+    if (activeDraftSession && agentDraftCanRenderCard(activeDraftSession) && !hasDemand) {
+      setDemand(displayDraftSession(activeDraftSession));
+      setHasDemand(true);
+      setOverlay('demand');
       return;
     }
     const status = effectiveDemandStatus(demand, activeCandidates.length);
@@ -3100,7 +3194,12 @@ function FitMeetAuthenticatedExperience({
           void (async () => {
             try {
               const thread = await ensureAgentThread();
-              await api.sendAgentThreadTurn(thread.id, `我想先处理这些目标：${selectedSummary}。请帮我一起梳理。`);
+              const turn = await api.sendAgentThreadTurn(thread.id, `我想先处理这些目标：${selectedSummary}。请帮我一起梳理。`);
+              const afterSequence = (turn.entries || []).reduce(
+                (maximum, entry) => Math.max(maximum, Number(entry.sequence || 0)),
+                0,
+              );
+              await api.waitForAgentRun(turn.run.id, { afterSequence, timeoutMs: 45_000 });
               await loadAgentThread(thread.id, true);
             } catch {
               notice('小福工作台已准备好；你可以从一个模糊的想法开始。 ');
@@ -3118,11 +3217,11 @@ function FitMeetAuthenticatedExperience({
       fields={contextFields}
       missingFields={activeDraftSession?.missingFields || []}
       candidateCount={activeCandidates.length}
+      lifecycleStage={currentDemandLifecycleStage}
       primaryLabel={demandContextPrimary}
       primaryDisabled={Boolean(
         activeDraftSession &&
-          !activeDraftSession.userConfirmedGenerate &&
-          !activeDraftSession.canGenerateCard,
+          !agentDraftCanRenderCard(activeDraftSession),
       )}
       onPrimary={openDemandContextPrimary}
       onEdit={() => (hasDemand ? setOverlay('demandEdit') : void prepareDemandDraft())}
@@ -3293,29 +3392,25 @@ function FitMeetAuthenticatedExperience({
               onQuickPrompt={(prompt) => void sendAgentMessage(prompt)}
               replySuggestions={agentReplySuggestions(activeDraftSession)}
               sending={agentSending}
+              draftStructuring={agentDraftStructuring}
+              sendingAfterSequence={agentSendingAfterSequenceRef.current}
+              pendingMessage={agentPendingMessage}
               onVoice={startVoiceInput}
               voiceActive={voiceInput.isListening}
               demand={hasDemand ? demand : null}
-              draftMissingFields={activeDraftSession?.missingFields ?? []}
-              candidateCount={activeCandidates.length}
-              onDemand={() => (hasDemand ? setOverlay('demand') : void prepareDemandDraft())}
-              onDemandList={() =>
-                demands.length
-                  ? setOverlay('demandList')
-                  : hasDemand
-                    ? setOverlay('demand')
-                    : void prepareDemandDraft()
-              }
               onEditDemand={() =>
                 hasDemand ? setOverlay('demandEdit') : void prepareDemandDraft()
               }
-              onCandidates={() => setOverlay('candidate')}
-              onConversation={openDemandConversation}
-              onCreateDemand={() =>
-                activeDraftSession ? void prepareDemandDraft() : void startNewDemand()
-              }
-              onReviewDemandCard={() => void confirmDemandCardDraft()}
+              onPublish={() => void publishDemand()}
+              onHide={() => {
+                if (liveDemand) void changeDemandStatus('hidden');
+                else void requestAgentDemandLifecycle('hide');
+              }}
+              onCancel={() => void changeDemandStatus('cancelled')}
               onToolProposal={openToolProposal}
+              onExploreCandidateKind={(kind) =>
+                void sendAgentMessage(`请保持我刚才的目标和已确认约束，只检索“${fulfillmentCandidateKindLabel(kind)}”类型的真实结果；说明证据和仍缺的验证，不要联系或发布。`)
+              }
               onMemory={() => setOverlay('memory')}
               onHistory={() => setOverlay('history')}
               realtimeStatus={realtimeStatus}
@@ -3575,6 +3670,8 @@ function FitMeetAuthenticatedExperience({
           key={memoryOwnerId ?? 'anonymous'}
           ownerId={memoryOwnerId}
           memories={memoryStateBelongsToCurrentOwner ? memories : []}
+          needWikiEntries={memoryStateBelongsToCurrentOwner ? needWikiEntries : []}
+          capabilityOfferings={memoryStateBelongsToCurrentOwner ? capabilityOfferings : []}
           control={memoryStateBelongsToCurrentOwner ? memoryControl : null}
           loading={Boolean(memoryOwnerId) && (!memoryStateBelongsToCurrentOwner || memoryLoading)}
           error={memoryStateBelongsToCurrentOwner ? memoryError : null}
@@ -3587,6 +3684,9 @@ function FitMeetAuthenticatedExperience({
           onSuppress={suppressMemory}
           onRemoveSuppression={removeMemorySuppression}
           onLoadUsage={loadMemoryUsage}
+          onUpdateNeedWiki={updateNeedWiki}
+          onDeleteNeedWiki={deleteNeedWiki}
+          onSaveCapability={saveCapabilityOffering}
           onRetry={refreshMemoryCenter}
         />
       ) : null}
@@ -3699,6 +3799,93 @@ function FitMeetAuthenticatedExperience({
   );
 }
 
+type AgentRunPresentation = {
+  title: string;
+  detail: string;
+  stage: number;
+  stages: [string, string, string];
+};
+
+function agentRunPresentation(
+  entries: AgentThreadEntry[],
+  afterSequence: number,
+): AgentRunPresentation {
+  const currentTurnEntries = entries.filter(
+    (entry) => Number(entry.sequence || 0) > afterSequence,
+  );
+  const latestTool = [...currentTurnEntries]
+    .reverse()
+    .find((entry) => entry.toolName || entry.kind !== 'message');
+  const toolName = latestTool?.toolName || '';
+  const toolStatus = latestTool?.toolStatus || '';
+
+  if (toolStatus === 'awaiting_confirmation' || toolStatus === 'ready_for_review') {
+    return {
+      title: '内容已整理，等待你确认',
+      detail: '这一步还没有发布、邀请或联系任何人。',
+      stage: 2,
+      stages: ['理解需求', '生成卡片', '等你确认'],
+    };
+  }
+
+  if (/search_candidates|rank_candidates|search_people|search_services|search_activities|search_organizations/.test(toolName)) {
+    return {
+      title: '正在按已确认条件查找候选',
+      detail: '候选会先核对服务端可见性、边界和资料证据，再交给你确认。',
+      stage: /completed|executed|approved/.test(toolStatus) ? 2 : 1,
+      stages: ['确认条件', '筛选候选', '整理理由'],
+    };
+  }
+
+  if (/generate_demand_card|classify_demand|route_demand_flow/.test(toolName)) {
+    return {
+      title: toolName === 'generate_demand_card' ? '正在生成可编辑需求卡' : '已收到，正在整理条件',
+      detail: '正在核对时间、地点、人数与见面边界；卡片生成后仍需你确认。',
+      stage: toolName === 'generate_demand_card' ? 1 : 0,
+      stages: ['理解需求', '生成卡片', '等你确认'],
+    };
+  }
+
+  return {
+    title: '已收到，正在理解你的想法',
+    detail: '小福会先给出可阅读的回复，需要执行的真实动作会单独请你确认。',
+    stage: 0,
+    stages: ['理解需求', '组织回复', '给出下一步'],
+  };
+}
+
+function AgentRunStatus({
+  entries,
+  afterSequence,
+}: {
+  entries: AgentThreadEntry[];
+  afterSequence: number;
+}) {
+  const status = agentRunPresentation(entries, afterSequence);
+  return (
+    <section className={styles.agentRunStatus} role="status" aria-live="polite">
+      <header>
+        <span className={styles.agentRunPulse} aria-hidden="true" />
+        <div>
+          <strong>{status.title}</strong>
+          <small>{status.detail}</small>
+        </div>
+      </header>
+      <ol aria-label="本轮处理进度">
+        {status.stages.map((stage, index) => (
+          <li
+            key={stage}
+            data-state={index < status.stage ? 'complete' : index === status.stage ? 'active' : 'pending'}
+          >
+            <i>{index < status.stage ? <FiCheck /> : index + 1}</i>
+            <span>{stage}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function HomeScreen({
   nickname,
   chat,
@@ -3709,19 +3896,18 @@ function HomeScreen({
   onQuickPrompt,
   replySuggestions,
   sending,
+  draftStructuring,
+  sendingAfterSequence,
+  pendingMessage,
   onVoice,
   voiceActive,
   demand,
-  draftMissingFields,
-  candidateCount,
-  onDemand,
-  onDemandList,
   onEditDemand,
-  onCandidates,
-  onConversation,
-  onCreateDemand,
-  onReviewDemandCard,
+  onPublish,
+  onHide,
+  onCancel,
   onToolProposal,
+  onExploreCandidateKind,
   onMemory,
   onHistory,
   realtimeStatus,
@@ -3735,19 +3921,18 @@ function HomeScreen({
   onQuickPrompt: (prompt: string) => void;
   replySuggestions: string[];
   sending: boolean;
+  draftStructuring: boolean;
+  sendingAfterSequence: number;
+  pendingMessage: string | null;
   onVoice: () => void;
   voiceActive: boolean;
   demand: DemandViewModel | null;
-  draftMissingFields: string[];
-  candidateCount: number;
-  onDemand: () => void;
-  onDemandList: () => void;
   onEditDemand: () => void;
-  onCandidates: () => void;
-  onConversation: () => void;
-  onCreateDemand: () => void;
-  onReviewDemandCard: () => void;
+  onPublish: () => void;
+  onHide: () => void;
+  onCancel: () => void;
   onToolProposal: (proposal: AgentThreadEntry) => void;
+  onExploreCandidateKind: (kind: FulfillmentCandidatePreview['kind']) => void;
   onMemory: () => void;
   onHistory: () => void;
   realtimeStatus: 'offline' | 'connecting' | 'connected' | 'reconnecting';
@@ -3767,7 +3952,7 @@ function HomeScreen({
   const hiddenTimelineCount = Math.max(0, timeline.length - 10);
   const visibleTimeline = showFullTimeline ? timeline : timeline.slice(-10);
   const hasUserMessage = timeline.some((item) => item.kind === 'message' && item.role === 'user');
-  const showWelcome = !hasUserMessage && !demand && !draftMissingFields.length;
+  const showWelcome = !hasUserMessage && !pendingMessage && !demand && !draftStructuring;
 
   return (
     <div className={styles.homeScreen}>
@@ -3816,34 +4001,27 @@ function HomeScreen({
                   <AgentToolTimelineCard
                     key={item.id}
                     entry={item}
-                    onReviewDemandCard={onReviewDemandCard}
                     onOpenProposal={() => onToolProposal(item)}
+                    onExploreCandidateKind={onExploreCandidateKind}
                   />
                 ),
               )}
-              {demand ? (
-                <div className={styles.homeDemandSlot}>
-                  <DemandCard
-                    demand={demand}
-                    candidateCount={candidateCount}
-                    onEdit={onEditDemand}
-                    onOpen={onDemand}
-                    onCandidates={onCandidates}
-                    onConversation={onConversation}
-                  />
-                </div>
-              ) : null}
-              {!demand && draftMissingFields.length ? (
-                <button type="button" className={styles.draftDemandAction} onClick={onCreateDemand}>
-                  <FiFileText />
-                  <span>
-                    <strong>需求草稿已保存</strong>
-                    <small>还需补充：{draftMissingFields.join('、')}</small>
-                  </span>
-                  <FiChevronRight />
-                </button>
+              {pendingMessage ? <AgentMessage role="user" text={pendingMessage} /> : null}
+              {sending ? (
+                <AgentRunStatus entries={entries} afterSequence={sendingAfterSequence} />
               ) : null}
             </div>
+            {demand ? (
+              <div className={styles.homeDemandSlot}>
+                <DemandCard
+                  demand={demand}
+                  onEdit={onEditDemand}
+                  onPublish={onPublish}
+                  onHide={onHide}
+                  onCancel={onCancel}
+                />
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -3884,12 +4062,14 @@ function HomeScreen({
                 onSend();
               }
             }}
-            placeholder={sending ? '小福正在理解和整理…' : `给小福发送消息，${nickname || '朋友'}`}
+            placeholder={`给小福发送消息，${nickname || '朋友'}`}
             aria-label="告诉小福你现在想解决什么"
-            disabled={sending}
+            aria-describedby="agent-composer-guidance"
           />
           <div className={styles.composerTools}>
-            <span>需求整理</span>
+            <span role="status" aria-live="polite">
+              {sending ? '本轮处理中 · 可以先输入下一条' : '普通聊天与需求整理都可以直接说'}
+            </span>
             <button
               type="button"
               aria-label={voiceActive ? '停止语音输入' : '语音输入'}
@@ -3903,22 +4083,42 @@ function HomeScreen({
             </button>
           </div>
         </form>
-        <small>小福可能会理解错信息，请核查重要内容。发布、邀请和联系都由你确认。</small>
+        <small id="agent-composer-guidance">
+          {sending
+            ? '本轮完成后即可发送下一条；已输入内容不会被清空。'
+            : '小福可能会理解错信息，请核查重要内容。发布、邀请和联系都由你确认。'}
+        </small>
       </div>
     </div>
   );
 }
 
 function AgentMessage({ role, text }: { role: 'assistant' | 'user'; text: string }) {
+  const displayText = role === 'assistant' ? agentDisplayText(text) : text;
   return (
     <article className={role === 'user' ? styles.userChat : styles.agentChat}>
       {role === 'assistant' ? <FitMeetBrandIcon size={31} /> : null}
       <div>
-        <p>{text}</p>
+        <p>{displayText}</p>
       </div>
       {role === 'user' ? <Avatar name="我" size={31} /> : null}
     </article>
   );
+}
+
+// The server remains the source of Agent text.  This only presents occasional
+// Markdown-like model formatting as normal conversation rather than exposing
+// implementation punctuation such as **标题** in the chat surface.
+function agentDisplayText(value: string) {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(/(^|\n)\s{0,3}#{1,6}\s+/g, '$1')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/(^|\n)\s*[-*•]\s+/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function toolTitle(toolName: string | null, status: string | null) {
@@ -3936,30 +4136,92 @@ function toolTitle(toolName: string | null, status: string | null) {
     block_user: '拉黑用户',
     report_user: '举报用户',
     patch_social_profile: '更新资料',
+    search_knowledge: '知识检索',
+    search_people: '寻找合适的人',
+    search_services: '寻找专业服务',
+    search_activities: '寻找活动',
+    search_organizations: '寻找机构',
+    evaluate_safety_requirements: '安全要求核验',
   };
   if (status === 'failed') return `${titles[toolName || ''] || '操作'}未提交`;
   if (status === 'stale' || status === 'expired') return `${titles[toolName || ''] || '操作'}已更新`;
   return titles[toolName || ''] || '小福整理的下一步';
 }
 
+type FulfillmentCandidatePreview = {
+  id: string;
+  kind: string;
+  title: string;
+  summary: string;
+  score: number | null;
+  reasons: string[];
+  evidenceCount: number;
+  missingEvidence: string[];
+  nextStep: string;
+};
+
+function textList(value: unknown, limit = 3) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, limit)
+    : [];
+}
+
+function fulfillmentCandidatePreviews(entry: AgentThreadEntry): FulfillmentCandidatePreview[] {
+  if (entry.kind !== 'tool_result') return [];
+  const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : {};
+  const execution = payload.execution;
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) return [];
+  const result = (execution as Record<string, unknown>).result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
+  const candidates = (result as Record<string, unknown>).candidates;
+  if (!Array.isArray(candidates)) return [];
+  return candidates.slice(0, 3).flatMap((candidate, index) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+    const item = candidate as Record<string, unknown>;
+    const title = typeof item.displayName === 'string' ? item.displayName.trim() : '';
+    const candidateId = typeof item.candidateId === 'string' ? item.candidateId.trim() : '';
+    if (!title || !candidateId) return [];
+    const score = typeof item.score === 'number' && Number.isFinite(item.score) ? item.score : null;
+    return [{
+      id: `${entry.id}-${candidateId || index}`,
+      kind: typeof item.candidateKind === 'string' ? item.candidateKind : 'candidate',
+      title,
+      summary: typeof item.summary === 'string' ? item.summary.trim() : '',
+      score,
+      reasons: textList(item.matchReasons),
+      evidenceCount: Array.isArray(item.evidence) ? item.evidence.length : 0,
+      missingEvidence: textList(item.missingEvidence, 2),
+      nextStep: typeof item.recommendedNextStep === 'string' ? item.recommendedNextStep.trim() : '',
+    }];
+  });
+}
+
+function fulfillmentCandidateKindLabel(kind: string) {
+  const labels: Record<string, string> = {
+    person: '人员',
+    provider: '服务者',
+    activity: '活动',
+    organization: '机构',
+    knowledge: '知识来源',
+  };
+  return labels[kind] || '候选';
+}
+
 function AgentToolTimelineCard({
   entry,
-  onReviewDemandCard,
   onOpenProposal,
+  onExploreCandidateKind,
 }: {
   entry: AgentThreadEntry;
-  onReviewDemandCard: () => void;
   onOpenProposal: () => void;
+  onExploreCandidateKind: (kind: FulfillmentCandidatePreview['kind']) => void;
 }) {
   const isProposal = entry.kind === 'tool_proposal';
   const args = proposalArguments(entry);
   const disclosure = agentToolDisclosure(entry.toolName, args);
   const resultLink = agentToolResultLink(entry.payload || {});
+  const candidates = fulfillmentCandidatePreviews(entry);
   const awaitingConfirmation = isProposal && entry.toolStatus === 'awaiting_confirmation';
-  const readyForReview =
-    isProposal &&
-    entry.toolName === 'generate_demand_card' &&
-    entry.toolStatus === 'ready_for_review';
   const isCompleted =
     entry.toolStatus === 'executed' ||
     entry.toolStatus === 'completed' ||
@@ -3968,7 +4230,7 @@ function AgentToolTimelineCard({
     entry.toolStatus === 'awaiting_confirmation'
       ? '等待你的确认'
       : entry.toolStatus === 'ready_for_review'
-        ? '等待生成'
+        ? '草稿已自动整理'
         : entry.toolStatus === 'collecting'
           ? '还在整理'
           : entry.toolStatus === 'executing'
@@ -4003,10 +4265,48 @@ function AgentToolTimelineCard({
       </header>
       <p>
         {entry.content ||
-          (readyForReview
-            ? '信息已整理好，但不会自动生成或发布。'
-            : '小福已把这一步记录在账号级对话里。')}
+          '小福已把这一步记录在账号级对话里。'}
       </p>
+      {candidates.length ? (
+        <section className={styles.fulfillmentCandidates} aria-label="真实检索候选">
+          <div className={styles.fulfillmentCandidateKinds} aria-label="切换检索结果类型">
+            {(['person', 'provider', 'activity', 'organization', 'knowledge'] as const).map((kind) => (
+              <button
+                type="button"
+                key={kind}
+                className={candidates.some((candidate) => candidate.kind === kind) ? styles.fulfillmentCandidateKindActive : undefined}
+                onClick={() => onExploreCandidateKind(kind)}
+              >
+                {fulfillmentCandidateKindLabel(kind)}
+              </button>
+            ))}
+          </div>
+          {candidates.map((candidate) => {
+            const fit = candidateFitPresentation({
+              score: candidate.score,
+              evidenceCount: candidate.evidenceCount,
+              missingEvidenceCount: candidate.missingEvidence.length,
+            });
+            return (
+              <article key={candidate.id} className={styles.fulfillmentCandidate}>
+                <header>
+                  <strong>{candidate.title}</strong>
+                  <span>{fulfillmentCandidateKindLabel(candidate.kind)}</span>
+                  <small data-tone={fit.tone}>{fit.label}</small>
+                </header>
+                {candidate.summary ? <p>{candidate.summary}</p> : null}
+                {candidate.reasons.length ? <ul>{candidate.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}
+                <footer>
+                  <span>{candidate.evidenceCount ? `已用证据 ${candidate.evidenceCount} 项` : '暂无可核验证据'}</span>
+                  <span>{fit.detail}</span>
+                  {candidate.missingEvidence.length ? <span>待核验：{candidate.missingEvidence.join('、')}</span> : null}
+                </footer>
+                {candidate.nextStep ? <small className={styles.fulfillmentNextStep}>{candidate.nextStep}</small> : null}
+              </article>
+            );
+          })}
+        </section>
+      ) : null}
       <details className={styles.toolDisclosure}>
         <summary>为什么出现 · 使用了哪些资料</summary>
         <div>
@@ -4029,11 +4329,6 @@ function AgentToolTimelineCard({
         </time>
         {isCompleted && resultLink ? <Link href={resultLink.href}>{resultLink.label} <FiChevronRight /></Link> : null}
       </footer>
-      {readyForReview ? (
-        <button type="button" className={styles.secondaryButton} onClick={onReviewDemandCard}>
-          由我生成需求卡 <FiChevronRight />
-        </button>
-      ) : null}
       {awaitingConfirmation ? (
         <button
           type="button"
@@ -4049,56 +4344,38 @@ function AgentToolTimelineCard({
 
 function DemandCard({
   demand,
-  candidateCount,
   onEdit,
-  onOpen,
-  onCandidates,
-  onConversation,
+  onPublish,
+  onHide,
+  onCancel,
 }: {
   demand: DemandViewModel;
-  candidateCount: number;
   onEdit: () => void;
-  onOpen: () => void;
-  onCandidates: () => void;
-  onConversation: () => void;
+  onPublish: () => void;
+  onHide: () => void;
+  onCancel: () => void;
 }) {
-  const effectiveStatus = effectiveDemandStatus(demand, candidateCount);
-  const primary =
-    effectiveStatus === 'draft'
-      ? '确认并开始匹配'
-      : effectiveStatus === 'matching' || effectiveStatus === 'published'
-        ? '正在匹配 · 查看详情'
-        : effectiveStatus === 'matched'
-          ? `查看 ${candidateCount} 位候选人`
-          : effectiveStatus === 'invited'
-            ? '邀请已发送 · 等待回应'
-            : effectiveStatus === 'communicating'
-              ? '已匹配 · 进入聊天'
-              : effectiveStatus === 'hidden'
-                ? '匹配已暂停'
-                : '这条需求已取消';
-  const click =
-    effectiveStatus === 'matched'
-      ? onCandidates
-      : effectiveStatus === 'communicating'
-        ? onConversation
-        : onOpen;
-  const dynamicRows = (
-    demand.fields?.length
-      ? demand.fields
-      : [
-          { title: '时间', value: demand.timeWindow },
-          { title: '地点', value: demand.locationText },
-          { title: '同行', value: `${demand.capacityMax} 位伙伴` },
-          { title: '方式', value: demand.durationText },
-        ]
-  ).filter((field) => field.value.trim());
-  const iconFor = (label: string) =>
-    label.includes('时间')
+  const fieldOrder = ['public_summary', 'goal', 'activity', 'location', 'time', 'ability'];
+  const fallbacks: Record<string, { title: string; value: string }> = {
+    public_summary: { title: '公开摘要', value: demand.summary },
+    goal: { title: '核心目的', value: `找到合适伙伴，一起完成“${demand.activityType}”` },
+    activity: { title: '活动', value: demand.activityType },
+    location: { title: '地点', value: demand.locationText },
+    time: { title: '时间', value: demand.timeWindow },
+    ability: { title: '能力', value: demand.durationText },
+  };
+  const facts = new Map((demand.fields || []).map((field) => [field.key, field]));
+  const rows = fieldOrder.map((key) => facts.get(key) || { key, ...fallbacks[key] });
+  const iconFor = (key: string, label: string) =>
+    key === 'public_summary'
+      ? FiFileText
+      : key === 'goal'
+        ? FiStar
+        : key === 'time' || label.includes('时间')
       ? FiCalendar
-      : /地点|目的地|区域/.test(label)
+      : key === 'location' || /地点|目的地|区域/.test(label)
         ? FiMapPin
-        : /人数|同行|偏好|要求/.test(label)
+        : key === 'ability' || /能力|人数|同行|偏好|要求/.test(label)
           ? FiUsers
           : FiClock;
   return (
@@ -4108,38 +4385,38 @@ function DemandCard({
           <FiStar />
         </span>
         <strong>{demand.title}</strong>
-        {effectiveStatus === 'draft' ? (
-          <button type="button" aria-label="编辑需求" onClick={onEdit}>
-            <FiEdit3 />
-          </button>
-        ) : (
-          <FiChevronRight />
-        )}
+        <small className={styles.demandStatus}>草稿 · 未发布</small>
+        <button type="button" aria-label="编辑需求" onClick={onEdit}>
+          <FiEdit3 />
+        </button>
       </header>
-      {dynamicRows.slice(0, 6).map(({ title, value }) => {
-        const RowIcon = iconFor(title);
+      {rows.map(({ key, title, value }) => {
+        const RowIcon = iconFor(key || '', title);
         return (
           <button
             type="button"
             className={styles.demandRow}
             key={`${title}-${value}`}
-            onClick={onOpen}
+            onClick={onEdit}
           >
             <RowIcon />
             <span>{title}</span>
             <strong>{value}</strong>
-            {effectiveStatus === 'draft' ? <FiEdit3 /> : <FiChevronRight />}
+            <FiEdit3 />
           </button>
         );
       })}
-      <button
-        type="button"
-        className={styles.primaryButton}
-        onClick={click}
-        disabled={effectiveStatus === 'cancelled'}
-      >
-        {primary} {effectiveStatus === 'matched' ? <FiChevronRight /> : <FiCheck />}
-      </button>
+      <p className={styles.demandBoundaryNote}>
+        <FiInfo />
+        发布后开始推荐合适的人；地点、时间和能力默认只参与排序，邀请和联系仍由你确认。
+      </p>
+      <div className={styles.demandCardActions}>
+        <button type="button" className={styles.primaryButton} onClick={onPublish}>
+          <FiCheck /> 发布
+        </button>
+        <button type="button" className={styles.secondaryButton} onClick={onHide}>隐藏</button>
+        <button type="button" className={styles.dangerButton} onClick={onCancel}>取消</button>
+      </div>
     </section>
   );
 }
@@ -4752,8 +5029,7 @@ function DemandSheet({
   return (
     <Sheet title="我的需求" onClose={onClose}>
       <p className={styles.sheetLead}>
-        需求先以草稿保存。发布、暂停、取消和查看候选人都对应 iOS 的 demand
-        状态，而不是一次性的展示按钮。
+        这里显示这张需求的真实状态。发布、暂停或取消都需要你再次确认。
       </p>
       <article className={styles.detailCard}>
         <span>当前状态</span>
@@ -4775,9 +5051,19 @@ function DemandSheet({
           </button>
         ) : null}
         {effectiveStatus === 'draft' || effectiveStatus === 'hidden' ? (
-          <button type="button" className={styles.primaryButton} onClick={onPublish}>
+          <button
+            type="button"
+            className={styles.primaryButton}
+            onClick={onPublish}
+            disabled={effectiveStatus === 'draft' && demand.publishable === false}
+          >
             确认并开始匹配
           </button>
+        ) : null}
+        {effectiveStatus === 'draft' && demand.publishable === false ? (
+          <p className={styles.sheetSafety}>
+            <FiAlertTriangle /> 关键事实尚未补齐；草稿可以保存，但暂不能发布。
+          </p>
         ) : null}
         {effectiveStatus === 'matched' ? (
           <button type="button" className={styles.primaryButton} onClick={onCandidates}>
@@ -4809,6 +5095,26 @@ function DemandSheet({
   );
 }
 
+type DemandEditorField = NonNullable<DemandViewModel['fields']>[number];
+
+const lightDemandFieldSpecs: Array<{
+  key: string;
+  title: string;
+  fallback: string;
+}> = [
+  { key: 'goal', title: '核心目的', fallback: '找到合适伙伴，一起完成这件事' },
+  { key: 'activity', title: '活动', fallback: '新的活动' },
+  { key: 'location', title: '地点', fallback: '同城公共场所，具体地点可协商（可编辑默认）' },
+  { key: 'time', title: '时间', fallback: '时间可协商（可编辑默认）' },
+  { key: 'ability', title: '能力', fallback: '能力不限，轻松参与（可编辑默认）' },
+];
+
+const demandTypeOptions = [
+  ['friends', '交友'], ['dating', '认真认识'], ['workout', '运动约练'], ['buddy', '活动搭子'],
+  ['travel', '旅行同行'], ['service', '生活服务'], ['housing', '找房合租'], ['activity', '线下活动'],
+  ['help', '本地求助'], ['other', '其他需求'],
+] as const;
+
 function DemandEditSheet({
   demand,
   onClose,
@@ -4819,41 +5125,101 @@ function DemandEditSheet({
   onSave: (demand: DemandViewModel) => void;
 }) {
   const [draft, setDraft] = useState(demand);
-  const fields = draft.fields || [];
+
+  const fieldFor = (spec: typeof lightDemandFieldSpecs[number]): DemandEditorField =>
+    (draft.fields || []).find((field) => field.key === spec.key) || {
+      key: spec.key,
+      title: spec.title,
+      value: spec.fallback,
+      state: 'defaulted',
+      requirement: spec.key === 'goal' ? 'context' : 'preferred',
+      visibility: 'public',
+      editable: true,
+      evidence: [],
+    };
+
+  const updateField = (spec: typeof lightDemandFieldSpecs[number], value: string) => {
+    setDraft((current) => {
+      const fields = current.fields || [];
+      const index = fields.findIndex((field) => field.key === spec.key);
+      const nextField: DemandEditorField = {
+        ...(index >= 0 ? fields[index] : {}),
+        key: spec.key,
+        title: spec.title,
+        value,
+        state: 'confirmed',
+        requirement: spec.key === 'goal' ? 'context' : 'preferred',
+        visibility: 'public',
+        editable: true,
+        evidence: index >= 0 ? fields[index].evidence || [] : [],
+      };
+      return {
+        ...current,
+        fields: index >= 0
+          ? fields.map((field, fieldIndex) => fieldIndex === index ? nextField : field)
+          : [...fields, nextField],
+      };
+    });
+  };
+
   return (
     <Sheet title="编辑需求草稿" onClose={onClose}>
       <p className={styles.sheetLead}>
-        字段由小福根据这一次真实需求动态整理，不会把 Citywalk、咖啡、服务或求助强行套进运动模板。
+        小福会把你的描述整理成简洁需求卡。地点、时间和能力没有特别要求时可保留默认值。
       </p>
-      <article className={styles.detailCard}>
-        <span>小福理解的需求</span>
-        <strong>{draft.title}</strong>
-        <p>{draft.summary}</p>
-      </article>
-      <div className={styles.draftForm}>
-        {fields.map((field, index) => (
-          <Field label={field.title} key={`${field.title}-${index}`}>
-            <input
-              value={field.value}
-              placeholder={`补充${field.title}`}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  fields: (current.fields || []).map((item, fieldIndex) =>
-                    fieldIndex === index ? { ...item, value: event.target.value } : item,
-                  ),
-                }))
-              }
-            />
-          </Field>
-        ))}
+      <div className={styles.draftIntentEditor}>
+        <Field label="需求类型">
+          <select
+            value={draft.demandType || 'other'}
+            onChange={(event) => setDraft((current) => ({ ...current, demandType: event.target.value }))}
+          >
+            {demandTypeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </Field>
+        <Field label="简短标题">
+          <input
+            value={draft.title}
+            maxLength={28}
+            onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+          />
+        </Field>
+        <Field label="公开摘要">
+          <textarea
+            value={draft.summary}
+            maxLength={88}
+            onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+          />
+        </Field>
       </div>
+
+      <div className={styles.structuredDraftEditor}>
+        {lightDemandFieldSpecs.map((spec) => {
+          const field = fieldFor(spec);
+          return (
+            <article key={spec.key} className={styles.structuredDraftField}>
+              <div>
+                <strong>{spec.title}</strong>
+                {field.state === 'defaulted' ? <span data-state="defaulted">可编辑默认</span> : null}
+              </div>
+              <textarea
+                aria-label={`${spec.title}内容`}
+                value={field.value}
+                placeholder={spec.fallback}
+                disabled={field.editable === false}
+                onChange={(event) => updateField(spec, event.target.value)}
+              />
+            </article>
+          );
+        })}
+      </div>
+
       <button
         type="button"
         className={styles.primaryButton}
+        disabled={!draft.title.trim()}
         onClick={() => onSave({ ...draft, status: 'draft' })}
       >
-        保存并让小福继续理解
+        保存需求卡
       </button>
     </Sheet>
   );
@@ -4991,8 +5357,8 @@ function ToolApprovalSheet({
           </dl>
         ) : null}
       </article>
-      <details className={styles.approvalDisclosure} open>
-        <summary>为什么出现 · 本次会读取什么</summary>
+      <details className={styles.approvalDisclosure}>
+        <summary>查看为什么需要确认 · 读取范围</summary>
         <p>{disclosure.why}</p>
         <ul>{disclosure.sources.map((source) => <li key={source}>{source}</li>)}</ul>
         <small><FiShield /> {disclosure.writeScope}</small>
@@ -5296,6 +5662,8 @@ function formatMemoryDate(value?: string) {
 function MemorySheet({
   ownerId,
   memories,
+  needWikiEntries,
+  capabilityOfferings,
   control,
   loading,
   error,
@@ -5308,10 +5676,15 @@ function MemorySheet({
   onSuppress,
   onRemoveSuppression,
   onLoadUsage,
+  onUpdateNeedWiki,
+  onDeleteNeedWiki,
+  onSaveCapability,
   onRetry,
 }: {
   ownerId: string | null;
   memories: FitMeetAgentMemory[];
+  needWikiEntries: AgentNeedWikiItem[];
+  capabilityOfferings: CapabilityOffering[];
   control: AgentMemoryControl | null;
   loading: boolean;
   error: string | null;
@@ -5331,12 +5704,32 @@ function MemorySheet({
   onSuppress: (id: string) => Promise<boolean>;
   onRemoveSuppression: (memoryType: string) => Promise<void>;
   onLoadUsage: (id: string, cursor?: string) => Promise<AgentMemoryUsagePage>;
+  onUpdateNeedWiki: (id: string, title: string, summary: string) => Promise<boolean>;
+  onDeleteNeedWiki: (id: string) => Promise<boolean>;
+  onSaveCapability: (draft: {
+    id?: string;
+    displayName: string;
+    domain: string;
+    capabilities: string[];
+    serviceModes: string[];
+    city?: string | null;
+    acceptsNewRequests: boolean;
+  }) => Promise<boolean>;
   onRetry: () => Promise<void>;
 }) {
   const [busyAction, setBusyAction] = useState('');
   const [scopeDrafts, setScopeDrafts] = useState<Record<string, AgentMemoryUseScope>>({});
   const [editingId, setEditingId] = useState('');
   const [editValue, setEditValue] = useState('');
+  const [editingWikiId, setEditingWikiId] = useState('');
+  const [wikiTitle, setWikiTitle] = useState('');
+  const [wikiSummary, setWikiSummary] = useState('');
+  const [capabilityName, setCapabilityName] = useState('');
+  const [capabilityDomain, setCapabilityDomain] = useState('general');
+  const [capabilityText, setCapabilityText] = useState('');
+  const [capabilityModes, setCapabilityModes] = useState('线下');
+  const [capabilityCity, setCapabilityCity] = useState('');
+  const [acceptsNewRequests, setAcceptsNewRequests] = useState(true);
   const [confirmingAction, setConfirmingAction] = useState<{
     id: string;
     kind: 'delete' | 'suppress';
@@ -5363,10 +5756,23 @@ function MemorySheet({
     setScopeDrafts({});
     setEditingId('');
     setEditValue('');
+    setEditingWikiId('');
+    setWikiTitle('');
+    setWikiSummary('');
     setConfirmingAction(null);
     setExpandedUsageId('');
     setUsageByMemory({});
   }, [ownerId]);
+
+  useEffect(() => {
+    const offering = capabilityOfferings[0];
+    setCapabilityName(offering?.displayName ?? '');
+    setCapabilityDomain(offering?.domain ?? 'general');
+    setCapabilityText((offering?.capabilities ?? []).join('、'));
+    setCapabilityModes((offering?.serviceModes ?? ['线下']).join('、'));
+    setCapabilityCity(offering?.city ?? '');
+    setAcceptsNewRequests(offering?.acceptsNewRequests ?? true);
+  }, [capabilityOfferings]);
 
   useEffect(() => {
     setScopeDrafts((current) => {
@@ -5488,6 +5894,107 @@ function MemorySheet({
             </ul>
           </div>
         ) : null}
+      </section>
+      <section className={styles.memoryList} aria-label="需求 Wiki">
+        <header>
+          <div>
+            <strong>需求 Wiki</strong>
+            <p>每个完整目标保留一份高价值版本；你可以纠正或删除，它不会自动触发发布和联系。</p>
+          </div>
+        </header>
+        {needWikiEntries.length ? needWikiEntries.map((item) => (
+          <article key={item.id}>
+            <header>
+              <span>版本 {item.revision}</span>
+              <em data-tone={item.status === 'active' ? 'positive' : 'neutral'}>
+                {item.status === 'active' ? '当前目标' : '已归档'}
+              </em>
+            </header>
+            {editingWikiId === item.id ? (
+              <form
+                className={styles.memoryEditForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!wikiTitle.trim() || !wikiSummary.trim()) return;
+                  void execute(`${item.id}:wiki`, async () => {
+                    if (await onUpdateNeedWiki(item.id, wikiTitle.trim(), wikiSummary.trim())) {
+                      setEditingWikiId('');
+                    }
+                  });
+                }}
+              >
+                <label><span>需求名称</span><input value={wikiTitle} maxLength={120} onChange={(event) => setWikiTitle(event.target.value)} /></label>
+                <label><span>高价值摘要</span><textarea value={wikiSummary} maxLength={1500} onChange={(event) => setWikiSummary(event.target.value)} /></label>
+                <div className={styles.inlineActions}>
+                  <button type="submit" disabled={Boolean(busyAction) || !wikiTitle.trim() || !wikiSummary.trim()}>保存纠正</button>
+                  <button type="button" disabled={Boolean(busyAction)} onClick={() => setEditingWikiId('')}>取消</button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <strong>{item.title}</strong>
+                <p>{item.summary}</p>
+                <div className={styles.inlineActions}>
+                  <button type="button" disabled={Boolean(busyAction)} onClick={() => {
+                    setEditingWikiId(item.id);
+                    setWikiTitle(item.title);
+                    setWikiSummary(item.summary);
+                  }}><FiEdit3 /> 修正</button>
+                  <button type="button" disabled={Boolean(busyAction)} onClick={() => void execute(`${item.id}:wiki-delete`, async () => {
+                    await onDeleteNeedWiki(item.id);
+                  })}><FiTrash2 /> 删除</button>
+                </div>
+              </>
+            )}
+          </article>
+        )) : <p className={styles.emptyState}>完整需求会自动整理到这里；零散聊天不会写成 Wiki。</p>}
+      </section>
+      <section className={styles.memoryList} aria-label="能力档案">
+        <header>
+          <div>
+            <strong>我能提供什么</strong>
+            <p>能力档案用于需求—能力匹配，不再只用兴趣相似度。专业服务和机构资质仍需人工审核。</p>
+          </div>
+        </header>
+        <article>
+          <form
+            className={styles.memoryEditForm}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const capabilities = capabilityText.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean);
+              const serviceModes = capabilityModes.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean);
+              if (!capabilityName.trim() || !capabilityDomain.trim() || !capabilities.length) return;
+              const existing = capabilityOfferings[0];
+              void execute('capability-save', async () => {
+                await onSaveCapability({
+                  id: existing?.id,
+                  displayName: capabilityName.trim(),
+                  domain: capabilityDomain.trim(),
+                  capabilities,
+                  serviceModes,
+                  city: capabilityCity.trim() || null,
+                  acceptsNewRequests,
+                });
+              });
+            }}
+          >
+            <label><span>展示名称</span><input value={capabilityName} maxLength={120} onChange={(event) => setCapabilityName(event.target.value)} /></label>
+            <label><span>能力领域</span><input value={capabilityDomain} maxLength={120} placeholder="例如 education.tutoring" onChange={(event) => setCapabilityDomain(event.target.value)} /></label>
+            <label><span>具体能力</span><textarea value={capabilityText} maxLength={800} placeholder="例如 初中数学、英语口语、大型犬照护" onChange={(event) => setCapabilityText(event.target.value)} /></label>
+            <label><span>服务方式</span><input value={capabilityModes} maxLength={240} placeholder="线上、线下、上门" onChange={(event) => setCapabilityModes(event.target.value)} /></label>
+            <label><span>所在城市</span><input value={capabilityCity} maxLength={120} onChange={(event) => setCapabilityCity(event.target.value)} /></label>
+            <label>
+              <span>接受新需求</span>
+              <input type="checkbox" checked={acceptsNewRequests} onChange={(event) => setAcceptsNewRequests(event.target.checked)} />
+            </label>
+            <button type="submit" disabled={Boolean(busyAction) || !capabilityName.trim() || !capabilityText.trim()}>
+              {busyAction === 'capability-save' ? '正在保存…' : capabilityOfferings[0] ? '更新能力档案' : '创建能力档案'}
+            </button>
+            {capabilityOfferings[0] ? (
+              <small>当前状态：{capabilityOfferings[0].status} · 版本 {capabilityOfferings[0].revision}</small>
+            ) : null}
+          </form>
+        </article>
       </section>
       {error ? (
         <div className={styles.memoryLoadError} role="alert">

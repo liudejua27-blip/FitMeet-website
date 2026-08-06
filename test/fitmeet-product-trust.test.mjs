@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  candidateFitPresentation,
   candidateTrustEvidence,
   inboxEventCategory,
   inboxEventDestination,
@@ -10,6 +11,26 @@ import {
   memorySensitivityPresentation,
   memorySourceLabel,
 } from '../lib/fitmeet-product-trust.ts';
+
+test('candidate fit uses honest qualitative bands instead of pseudo-precise percentages', () => {
+  assert.deepEqual(candidateFitPresentation({ score: 0.91, evidenceCount: 3, missingEvidenceCount: 0 }), {
+    label: '高度符合',
+    tone: 'positive',
+    detail: '多项已核验条件一致',
+  });
+  assert.equal(
+    candidateFitPresentation({ score: 76, evidenceCount: 2, missingEvidenceCount: 1 }).label,
+    '基本符合',
+  );
+  assert.equal(
+    candidateFitPresentation({ score: 0.94, evidenceCount: 0, missingEvidenceCount: 2 }).label,
+    '信息不足，建议先确认',
+  );
+  assert.equal(
+    candidateFitPresentation({ score: null, evidenceCount: 4, missingEvidenceCount: 0 }).label,
+    '信息不足，建议先确认',
+  );
+});
 
 test('candidate trust evidence separates used, missing and safety signals without duplicates', () => {
   const evidence = candidateTrustEvidence({

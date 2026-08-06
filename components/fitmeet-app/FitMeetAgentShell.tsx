@@ -18,6 +18,7 @@ import {
   FiRefreshCw,
   FiSearch,
   FiSettings,
+  FiStar,
   FiSun,
   FiUser,
   FiUsers,
@@ -70,6 +71,7 @@ type FitMeetAgentShellProps = {
 type ThreadGroup = { label: string; items: AgentThread[] };
 
 export type FitMeetContextField = { label: string; value: string };
+export type FitMeetContextLifecycleStage = "draft" | "published" | "matching";
 
 export function FitMeetAgentContextPanel({
   title,
@@ -77,6 +79,7 @@ export function FitMeetAgentContextPanel({
   fields,
   missingFields,
   candidateCount,
+  lifecycleStage,
   primaryLabel,
   primaryDisabled = false,
   onPrimary,
@@ -88,6 +91,7 @@ export function FitMeetAgentContextPanel({
   fields: FitMeetContextField[];
   missingFields: string[];
   candidateCount: number;
+  lifecycleStage: FitMeetContextLifecycleStage;
   primaryLabel: string;
   primaryDisabled?: boolean;
   onPrimary: () => void;
@@ -96,6 +100,8 @@ export function FitMeetAgentContextPanel({
 }) {
   const total = Math.max(fields.length + missingFields.length, 1);
   const progress = Math.round((fields.length / total) * 100);
+  const lifecycleIndex = lifecycleStage === "draft" ? 0 : lifecycleStage === "published" ? 1 : 2;
+  const lifecycleLabels = ["草稿", "已发布", "匹配"] as const;
   return <div className={styles.contextPanel}>
     <header>
       <div><strong>当前需求</strong><small>所有真实动作都需要你确认</small></div>
@@ -109,8 +115,17 @@ export function FitMeetAgentContextPanel({
       </dl>
       {candidateCount ? <button type="button" className={styles.contextCandidates} onClick={onOpen}><FiUsers /><span><strong>{candidateCount} 位真实候选人</strong><small>查看共同点与安全边界</small></span><FiChevronDown /></button> : null}
     </section>
+    <section className={styles.contextLifecycle} aria-label="需求生命周期">
+      <strong>发布流程</strong>
+      <ol>
+        {lifecycleLabels.map((label, index) => <li key={label} data-state={index < lifecycleIndex ? "complete" : index === lifecycleIndex ? "active" : "pending"}>
+          <i>{index < lifecycleIndex ? <FiCheck /> : index + 1}</i>
+          <span>{label}</span>
+        </li>)}
+      </ol>
+    </section>
     <div className={styles.contextProgress}>
-      <div><span>完成进度</span><strong>{progress}%</strong></div>
+      <div><span>信息完整度</span><strong>{progress}%</strong></div>
       <i><b style={{ width: `${progress}%` }} /></i>
     </div>
     <p className={styles.contextNote}>确认后只会提交当前这一步；生成需求卡不会自动发布，发送邀请也不会自动开启私信。</p>
@@ -126,6 +141,15 @@ const destinationItems: Array<{
   { id: "moments", label: "发现", icon: FiCompass },
   { id: "messages", label: "消息", icon: FiMessageCircle },
   { id: "profile", label: "我的", icon: FiUser },
+];
+
+const mobileDestinationItems: Array<{
+  id: FitMeetAppDestination;
+  label: string;
+  icon: typeof FiCompass;
+}> = [
+  { id: "home", label: "小福", icon: FiStar },
+  ...destinationItems,
 ];
 
 function dayStart(value: Date) {
@@ -509,7 +533,7 @@ export function FitMeetAgentShell({
       </div> : null}
       <div className={styles.workspaceBody}>{children}</div>
       <nav className={styles.mobilePrimaryNav} aria-label="FitMeet 主导航">
-        {destinationItems.map((item) => {
+        {mobileDestinationItems.map((item) => {
           const Icon = item.icon;
           const active = activeDestination === item.id;
           return <button
