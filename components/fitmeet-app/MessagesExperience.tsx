@@ -1,6 +1,6 @@
 'use client';
 
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
   FiBell,
   FiCalendar,
@@ -19,10 +19,16 @@ import type {
   FitMeetIntentApplication,
   MeetInvitation,
 } from '@/lib/fitmeet-api-contract';
+import {
+  dedupeAndSortConversations,
+  formatInboxTimestamp,
+} from '@/lib/fitmeet-social-state';
 import styles from './fitmeet-complete.module.css';
 import { useAccessibleDialog } from './useAccessibleDialog';
 
 type MessageCategory = 'all' | 'private' | 'interaction' | 'system';
+type MessageHomeCategory = Exclude<MessageCategory, 'all'>;
+type InvitationAction = 'accept' | 'reject' | 'cancel';
 type SearchItem = {
   id: string;
   category: Exclude<MessageCategory, 'all'>;
@@ -71,7 +77,7 @@ export function MessagesExperience({
   currentUserId: number;
   unreadCount: number;
   onConversation: (id: string) => void;
-  onInvitation: (invitation: MeetInvitation, action: 'accept' | 'reject' | 'cancel') => void;
+  onInvitation: (invitation: MeetInvitation, action: InvitationAction) => Promise<void>;
   onIntentApplication: (
     kind: 'social' | 'task',
     application: FitMeetIntentApplication,
@@ -83,12 +89,28 @@ export function MessagesExperience({
   onNotifications: () => void;
   onRefresh: () => Promise<void>;
 }) {
-  const [category, setCategory] = useState<MessageCategory>('all');
+  const [category, setCategory] = useState<MessageHomeCategory>('private');
+  const [searchCategory, setSearchCategory] = useState<MessageCategory>('all');
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [pendingInvitationActions, setPendingInvitationActions] = useState<
+    Partial<Record<number, InvitationAction>>
+  >({});
+  const [invitationActionErrors, setInvitationActionErrors] = useState<
+    Partial<Record<number, string>>
+  >({});
+  const invitationActionLocksRef = useRef(new Set<number>());
   const searchDialogRef = useAccessibleDialog(searchOpen, () => setSearchOpen(false));
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase('zh-CN'));
+  const visibleConversations = useMemo(
+    () => dedupeAndSortConversations(conversations),
+    [conversations],
+  );
   const pendingReceived = invitations.filter(
     (item) => item.status === 'pending' && Number(item.inviteeUserId) === Number(currentUserId),
   );
@@ -110,13 +132,13 @@ export function MessagesExperience({
   // rendered by category but are not added again, otherwise reconnects or
   // partially acknowledged events would double count the badge.
   const totalUnread = unreadCount;
-  const showPrivate = category === 'all' || category === 'private';
-  const showInteraction = category === 'all' || category === 'interaction';
-  const showSystem = category === 'all' || category === 'system';
+  const showPrivate = category === 'private';
+  const showInteraction = category === 'interaction';
+  const showSystem = category === 'system';
 
   const searchItems = useMemo<SearchItem[]>(
     () => [
-      ...conversations.map((item) => ({
+      ...visibleConversations.map((item) => ({
         id: `conversation-${item.id}`,
         category: 'private' as const,
         title: item.title || item.displayName || item.username || 'FitMeet 用户',
@@ -183,7 +205,6 @@ export function MessagesExperience({
     ],
     [
       agentEvents,
-      conversations,
       incomingConnections,
       onConversation,
       onMeet,
@@ -194,13 +215,14 @@ export function MessagesExperience({
       pendingSent,
       pendingSocialApplications,
       pendingTaskApplications,
+      visibleConversations,
     ],
   );
 
   const visibleSearchItems = useMemo(
     () =>
       searchItems.filter((item) => {
-        const categoryMatches = category === 'all' || item.category === category;
+        const categoryMatches = searchCategory === 'all' || item.category === searchCategory;
         const queryMatches =
           !deferredQuery ||
           `${item.title} ${item.subtitle} ${item.category}`
@@ -208,16 +230,52 @@ export function MessagesExperience({
             .includes(deferredQuery);
         return categoryMatches && queryMatches;
       }),
-    [category, deferredQuery, searchItems],
+    [deferredQuery, searchCategory, searchItems],
   );
 
   const refresh = async () => {
     if (refreshing) return;
+    setRefreshNotice(null);
     setRefreshing(true);
     try {
       await onRefresh();
+      setRefreshNotice({ tone: 'success', text: '消息已更新' });
+    } catch {
+      setRefreshNotice({ tone: 'error', text: '刷新失败，请检查网络后重试。' });
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const runInvitationAction = async (invitation: MeetInvitation, action: InvitationAction) => {
+    const invitationId = invitation.id;
+    if (invitationActionLocksRef.current.has(invitationId)) return;
+
+    invitationActionLocksRef.current.add(invitationId);
+    setPendingInvitationActions((current) => ({ ...current, [invitationId]: action }));
+    setInvitationActionErrors((current) => {
+      if (!current[invitationId]) return current;
+      const next = { ...current };
+      delete next[invitationId];
+      return next;
+    });
+
+    try {
+      await onInvitation(invitation, action);
+    } catch {
+      const actionLabel = action === 'accept' ? '接受' : action === 'reject' ? '婉拒' : '撤回';
+      setInvitationActionErrors((current) => ({
+        ...current,
+        [invitationId]: `${actionLabel}邀请失败，请重试。`,
+      }));
+    } finally {
+      invitationActionLocksRef.current.delete(invitationId);
+      setPendingInvitationActions((current) => {
+        if (!current[invitationId]) return current;
+        const next = { ...current };
+        delete next[invitationId];
+        return next;
+      });
     }
   };
 
@@ -231,35 +289,33 @@ export function MessagesExperience({
         <button
           type="button"
           aria-label="刷新消息"
+          aria-busy={refreshing}
+          disabled={refreshing}
           onClick={() => void refresh()}
           className={refreshing ? styles.spinIcon : ''}
         >
           <FiRefreshCw />
         </button>
       </header>
+      {refreshNotice ? (
+        <p
+          className={`${styles.messageRefreshNotice} ${
+            refreshNotice.tone === 'error' ? styles.messageRefreshError : ''
+          }`}
+          role={refreshNotice.tone === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          {refreshNotice.text}
+        </p>
+      ) : null}
       <button type="button" className={styles.searchButton} onClick={() => setSearchOpen(true)}>
         <FiSearch /> 搜索会话、组局或系统通知
       </button>
-      <section className={styles.messageOverview}>
-        <span>
-          <strong>{totalUnread}</strong>
-          <small>未读</small>
-        </span>
-        <span>
-          <strong>{conversations.length}</strong>
-          <small>会话</small>
-        </span>
-        <span>
-          <strong>{interactionCount}</strong>
-          <small>互动</small>
-        </span>
-        <span>
-          <strong>{agentEvents.length}</strong>
-          <small>系统</small>
-        </span>
-      </section>
-      <nav className={styles.messageCategoryTabs} aria-label="消息分类">
-        {(['all', 'private', 'interaction', 'system'] as const).map((item) => (
+      <nav
+        className={`${styles.messageCategoryTabs} ${styles.messageHomeTabs}`}
+        aria-label="消息分类"
+      >
+        {(['private', 'interaction', 'system'] as const).map((item) => (
           <button
             type="button"
             key={item}
@@ -267,83 +323,135 @@ export function MessagesExperience({
             className={category === item ? styles.messageCategoryActive : ''}
             onClick={() => setCategory(item)}
           >
-            {item === 'all'
-              ? '全部'
-              : item === 'private'
-                ? '会话'
-                : item === 'interaction'
-                  ? '互动'
-                  : '系统'}
+            {item === 'private' ? '会话' : item === 'interaction' ? '互动' : '系统'}
           </button>
         ))}
       </nav>
-      <section className={styles.quickMessages}>
-        <button type="button" onClick={onRelationship}>
-          <span>
-            <FiHeart />
-          </span>
-          互动消息{incomingConnections.length ? <small>{incomingConnections.length}</small> : null}
-        </button>
-        <button type="button" onClick={onNotifications}>
-          <span>
-            <FiBell />
-          </span>
-          通知中心{agentEvents.length ? <small>{agentEvents.length}</small> : null}
-        </button>
-        <button type="button" onClick={onMeet}>
-          <span>
-            <FiCalendar />
-          </span>
-          待处理{pendingReceived.length ? <small>{pendingReceived.length}</small> : null}
-        </button>
-      </section>
+      {showInteraction ? (
+        <section className={styles.quickMessages}>
+          <button type="button" onClick={onRelationship}>
+            <span>
+              <FiHeart />
+            </span>
+            好友与申请
+            {incomingConnections.length ? <small>{incomingConnections.length}</small> : null}
+          </button>
+          <button type="button" onClick={onMeet}>
+            <span>
+              <FiCalendar />
+            </span>
+            活动与邀约{pendingReceived.length ? <small>{pendingReceived.length}</small> : null}
+          </button>
+        </section>
+      ) : null}
+      {showSystem ? (
+        <section className={styles.quickMessages}>
+          <button type="button" onClick={onNotifications}>
+            <span>
+              <FiBell />
+            </span>
+            打开通知中心{agentEvents.length ? <small>{agentEvents.length}</small> : null}
+          </button>
+        </section>
+      ) : null}
 
       {showInteraction && pendingReceived.length ? (
         <>
           <h2 className={styles.listTitle}>待处理邀请</h2>
-          {pendingReceived.map((item) => (
-            <article className={styles.inboxAction} key={item.id}>
-              <span>
-                <FiCalendar />
-              </span>
-              <div>
-                <strong>{item.title || 'FitMeet 活动邀请'}</strong>
-                <p>{item.message || '对方邀请你一起参与活动。'}</p>
-                <small>
-                  {item.timeWindow || '时间待确认'} · {item.locationText || '公共区域集合'}
-                </small>
-                <div className={styles.inlineActions}>
-                  <button type="button" onClick={() => onInvitation(item, 'accept')}>
-                    接受
-                  </button>
-                  <button type="button" onClick={() => onInvitation(item, 'reject')}>
-                    婉拒
-                  </button>
+          {pendingReceived.map((item) => {
+            const pendingAction = pendingInvitationActions[item.id];
+            const invitationBusy = Boolean(pendingAction);
+            return (
+              <article className={styles.inboxAction} key={item.id} aria-busy={invitationBusy}>
+                <span>
+                  <FiCalendar />
+                </span>
+                <div>
+                  <strong>{item.title || 'FitMeet 活动邀请'}</strong>
+                  <p>{item.message || '对方邀请你一起参与活动。'}</p>
+                  <small>
+                    {item.timeWindow || '时间待确认'} · {item.locationText || '公共区域集合'}
+                  </small>
+                  <div className={styles.inlineActions} aria-live="polite">
+                    <button
+                      type="button"
+                      disabled={invitationBusy}
+                      className={pendingAction === 'accept' ? styles.spinIcon : ''}
+                      onClick={() => void runInvitationAction(item, 'accept')}
+                    >
+                      {pendingAction === 'accept' ? (
+                        <>
+                          <FiRefreshCw aria-hidden="true" /> 正在接受…
+                        </>
+                      ) : (
+                        '接受'
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={invitationBusy}
+                      className={pendingAction === 'reject' ? styles.spinIcon : ''}
+                      onClick={() => void runInvitationAction(item, 'reject')}
+                    >
+                      {pendingAction === 'reject' ? (
+                        <>
+                          <FiRefreshCw aria-hidden="true" /> 正在婉拒…
+                        </>
+                      ) : (
+                        '婉拒'
+                      )}
+                    </button>
+                  </div>
+                  {invitationActionErrors[item.id] ? (
+                    <small className={styles.messageRefreshError} role="alert">
+                      {invitationActionErrors[item.id]}
+                    </small>
+                  ) : null}
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </>
       ) : null}
       {showInteraction && pendingSent.length ? (
         <>
           <h2 className={styles.listTitle}>等待回应</h2>
-          {pendingSent.map((item) => (
-            <article className={styles.inboxAction} key={item.id}>
-              <span>
-                <FiCalendar />
-              </span>
-              <div>
-                <strong>{item.title || '活动邀请'}</strong>
-                <p>接受前不会开放连续私信。</p>
-                <div className={styles.inlineActions}>
-                  <button type="button" onClick={() => onInvitation(item, 'cancel')}>
-                    撤回邀请
-                  </button>
+          {pendingSent.map((item) => {
+            const pendingAction = pendingInvitationActions[item.id];
+            const invitationBusy = Boolean(pendingAction);
+            return (
+              <article className={styles.inboxAction} key={item.id} aria-busy={invitationBusy}>
+                <span>
+                  <FiCalendar />
+                </span>
+                <div>
+                  <strong>{item.title || '活动邀请'}</strong>
+                  <p>接受前不会开放连续私信。</p>
+                  <div className={styles.inlineActions} aria-live="polite">
+                    <button
+                      type="button"
+                      disabled={invitationBusy}
+                      className={pendingAction === 'cancel' ? styles.spinIcon : ''}
+                      onClick={() => void runInvitationAction(item, 'cancel')}
+                    >
+                      {pendingAction === 'cancel' ? (
+                        <>
+                          <FiRefreshCw aria-hidden="true" /> 正在撤回…
+                        </>
+                      ) : (
+                        '撤回邀请'
+                      )}
+                    </button>
+                  </div>
+                  {invitationActionErrors[item.id] ? (
+                    <small className={styles.messageRefreshError} role="alert">
+                      {invitationActionErrors[item.id]}
+                    </small>
+                  ) : null}
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </>
       ) : null}
       {showInteraction && (pendingSocialApplications.length || pendingTaskApplications.length) ? (
@@ -412,7 +520,10 @@ export function MessagesExperience({
                 <strong>{item.title || 'FitMeet 通知'}</strong>
                 <small>{item.body || item.type || '账号状态已更新'}</small>
               </span>
-              <time className={styles.unreadBadge}>1</time>
+              <span className={styles.messageRowMeta}>
+                {item.createdAt ? <time>{formatInboxTimestamp(item.createdAt)}</time> : null}
+                <i className={styles.unreadBadge}>1</i>
+              </span>
               <FiChevronRight />
             </button>
           ))}
@@ -429,10 +540,10 @@ export function MessagesExperience({
         <>
           <div className={styles.messageListHeader}>
             <h2 className={styles.listTitle}>会话</h2>
-            <small>{conversations.length}</small>
+            <small>{visibleConversations.length}</small>
           </div>
-          {conversations.length ? (
-            conversations.map((item) => (
+          {visibleConversations.length ? (
+            visibleConversations.map((item) => (
               <button
                 type="button"
                 className={styles.messageRow}
@@ -444,11 +555,12 @@ export function MessagesExperience({
                   <strong>{item.title || item.displayName || item.username || 'FitMeet 用户'}</strong>
                   <small>{item.lastMessage || '会话已开放'}</small>
                 </span>
-                {item.unread ? (
-                  <time className={styles.unreadBadge}>{item.unread}</time>
-                ) : (
-                  <time>{item.updatedAt || item.time || ''}</time>
-                )}
+                <span className={styles.messageRowMeta}>
+                  {item.updatedAt || item.time ? (
+                    <time>{formatInboxTimestamp(item.updatedAt || item.time)}</time>
+                  ) : null}
+                  {item.unread ? <i className={styles.unreadBadge}>{item.unread}</i> : null}
+                </span>
                 {item.notificationLevel === 'muted' || item.mutedUntil ? (
                   <FiBell aria-label="会话已静音" />
                 ) : (
@@ -505,9 +617,9 @@ export function MessagesExperience({
                 <button
                   type="button"
                   key={item}
-                  aria-pressed={category === item}
-                  className={category === item ? styles.messageCategoryActive : ''}
-                  onClick={() => setCategory(item)}
+                  aria-pressed={searchCategory === item}
+                  className={searchCategory === item ? styles.messageCategoryActive : ''}
+                  onClick={() => setSearchCategory(item)}
                 >
                   {item === 'all'
                     ? '全部'
@@ -561,7 +673,7 @@ export function MessagesExperience({
                 ))
               ) : (
                 <p className={styles.emptyState}>
-                  {category === 'system' ? '当前没有系统通知。' : '没有找到匹配的消息。'}
+                  {searchCategory === 'system' ? '当前没有系统通知。' : '没有找到匹配的消息。'}
                 </p>
               )}
             </div>

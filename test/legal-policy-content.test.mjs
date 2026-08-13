@@ -7,9 +7,11 @@ const termsRoute = read('app/terms/page.tsx');
 const privacyRoute = read('app/privacy/page.tsx');
 const terms = read('lib/legal/terms-v1.tsx');
 const privacy = read('lib/legal/privacy-v1.tsx');
+const privacyV1_1 = read('lib/legal/privacy-v1-1.tsx');
 const versions = read('app/legal/versions/page.tsx');
 const termsSnapshot = read('app/legal/versions/terms-1.0/page.tsx');
 const privacySnapshot = read('app/legal/versions/privacy-1.0/page.tsx');
+const privacyV1_1Snapshot = read('app/legal/versions/privacy-1.1/page.tsx');
 const thirdParties = read('app/privacy/third-parties/page.tsx');
 const sitemap = read('app/sitemap.ts');
 const footer = read('components/site-shell/SiteFooter.tsx');
@@ -20,17 +22,19 @@ const navigationStyles = read('components/site-shell/site-shell.module.css');
 const siteConfig = read('lib/site-config.ts');
 
 test('legal pages are current documents rather than launch placeholders', () => {
-  for (const source of [terms, privacy]) {
+  for (const source of [terms, privacyV1_1]) {
     assert.match(source, /"现行有效"/);
-    assert.match(source, /version="1\.0"/);
-    assert.match(source, /effectiveDate="2026-07-29"/);
     assert.doesNotMatch(source, /上线前法务审核中|待正式发布|草案 1\.0/);
   }
+  assert.match(terms, /version="1\.0"/);
+  assert.match(terms, /effectiveDate="2026-07-29"/);
+  assert.match(privacyV1_1, /versionOverride="1\.1"/);
+  assert.match(privacyV1_1, /effectiveDateOverride="2026-08-12"/);
 });
 
 test('current routes render immutable versioned policy content', () => {
   assert.match(termsRoute, /TermsPolicyV1/);
-  assert.match(privacyRoute, /PrivacyPolicyV1/);
+  assert.match(privacyRoute, /PrivacyPolicyV1_1/);
   assert.match(termsRoute, /canonical: "\/terms"/);
   assert.match(privacyRoute, /canonical: "\/privacy"/);
 });
@@ -86,6 +90,26 @@ test('privacy policy explicitly covers the App Store privacy contract', () => {
   assert.match(privacy, /15 个工作日/);
 });
 
+test('privacy 1.1 describes manual nearby-radar check-in without changing the 1.0 snapshot', () => {
+  for (const phrase of [
+    '每次希望出现在附近推荐中时',
+    '手动签到',
+    '单次签到有效期为 4 小时',
+    '不提供自动签到、后台续期或永久开启',
+    '可以拒绝定位或拒绝签到',
+    '不影响登录、资料、Agent、非附近匹配、消息等无关功能',
+    '随时在附近雷达或隐私设置中选择“停止展示”',
+    '同样处于有效手动签到状态',
+    '安全规则和双方拉黑过滤',
+    '模糊距离或城市、区域信息',
+    '不会看到你的精确经纬度、实时定位点、移动轨迹',
+  ]) assert.match(privacyV1_1, new RegExp(phrase));
+
+  assert.match(privacySnapshot, /<PrivacyPolicyV1 snapshot/);
+  assert.doesNotMatch(privacySnapshot, /PrivacyPolicyV1_1/);
+  assert.match(privacyV1_1Snapshot, /<PrivacyPolicyV1_1 snapshot/);
+});
+
 test('policy template is semantic, keyboard accessible, and responsive', () => {
   assert.match(policyComponent, /className={styles\.skipLink}/);
   assert.match(policyComponent, /<h2 id={`section-title-/);
@@ -100,9 +124,10 @@ test('policy template is semantic, keyboard accessible, and responsive', () => {
   assert.match(navigationStyles, /\.mobilePanelOpen/);
 });
 
-test('legal version records and fixed 1.0 snapshots are public and linked', () => {
+test('legal version records and fixed snapshots are public and linked', () => {
   assert.match(versions, /法律文件版本记录/);
-  assert.match(versions, /当前 1\.0 是首个正式公开版本/);
+  assert.match(versions, /隐私政策》现行版本为 1\.1/);
+  assert.match(versions, /版本 1\.0 是首个正式公开版本/);
   assert.match(versions, /siteConfig\.legalEntityName/);
   assert.match(versions, /FitMeet 是产品及服务品牌/);
   assert.match(versions, /联系地址尚待根据营业执照和运营资料核验/);
@@ -115,6 +140,7 @@ test('legal version records and fixed 1.0 snapshots are public and linked', () =
     '/legal/versions',
     '/legal/versions/terms-1.0',
     '/legal/versions/privacy-1.0',
+    '/legal/versions/privacy-1.1',
   ]) assert.match(sitemap, new RegExp(path.replaceAll('/', '\\/')));
 });
 
@@ -142,7 +168,7 @@ test('third-party disclosure is specific, clickable, and release-gated where pro
 });
 
 test('public legal routes contain no draft or prelaunch-review placeholder', () => {
-  for (const source of [termsRoute, privacyRoute, terms, privacy, versions, termsSnapshot, privacySnapshot, thirdParties]) {
+  for (const source of [termsRoute, privacyRoute, terms, privacy, privacyV1_1, versions, termsSnapshot, privacySnapshot, privacyV1_1Snapshot, thirdParties]) {
     assert.doesNotMatch(source, /草案|上线前法务审核中|待正式发布/);
   }
 });

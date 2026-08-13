@@ -15,7 +15,7 @@ const sections = [
     title: "现行文件",
     body: [
       <>《FitMeet 用户服务协议》现行版本为 1.0，更新及生效日期为 2026-07-29。你可以<Link href="/terms">阅读现行文本</Link>，或打开<Link href="/legal/versions/terms-1.0">版本 1.0 固定快照</Link>。</>,
-      <>《FitMeet 隐私政策》现行版本为 1.0，更新及生效日期为 2026-07-29。你可以<Link href="/privacy">阅读现行文本</Link>，或打开<Link href="/legal/versions/privacy-1.0">版本 1.0 固定快照</Link>。</>,
+      <>《FitMeet 隐私政策》现行版本为 1.1，更新及生效日期为 2026-08-12。你可以<Link href="/privacy">阅读现行文本</Link>，或打开<Link href="/legal/versions/privacy-1.1">版本 1.1 固定快照</Link>。版本 1.0 已于 2026-08-11 结束现行效力，其<Link href="/legal/versions/privacy-1.0">固定快照仍可查阅</Link>。</>,
       <>第三方服务的处理对象、场景、信息种类和启用条件由<Link href="/privacy/third-parties">《第三方信息处理与共享清单》</Link>持续公开；清单发生实质变化时，我们会同步评估是否需要更新隐私政策版本。</>,
     ],
   },
@@ -25,7 +25,7 @@ const sections = [
     body: [
       "每次正式发布会记录文件名称、版本号、更新日期、生效日期和固定快照地址。新版本不会覆盖已经公开的旧版本快照。",
       "涉及处理目的、敏感个人信息、共享对象、用户权利、责任边界或争议解决的重要变化时，我们会通过应用内弹窗、站内通知或官网显著提示；依法需要重新同意时，会保存用户确认的版本和时间。",
-      "当前 1.0 是首个正式公开版本，因此没有早于 1.0 的已废止版本。未来版本生效后，本页会同时标明现行版本与已失效版本的适用期间。",
+      "版本 1.0 是首个正式公开版本；隐私政策 1.1 自 2026-08-12 起生效，并增加附近雷达手动签到、单次 4 小时、可拒绝和随时停止等处理规则。旧版本固定快照不会被新版本覆盖。",
     ],
   },
   {
@@ -50,9 +50,9 @@ export default function LegalVersionsPage() {
       relatedHref="/terms"
       relatedLabel="现行用户协议"
       navigationContext="法律文件版本记录"
-      version="1.0"
-      effectiveDate="2026-07-29"
-      updatedAt="2026-07-29"
+      version="1.1"
+      effectiveDate="2026-08-12"
+      updatedAt="2026-08-12"
       resources={[
         { href: "/privacy", label: "现行隐私政策" },
         { href: "/privacy/third-parties", label: "第三方信息处理与共享清单" },

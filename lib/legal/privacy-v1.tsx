@@ -2,7 +2,7 @@ import Link from "next/link";
 import { EditorialPolicyPage } from "@/components/editorial-policy/EditorialPolicyPage";
 import { siteConfig } from "@/lib/site-config";
 
-const sections = [
+export const privacyPolicyV1Sections = [
   {
     index: "01",
     title: "处理者与适用范围",
@@ -177,14 +177,28 @@ const sections = [
   },
 ];
 
-export function PrivacyPolicyV1({ snapshot = false }: { snapshot?: boolean }) {
+export function PrivacyPolicyV1({
+  snapshot = false,
+  sectionsOverride = privacyPolicyV1Sections,
+  versionOverride = "1.0",
+  effectiveDateOverride = "2026-07-29",
+  updatedAtOverride = "2026-07-29",
+  statusOverride,
+}: {
+  snapshot?: boolean;
+  sectionsOverride?: typeof privacyPolicyV1Sections;
+  versionOverride?: string;
+  effectiveDateOverride?: string;
+  updatedAtOverride?: string;
+  statusOverride?: string;
+}) {
   return (
     <EditorialPolicyPage
       eyebrow="隐私政策"
       title={["信息被说明", "选择被保留"]}
       introduction="逐项说明 FitMeet 如何处理账号、资料、近似位置、社交内容与 Agent 上下文"
-      status={snapshot ? "版本 1.0 历史快照" : "现行有效"}
-      sections={sections}
+      status={statusOverride ?? (snapshot ? "版本 1.0 历史快照" : "现行有效")}
+      sections={sectionsOverride}
       notice={{
         title: "隐私概要",
         body: [
@@ -196,9 +210,9 @@ export function PrivacyPolicyV1({ snapshot = false }: { snapshot?: boolean }) {
       relatedHref="/terms"
       relatedLabel="用户服务协议"
       navigationContext="隐私政策"
-      version="1.0"
-      effectiveDate="2026-07-29"
-      updatedAt="2026-07-29"
+      version={versionOverride}
+      effectiveDate={effectiveDateOverride}
+      updatedAt={updatedAtOverride}
       resources={snapshot ? [
         { href: "/privacy", label: "查看现行隐私政策" },
         { href: "/legal/versions", label: "返回版本记录" },

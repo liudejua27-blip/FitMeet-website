@@ -101,7 +101,7 @@ test('registration consent is created only by an explicit checked choice', () =>
   );
   assert.deepEqual(consent, {
     termsVersion: '1.0',
-    privacyVersion: '1.0',
+    privacyVersion: '1.1',
     termsAccepted: true,
     privacyAccepted: true,
     acceptedAt: '2026-07-29T10:11:12.123Z',
@@ -113,7 +113,7 @@ test('same-origin registration boundary validates and allowlists legal consent',
   const valid = validateFitMeetRegistrationConsent(
     {
       termsVersion: '1.0',
-      privacyVersion: '1.0',
+      privacyVersion: '1.1',
       termsAccepted: true,
       privacyAccepted: true,
       acceptedAt: '2026-07-29T10:11:12.123Z',

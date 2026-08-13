@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   agentToolDisclosure,
@@ -8,6 +9,23 @@ import {
   updateConversationDraft,
   visibleAgentArguments,
 } from '../lib/fitmeet-interaction-state.ts';
+
+const completeExperienceSource = readFileSync(
+  new URL('../components/fitmeet-app/FitMeetCompleteExperience.tsx', import.meta.url),
+  'utf8',
+);
+const profileExperienceSource = readFileSync(
+  new URL('../components/fitmeet-app/ProfileExperience.tsx', import.meta.url),
+  'utf8',
+);
+
+function sourceBetween(source, start, end) {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  assert.notEqual(startIndex, -1, `missing source start: ${start}`);
+  assert.notEqual(endIndex, -1, `missing source end: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
 
 test('feedback uses distinct semantic tones instead of one success icon', () => {
   assert.equal(feedbackToneForMessage('好友申请已发送。'), 'success');
@@ -61,4 +79,61 @@ test('conversation drafts are scoped by conversation and invalid storage fails c
   });
   assert.deepEqual(parseConversationDrafts('{invalid'), {});
   assert.deepEqual(parseConversationDrafts(JSON.stringify({ good: '保留', bad: 12 })), { good: '保留' });
+});
+
+test('opening an invitation draft does not record an invited decision before server confirmation', () => {
+  const createInvite = sourceBetween(
+    completeExperienceSource,
+    'const createInvite = () => {',
+    'const sendInvite = async (message: string) => {',
+  );
+  const sendInvite = sourceBetween(
+    completeExperienceSource,
+    'const sendInvite = async (message: string) => {',
+    'const updateMeet = async',
+  );
+
+  assert.doesNotMatch(createInvite, /recordCandidate\([^)]*'invited'/);
+  assert.match(sendInvite, /await api\.createInvitation/);
+  assert.match(sendInvite, /recordCandidate\(selectedCandidate\.id, 'invited'\)/);
+  assert.match(sendInvite, /inviteSendingRef\.current/);
+});
+
+test('agent turns and demand matches reject late responses from an obsolete scope', () => {
+  const sendAgentMessage = sourceBetween(
+    completeExperienceSource,
+    'const sendAgentMessage = async',
+    'const startVoiceInput = () => {',
+  );
+  const activateDemand = sourceBetween(
+    completeExperienceSource,
+    'const activateDemand = useCallback(',
+    'const openDemandRecord = useCallback(',
+  );
+  const syncDemandMatches = sourceBetween(
+    completeExperienceSource,
+    'const syncDemandMatches = async',
+    'const pollDemandMatches =',
+  );
+
+  assert.match(sendAgentMessage, /const sendRequestId = \+\+agentSendRequestRef\.current/);
+  assert.match(sendAgentMessage, /if \(!operationIsCurrent\(\)\) return;/);
+  assert.match(activateDemand, /const activationGeneration = \+\+demandMatchPollGenerationRef\.current/);
+  assert.match(activateDemand, /activeDemandIdRef\.current !== record\.id/);
+  assert.match(syncDemandMatches, /activeDemandIdRef\.current !== demandId/);
+});
+
+test('destructive and write-in-progress sheets cannot close through Escape or the backdrop', () => {
+  const sheet = sourceBetween(
+    completeExperienceSource,
+    'function Sheet({',
+    'type FitMeetCompleteExperienceProps',
+  );
+  assert.match(sheet, /useAccessibleDialog\(true, guardedClose\)/);
+  assert.match(sheet, /onMouseDown={guardedClose}/);
+  assert.match(sheet, /aria-busy={closeDisabled}/);
+  assert.match(
+    profileExperienceSource,
+    /closeDisabled={accountOperation === "delete"}/,
+  );
 });

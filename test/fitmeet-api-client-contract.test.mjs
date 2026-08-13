@@ -75,6 +75,57 @@ test('relationship writes preserve paths, explicit confirmation payloads and ide
   calls.forEach(assertAuthorized);
 });
 
+test('meet invitation retries can reuse one caller-owned idempotency key', async () => {
+  const payload = {
+    inviteeUserId: 42,
+    demandId: 'demand-7',
+    candidateRecordId: 'candidate-9',
+    title: '周末一起打羽毛球',
+    message: '周六下午方便吗？',
+    activityType: 'badminton',
+    city: '青岛',
+    locationText: '市南区',
+    timeWindow: '周六下午',
+    capacityMax: 2,
+    sourceType: 'agent_candidate',
+    sourceId: 'demand-7',
+  };
+  const calls = await recordRequests(async (api) => {
+    await api.createInvitation(payload, 'web-invite-stable-operation-1');
+    await api.createInvitation(payload, 'web-invite-stable-operation-1');
+  });
+
+  assert.equal(calls.length, 2);
+  calls.forEach((call) => {
+    assert.equal(call.init.method, 'POST');
+    assert.equal(call.url.replace(baseUrl, ''), '/meet-invitations');
+    assert.equal(call.init.headers['Idempotency-Key'], 'web-invite-stable-operation-1');
+    assert.deepEqual(body(call), payload);
+    assertAuthorized(call);
+  });
+});
+
+test('meet invitation decisions use one stable key per invitation and action', async () => {
+  const calls = await recordRequests(async (api) => {
+    await api.acceptInvitation(11);
+    await api.rejectInvitation(12);
+    await api.cancelInvitation(13);
+  });
+
+  assert.deepEqual(
+    calls.map((call) => [
+      call.url.replace(baseUrl, ''),
+      call.init.headers['Idempotency-Key'],
+    ]),
+    [
+      ['/meet-invitations/11/accept', 'web-invite-accept-11'],
+      ['/meet-invitations/12/reject', 'web-invite-reject-12'],
+      ['/meet-invitations/13/cancel', 'web-invite-cancel-13'],
+    ],
+  );
+  calls.forEach(assertAuthorized);
+});
+
 test('multiplayer groups keep creation, join, approval, leave and cancellation as explicit writes', async () => {
   const calls = await recordRequests(async (api) => {
     await api.listGroups('mine');
@@ -277,6 +328,61 @@ test('notification preferences stay server-backed and update all web categories 
   calls.forEach(assertAuthorized);
 });
 
+test('account deletion requires a current email-password reauthentication token bound to the delete request', async () => {
+  const calls = await recordRequests(
+    async (api) => {
+      const challenge = await api.requestAccountReauthChallenge('email_password');
+      assert.equal(challenge.method, 'email_password');
+      const verification = await api.verifyAccountReauthChallenge(
+        challenge.challengeId,
+        challenge.method,
+        'current-password',
+      );
+      assert.equal(verification.action, 'account.delete');
+      const deletion = await api.deleteAccount(verification.reauthToken);
+      assert.equal(deletion.status, 'deleted');
+    },
+    (_call, index) => {
+      if (index === 0)
+        return response({
+          challengeId: 'challenge/1',
+          action: 'account.delete',
+          method: 'email_password',
+          expiresAt: '2099-07-29T10:05:00.000Z',
+          expiresIn: 300,
+          maskedDestination: 'su***@fitmeet.cn',
+        }, 201);
+      if (index === 1)
+        return response({
+          reauthToken: 'one-time-token',
+          action: 'account.delete',
+          expiresAt: '2099-07-29T10:03:00.000Z',
+          expiresIn: 180,
+        });
+      return response({ status: 'deleted', deletedAt: '2099-07-29T10:02:00.000Z' });
+    },
+  );
+
+  assert.deepEqual(
+    calls.map((call) => [call.init.method, call.url.replace(baseUrl, '')]),
+    [
+      ['POST', '/auth/reauth/challenges'],
+      ['POST', '/auth/reauth/challenges/challenge%2F1/verify'],
+      ['DELETE', '/users/me'],
+    ],
+  );
+  assert.deepEqual(body(calls[0]), { action: 'account.delete', method: 'email_password' });
+  assert.deepEqual(body(calls[1]), { password: 'current-password' });
+  assert.equal(calls[2].init.body, undefined);
+  assert.equal(calls[2].init.headers['X-FitMeet-Reauth-Token'], 'one-time-token');
+  calls.forEach(assertAuthorized);
+});
+
+test('account deletion rejects an empty reauthentication token before making a request', () => {
+  const api = new FitMeetApiClient(() => 'contract-token', baseUrl);
+  assert.throws(() => api.deleteAccount('   '), /身份验证已失效/);
+});
+
 test('memory decisions target the exact proposal and unwrap the server mutation envelope', async () => {
   let confirmed;
   let rejected;
@@ -394,6 +500,87 @@ test('memory control keeps scope, usage and suppression writes owner-scoped and 
   assert.equal(confirmed.useScope, 'agent_only');
   assert.equal(updated.revision, 5);
   assert.equal(usage.items[0].purpose, 'matching');
+});
+
+test('Agent data access settings and audit log stay revision-bound and owner-scoped', async () => {
+  const settings = {
+    profileConfirmed: true,
+    capabilityOfferings: true,
+    verificationBadges: true,
+    demands: true,
+    needWiki: true,
+    confirmedMemory: true,
+    publicPosts: false,
+    fulfillmentHistory: false,
+    relationshipSummary: false,
+    personalizedMatching: true,
+    privateMessages: 'shared_only',
+    revision: 2,
+    updatedAt: '2026-08-09T03:00:00.000Z',
+  };
+  const update = {
+    expectedRevision: 2,
+    profileConfirmed: true,
+    capabilityOfferings: false,
+    verificationBadges: true,
+    demands: true,
+    needWiki: false,
+    confirmedMemory: true,
+    publicPosts: false,
+    fulfillmentHistory: false,
+    relationshipSummary: false,
+    personalizedMatching: true,
+    privateMessages: 'disabled',
+  };
+  let loaded;
+  let updated;
+  let log;
+  const calls = await recordRequests(
+    async (api) => {
+      loaded = await api.getAgentDataAccess();
+      updated = await api.updateAgentDataAccess(update);
+      log = await api.getAgentDataAccessLog('  cursor/1  ', 999);
+    },
+    (_call, index) => {
+      if (index === 0) return response(settings);
+      if (index === 1)
+        return response({
+          ...settings,
+          ...update,
+          revision: 3,
+          updatedAt: '2026-08-09T03:01:00.000Z',
+        });
+      return response({
+        items: [
+          {
+            id: 'access-log-1',
+            purpose: 'matching',
+            sources: ['confirmed_memory', 'demands'],
+            subjectType: 'demand',
+            subjectId: 'demand/1',
+            createdAt: '2026-08-09T03:02:00.000Z',
+          },
+        ],
+        nextCursor: null,
+      });
+    },
+  );
+
+  assert.deepEqual(
+    calls.map((call) => [call.init.method, call.url.replace(baseUrl, '')]),
+    [
+      ['GET', '/users/me/agent-data-access'],
+      ['PATCH', '/users/me/agent-data-access'],
+      ['GET', '/users/me/agent-data-access-log?limit=100&cursor=cursor%2F1'],
+    ],
+  );
+  assert.deepEqual(body(calls[1]), update);
+  assert.equal(calls[1].init.headers['Idempotency-Key'], 'web-agent-data-access-update-2');
+  calls.forEach(assertAuthorized);
+  assert.equal(loaded.revision, 2);
+  assert.equal(updated.privateMessages, 'disabled');
+  assert.equal(updated.revision, 3);
+  assert.deepEqual(log.items[0].sources, ['confirmed_memory', 'demands']);
 });
 
 test('global search sends one authenticated permission-filtered query contract', async () => {
@@ -556,6 +743,35 @@ test('database/provider JSON diagnostics are converted to a useful retry message
     fitMeetUserFacingErrorMessage('双方尚未成为好友', 'RELATIONSHIP_REQUIRED'),
     '双方尚未成为好友',
   );
+});
+
+test('demand-card confirmation uses the dedicated verified action and authoritative matches routes', async () => {
+  const calls = await recordRequests(async (api) => {
+    await api.performAgentDemandDraftAction('thread/1', 'draft/2', {
+      action: 'publish',
+      cardId: 'card-3',
+      expectedCardStatus: 'cardGenerated',
+    });
+    await api.listDemandMatches('demand/4');
+  });
+
+  assert.deepEqual(
+    calls.map((call) => [call.init.method, call.url.replace(baseUrl, '')]),
+    [
+      ['POST', '/users/me/agent-threads/thread%2F1/demand-drafts/draft%2F2/actions'],
+      ['GET', '/demands/demand%2F4/matches?limit=20'],
+    ],
+  );
+  assert.deepEqual(body(calls[0]), {
+    action: 'publish',
+    cardId: 'card-3',
+    expectedCardStatus: 'cardGenerated',
+  });
+  assert.equal(
+    calls[0].init.headers['Idempotency-Key'],
+    'web-agent-demand-draft-thread/1-draft/2-publish-cardGenerated',
+  );
+  calls.forEach(assertAuthorized);
 });
 
 test('Agent SSE returns immediately when a real action is waiting for confirmation', async () => {
@@ -783,7 +999,7 @@ test('formal web email authentication uses same-origin routes and never returns 
       name: '新用户',
       consents: {
         termsVersion: '1.0',
-        privacyVersion: '1.0',
+        privacyVersion: '1.1',
         termsAccepted: true,
         privacyAccepted: true,
         acceptedAt: '2026-07-29T10:11:12.123Z',

@@ -1,5 +1,6 @@
 import type {
   AgentThreadEntry,
+  DemandMatchesResponse,
   DemandDraftSession,
   DemandDraftUpdatePayload,
 } from "./fitmeet-api-contract";
@@ -272,8 +273,156 @@ export function demandForAgentThread<
 
 export function agentDraftCanRenderCard(session: DemandDraftSession | null | undefined) {
   if (!session) return false;
-  if (["published", "hidden", "canceled", "cancelled"].includes(session.status)) return false;
+  const lifecycleStatus = session.status.replace(/[\s_-]/g, "").toLowerCase();
+  if (
+    [
+      "published",
+      "matching",
+      "candidatepool",
+      "hascandidates",
+      "invited",
+      "matchedcommunicating",
+      "hidden",
+      "canceled",
+      "cancelled",
+      "closed",
+    ].includes(lifecycleStatus)
+  )
+    return false;
   return true;
+}
+
+export type DemandMatchPhase =
+  | "matching"
+  | "waiting"
+  | "matched"
+  | "failed"
+  | "hidden"
+  | "cancelled";
+
+export function demandMatchPhase({
+  demandStatus,
+  demandVisibility,
+  matchJobStatus,
+  candidateCount = 0,
+}: {
+  demandStatus?: string | null;
+  demandVisibility?: string | null;
+  matchJobStatus?: string | null;
+  candidateCount?: number | null;
+}): DemandMatchPhase {
+  const demand = clean(demandStatus).replace(/[\s_-]/g, "").toLowerCase();
+  const visibility = clean(demandVisibility).toLowerCase();
+  const job = clean(matchJobStatus).replace(/[\s_-]/g, "").toLowerCase();
+  if (["canceled", "cancelled", "closed"].includes(demand)) return "cancelled";
+  if (demand === "hidden" || visibility === "hidden") return "hidden";
+  if (
+    Number(candidateCount || 0) > 0 ||
+    ["hascandidates", "invited", "matchedcommunicating", "matched"].includes(demand)
+  )
+    return "matched";
+  if (job === "failed") return "failed";
+  if (demand === "candidatepool" || job === "succeeded") return "waiting";
+  return "matching";
+}
+
+export type DemandMatchGenerationFailureCode =
+  | "missing_demand_id"
+  | "missing_demand_revision"
+  | "missing_match_job"
+  | "missing_match_job_id"
+  | "demand_id_mismatch"
+  | "demand_revision_mismatch"
+  | "candidate_job_mismatch"
+  | "candidate_revision_mismatch";
+
+export type DemandMatchGenerationGuard =
+  | {
+      ok: true;
+      code: null;
+      message: null;
+      requiresResync: false;
+      demandId: string;
+      demandRevision: number;
+      matchJobId: string;
+      candidates: DemandMatchesResponse["candidates"];
+    }
+  | {
+      ok: false;
+      code: DemandMatchGenerationFailureCode;
+      message: string;
+      requiresResync: true;
+      demandId: string | null;
+      demandRevision: number | null;
+      matchJobId: string | null;
+      candidates: [];
+    };
+
+function invalidDemandMatchGeneration(
+  code: DemandMatchGenerationFailureCode,
+  response: DemandMatchesResponse,
+): DemandMatchGenerationGuard {
+  return {
+    ok: false,
+    code,
+    message: "匹配结果的代次信息不完整或已过期，请重新同步。",
+    requiresResync: true,
+    demandId: clean(response.demand?.id) || null,
+    demandRevision: Number.isInteger(response.demand?.revision)
+      ? Number(response.demand.revision)
+      : null,
+    matchJobId: clean(response.matchJob?.id) || null,
+    candidates: [],
+  };
+}
+
+/**
+ * Fail closed unless the demand, matching job and returned candidates all
+ * describe the same server-owned generation. This prevents a late response
+ * from an older job/revision from replacing the current candidate set.
+ */
+export function guardDemandMatchesGeneration(
+  response: DemandMatchesResponse,
+): DemandMatchGenerationGuard {
+  const demandId = clean(response.demand?.id);
+  if (!demandId) return invalidDemandMatchGeneration("missing_demand_id", response);
+
+  const demandRevision = response.demand?.revision;
+  if (!Number.isInteger(demandRevision) || Number(demandRevision) <= 0) {
+    return invalidDemandMatchGeneration("missing_demand_revision", response);
+  }
+
+  const matchJob = response.matchJob;
+  if (!matchJob) return invalidDemandMatchGeneration("missing_match_job", response);
+  const matchJobId = clean(matchJob.id);
+  if (!matchJobId) return invalidDemandMatchGeneration("missing_match_job_id", response);
+  if (clean(matchJob.demandId) !== demandId) {
+    return invalidDemandMatchGeneration("demand_id_mismatch", response);
+  }
+  if (!Number.isInteger(matchJob.demandRevision) || matchJob.demandRevision !== demandRevision) {
+    return invalidDemandMatchGeneration("demand_revision_mismatch", response);
+  }
+
+  const candidates = Array.isArray(response.candidates) ? response.candidates : [];
+  for (const candidate of candidates) {
+    if (clean(candidate.matchJobId) !== matchJobId) {
+      return invalidDemandMatchGeneration("candidate_job_mismatch", response);
+    }
+    if (!Number.isInteger(candidate.demandRevision) || candidate.demandRevision !== demandRevision) {
+      return invalidDemandMatchGeneration("candidate_revision_mismatch", response);
+    }
+  }
+
+  return {
+    ok: true,
+    code: null,
+    message: null,
+    requiresResync: false,
+    demandId,
+    demandRevision,
+    matchJobId,
+    candidates,
+  };
 }
 
 export function mergeAgentDraftEdits(

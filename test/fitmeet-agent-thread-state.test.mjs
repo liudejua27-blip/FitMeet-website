@@ -8,9 +8,11 @@ import {
   canonicalAgentDraftCardPatch,
   compactAgentTimelineEntries,
   deduplicateAgentCardFields,
+  demandMatchPhase,
   demandForAgentThread,
   demandLifecyclePrompt,
   editableDefaultDraftPatch,
+  guardDemandMatchesGeneration,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
   orderedAgentDraftFields,
@@ -130,6 +132,148 @@ test("any real draft is displayed as editable without a generation approval", ()
     canGenerateCard: false,
     status: "collecting",
   }), true);
+});
+
+test("only pre-publication drafts can render as editable demand cards", () => {
+  for (const status of [
+    "published",
+    "matching",
+    "candidatePool",
+    "hasCandidates",
+    "invited",
+    "matchedCommunicating",
+    "hidden",
+    "canceled",
+    "cancelled",
+    "closed",
+  ]) {
+    assert.equal(agentDraftCanRenderCard({ ...draft, status }), false, status);
+  }
+});
+
+test("projects authoritative matching jobs without guessing from an empty candidate list", () => {
+  assert.equal(demandMatchPhase({ demandStatus: "matching", matchJobStatus: "running" }), "matching");
+  assert.equal(demandMatchPhase({ demandStatus: "candidatePool", matchJobStatus: "succeeded" }), "waiting");
+  assert.equal(demandMatchPhase({ demandStatus: "matching", matchJobStatus: "failed" }), "failed");
+  assert.equal(demandMatchPhase({ demandStatus: "hasCandidates", candidateCount: 1 }), "matched");
+  assert.equal(demandMatchPhase({ demandStatus: "hidden", candidateCount: 3 }), "hidden");
+  assert.equal(
+    demandMatchPhase({ demandStatus: "matching", demandVisibility: "hidden", matchJobStatus: "running" }),
+    "hidden",
+  );
+  assert.equal(demandMatchPhase({ demandStatus: "canceled" }), "cancelled");
+});
+
+const demandMatches = ({
+  demandId = "demand-1",
+  demandRevision = 3,
+  jobId = "job-3",
+  jobDemandId = demandId,
+  jobDemandRevision = demandRevision,
+  jobStatus = "succeeded",
+  candidates = [{
+    candidateRecordId: 9,
+    candidateUserId: 42,
+    matchJobId: jobId,
+    demandRevision,
+    displayName: "小林",
+    status: "recommended",
+  }],
+} = {}) => ({
+  demand: {
+    id: demandId,
+    revision: demandRevision,
+    type: "buddy",
+    title: "周末 Citywalk",
+    summary: "一起散步",
+    fields: [],
+    visibility: "public",
+    hallTarget: "socialHall",
+    category: "Citywalk",
+    status: jobStatus === "succeeded" ? "candidatePool" : "matching",
+    candidateCount: candidates.length,
+    capacityMin: 1,
+    capacityMax: 2,
+    acceptedParticipantCount: 0,
+  },
+  matchJob: {
+    id: jobId,
+    demandId: jobDemandId,
+    demandRevision: jobDemandRevision,
+    status: jobStatus,
+  },
+  candidates,
+  total: candidates.length,
+  nextCursor: null,
+});
+
+test("accepts one internally consistent demand matching generation", () => {
+  const guarded = guardDemandMatchesGeneration(demandMatches());
+  assert.equal(guarded.ok, true);
+  assert.equal(guarded.demandId, "demand-1");
+  assert.equal(guarded.demandRevision, 3);
+  assert.equal(guarded.matchJobId, "job-3");
+  assert.equal(guarded.candidates.length, 1);
+  assert.equal(guarded.requiresResync, false);
+});
+
+test("fails closed when a late job belongs to an older demand", () => {
+  const guarded = guardDemandMatchesGeneration(demandMatches({ jobDemandId: "demand-old" }));
+  assert.deepEqual(
+    { ok: guarded.ok, code: guarded.code, candidates: guarded.candidates, requiresResync: guarded.requiresResync },
+    { ok: false, code: "demand_id_mismatch", candidates: [], requiresResync: true },
+  );
+});
+
+test("fails closed when the matching job belongs to an older demand revision", () => {
+  const guarded = guardDemandMatchesGeneration(demandMatches({ jobDemandRevision: 2 }));
+  assert.equal(guarded.ok, false);
+  assert.equal(guarded.code, "demand_revision_mismatch");
+  assert.deepEqual(guarded.candidates, []);
+});
+
+test("fails closed when one candidate comes from another matching job", () => {
+  const guarded = guardDemandMatchesGeneration(demandMatches({ candidates: [{
+    candidateRecordId: 9,
+    candidateUserId: 42,
+    matchJobId: "job-old",
+    demandRevision: 3,
+    displayName: "小林",
+    status: "recommended",
+  }] }));
+  assert.equal(guarded.ok, false);
+  assert.equal(guarded.code, "candidate_job_mismatch");
+  assert.deepEqual(guarded.candidates, []);
+});
+
+test("fails closed when one candidate comes from another demand revision", () => {
+  const guarded = guardDemandMatchesGeneration(demandMatches({ candidates: [{
+    candidateRecordId: 9,
+    candidateUserId: 42,
+    matchJobId: "job-3",
+    demandRevision: 2,
+    displayName: "小林",
+    status: "recommended",
+  }] }));
+  assert.equal(guarded.ok, false);
+  assert.equal(guarded.code, "candidate_revision_mismatch");
+  assert.deepEqual(guarded.candidates, []);
+});
+
+test("accepts an empty succeeded generation without pretending candidates exist", () => {
+  const guarded = guardDemandMatchesGeneration(demandMatches({ candidates: [] }));
+  assert.equal(guarded.ok, true);
+  assert.deepEqual(guarded.candidates, []);
+});
+
+test("queued and running responses still require generation truth but may be empty", () => {
+  assert.equal(guardDemandMatchesGeneration(demandMatches({ jobStatus: "queued", candidates: [] })).ok, true);
+  assert.equal(guardDemandMatchesGeneration(demandMatches({ jobStatus: "running", candidates: [] })).ok, true);
+  const missingRevision = demandMatches({ jobStatus: "running", candidates: [] });
+  delete missingRevision.demand.revision;
+  const guarded = guardDemandMatchesGeneration(missingRevision);
+  assert.equal(guarded.ok, false);
+  assert.equal(guarded.code, "missing_demand_revision");
 });
 
 test("an incomplete V2 draft renders as a publishable six-field light card", () => {

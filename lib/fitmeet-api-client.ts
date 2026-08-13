@@ -18,9 +18,12 @@ import {
   type EmailRegistrationPending,
   type Conversation,
   type ConversationMessage,
+  type AgentDemandDraftAction,
+  type AgentDemandDraftActionReceipt,
   type DemandCandidateBehavior,
   type DemandDraftSession,
   type DemandDraftUpdatePayload,
+  type DemandMatchesResponse,
   type FitMeetConnectionRequest,
   type FeedPage,
   type FeedPost,
@@ -32,6 +35,14 @@ import {
   type AgentMemorySuppressionMutation,
   type AgentMemoryUsagePage,
   type AgentMemoryUseScope,
+  type AgentDataAccessLogPage,
+  type AgentDataAccessSettings,
+  type AgentDataAccessUpdateRequest,
+  type AccountDeletionResponse,
+  type AccountReauthAction,
+  type AccountReauthChallengeResponse,
+  type AccountReauthMethod,
+  type AccountReauthVerificationResponse,
   type FitMeetConversation,
   type FitMeetAppConfig,
   type FitMeetAuthSessionPage,
@@ -216,7 +227,7 @@ export class FitMeetApiClient {
     });
   }
 
-  async request<T>({ method, path, body, idempotencyKey }: RequestOptions): Promise<T> {
+  async request<T>({ method, path, body, idempotencyKey, headers }: RequestOptions): Promise<T> {
     const token = this.getToken();
     const response = await fetch(`${this.baseUrl}${path}`, {
       method,
@@ -225,6 +236,7 @@ export class FitMeetApiClient {
       // 304 response with no JSON body.
       cache: 'no-store',
       headers: {
+        ...(headers ?? {}),
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
@@ -586,10 +598,41 @@ export class FitMeetApiClient {
       path: fitMeetPaths.users.accountExport,
     });
   }
-  deleteAccount() {
-    return this.request<{ id?: number; status: string; deletedAt?: string }>({
+
+  requestAccountReauthChallenge(
+    method: AccountReauthMethod = 'email_password',
+    action: AccountReauthAction = 'account.delete',
+  ) {
+    return this.request<AccountReauthChallengeResponse>({
+      method: 'POST',
+      path: fitMeetPaths.auth.reauthChallenges,
+      body: { action, method },
+    });
+  }
+
+  verifyAccountReauthChallenge(
+    challengeId: string,
+    method: AccountReauthMethod,
+    credential: string,
+  ) {
+    const id = challengeId.trim();
+    const value = method === 'email_password' ? credential : credential.trim();
+    if (!id) throw new Error('身份验证请求无效，请重新开始。');
+    if (!value) throw new Error(method === 'email_password' ? '请输入当前邮箱密码。' : '请输入验证码。');
+    return this.request<AccountReauthVerificationResponse>({
+      method: 'POST',
+      path: fitMeetPaths.auth.verifyReauthChallenge(id),
+      body: method === 'email_password' ? { password: credential } : { code: value },
+    });
+  }
+
+  deleteAccount(reauthToken: string) {
+    const token = reauthToken.trim();
+    if (!token) throw new Error('身份验证已失效，请重新验证后再注销。');
+    return this.request<AccountDeletionResponse>({
       method: 'DELETE',
       path: fitMeetPaths.users.account,
+      headers: { 'X-FitMeet-Reauth-Token': token },
     });
   }
 
@@ -688,12 +731,12 @@ export class FitMeetApiClient {
     });
   }
 
-  createInvitation(payload: MeetInvitationDraft) {
+  createInvitation(payload: MeetInvitationDraft, idempotencyKey?: string) {
     return this.request<MeetInvitation>({
       method: 'POST',
       path: fitMeetPaths.invitations.root,
       body: payload,
-      idempotencyKey: `web-invite-${crypto.randomUUID()}`,
+      idempotencyKey: idempotencyKey || `web-invite-${crypto.randomUUID()}`,
     });
   }
   listMeetInvitations(role?: MeetInvitationRole, status?: MeetInvitationStatus) {
@@ -716,7 +759,7 @@ export class FitMeetApiClient {
       method: 'POST',
       path: fitMeetPaths.invitations.accept(id),
       body: {},
-      idempotencyKey: `web-invite-accept-${id}-${crypto.randomUUID()}`,
+      idempotencyKey: `web-invite-accept-${id}`,
     });
   }
   rejectInvitation(id: number) {
@@ -724,7 +767,7 @@ export class FitMeetApiClient {
       method: 'POST',
       path: fitMeetPaths.invitations.reject(id),
       body: {},
-      idempotencyKey: `web-invite-reject-${id}-${crypto.randomUUID()}`,
+      idempotencyKey: `web-invite-reject-${id}`,
     });
   }
   cancelInvitation(id: number) {
@@ -732,7 +775,7 @@ export class FitMeetApiClient {
       method: 'POST',
       path: fitMeetPaths.invitations.cancel(id),
       body: {},
-      idempotencyKey: `web-invite-cancel-${id}-${crypto.randomUUID()}`,
+      idempotencyKey: `web-invite-cancel-${id}`,
     });
   }
 
@@ -775,35 +818,37 @@ export class FitMeetApiClient {
   getDemand(id: string) {
     return this.request<FitMeetDemand>({ method: 'GET', path: fitMeetPaths.demands.detail(id) });
   }
-  publishDemand(id: string, category?: string) {
+  publishDemand(id: string, category?: string, expectedStatus = 'unknown') {
     return this.request<FitMeetDemand>({
       method: 'POST',
       path: fitMeetPaths.demands.publish(id),
       body: { hallTarget: 'socialHall', ...(category ? { category } : {}) },
-      idempotencyKey: `web-demand-publish-${id}-${crypto.randomUUID()}`,
+      idempotencyKey: `web-demand-publish-${id}-${expectedStatus}`,
     });
   }
   listDemandCandidates(id: string) {
-    return this.request<{
-      demand: FitMeetDemand;
-      candidates: FitMeetDemandCandidate[];
-      total: number;
-    }>({ method: 'GET', path: `${fitMeetPaths.demands.candidates(id)}?limit=20` });
+    return this.listDemandMatches(id);
   }
-  hideDemand(id: string) {
+  listDemandMatches(id: string) {
+    return this.request<DemandMatchesResponse>({
+      method: 'GET',
+      path: `${fitMeetPaths.demands.matches(id)}?limit=20`,
+    });
+  }
+  hideDemand(id: string, expectedStatus = 'unknown') {
     return this.request<FitMeetDemand>({
       method: 'POST',
       path: fitMeetPaths.demands.hide(id),
       body: {},
-      idempotencyKey: `web-demand-hide-${id}-${crypto.randomUUID()}`,
+      idempotencyKey: `web-demand-hide-${id}-${expectedStatus}`,
     });
   }
-  cancelDemand(id: string, reason?: string) {
+  cancelDemand(id: string, reason?: string, expectedStatus = 'unknown') {
     return this.request<FitMeetDemand>({
       method: 'POST',
       path: fitMeetPaths.demands.cancel(id),
       body: { reason },
-      idempotencyKey: `web-demand-cancel-${id}-${crypto.randomUUID()}`,
+      idempotencyKey: `web-demand-cancel-${id}-${expectedStatus}`,
     });
   }
   listGroups(scope: 'mine' | 'discover' = 'mine') {
@@ -1165,6 +1210,24 @@ export class FitMeetApiClient {
       path: fitMeetPaths.agentThreads.resolveProposal(threadId, proposalId),
       body: { decision, ...(argumentsPatch ? { arguments: argumentsPatch } : {}) },
       idempotencyKey: `web-agent-proposal-${proposalId}-${decision}`,
+    });
+  }
+  performAgentDemandDraftAction(
+    threadId: string,
+    draftId: string,
+    payload: {
+      action: AgentDemandDraftAction;
+      cardId: string;
+      expectedCardStatus: string;
+    },
+  ) {
+    return this.request<AgentDemandDraftActionReceipt>({
+      method: 'POST',
+      path: fitMeetPaths.agentThreads.demandDraftAction(threadId, draftId),
+      body: payload,
+      // The server verifies the demand and match job before returning. Keeping
+      // this key stable makes a double click or a retry the same user action.
+      idempotencyKey: `web-agent-demand-draft-${threadId}-${draftId}-${payload.action}-${payload.expectedCardStatus}`,
     });
   }
   deleteAgentThread(id: string) {
@@ -1660,6 +1723,28 @@ export class FitMeetApiClient {
       method: 'DELETE',
       path: fitMeetPaths.users.agentMemorySuppression(memoryType),
       idempotencyKey: `web-memory-unsuppress-${memoryType}-${crypto.randomUUID()}`,
+    });
+  }
+  getAgentDataAccess() {
+    return this.request<AgentDataAccessSettings>({
+      method: 'GET',
+      path: fitMeetPaths.users.agentDataAccess,
+    });
+  }
+  updateAgentDataAccess(payload: AgentDataAccessUpdateRequest) {
+    return this.request<AgentDataAccessSettings>({
+      method: 'PATCH',
+      path: fitMeetPaths.users.agentDataAccess,
+      body: payload,
+      idempotencyKey: `web-agent-data-access-update-${payload.expectedRevision}`,
+    });
+  }
+  getAgentDataAccessLog(cursor?: string, limit = 30) {
+    const query = new URLSearchParams({ limit: String(Math.max(1, Math.min(100, limit))) });
+    if (cursor?.trim()) query.set('cursor', cursor.trim());
+    return this.request<AgentDataAccessLogPage>({
+      method: 'GET',
+      path: `${fitMeetPaths.users.agentDataAccessLog}?${query.toString()}`,
     });
   }
   async listAgentNeedWiki(query?: string, limit = 50) {

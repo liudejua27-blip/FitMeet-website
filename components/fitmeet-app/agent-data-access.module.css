@@ -1,0 +1,550 @@
+.panel {
+  --access-accent: var(--shell-accent, #3478f6);
+  --access-accent-2: var(--shell-accent-2, #7655ed);
+  --access-text: var(--shell-text, #171a23);
+  --access-muted: var(--shell-muted, #667085);
+  --access-border: var(--shell-border, #e3e8f0);
+  --access-surface: var(--shell-surface, #fff);
+  --access-soft: color-mix(in srgb, var(--access-accent) 5%, var(--access-surface));
+  width: 100%;
+  color: var(--access-text);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 2px 22px;
+  border-bottom: 1px solid var(--access-border);
+}
+
+.heroIcon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--access-accent) 18%, var(--access-border));
+  border-radius: 15px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--access-accent) 10%, #fff), color-mix(in srgb, var(--access-accent-2) 8%, #fff));
+  color: var(--access-accent);
+  box-shadow: 0 10px 24px rgba(42, 81, 160, 0.08);
+  font-size: 22px;
+}
+
+.heroCopy {
+  min-width: 0;
+}
+
+.heroCopy h2 {
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 26px);
+  font-weight: 760;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.heroCopy p {
+  max-width: 660px;
+  margin: 6px 0 0;
+  color: var(--access-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.refreshButton,
+.centerState button,
+.errorNotice button {
+  min-height: 44px;
+  border: 1px solid var(--access-border);
+  border-radius: 12px;
+  background: var(--access-surface);
+  color: var(--access-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.refreshButton {
+  display: inline-flex;
+  min-width: 112px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+
+.refreshButton:hover:not(:disabled),
+.centerState button:hover:not(:disabled),
+.errorNotice button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--access-accent) 38%, var(--access-border));
+  background: var(--access-soft);
+  color: var(--access-accent);
+}
+
+.refreshButton:focus-visible,
+.centerState button:focus-visible,
+.errorNotice button:focus-visible,
+.accessRow:has(input:focus-visible) {
+  outline: 3px solid color-mix(in srgb, var(--access-accent) 25%, transparent);
+  outline-offset: 2px;
+}
+
+.refreshButton:disabled,
+.centerState button:disabled,
+.errorNotice button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.statusRegion:empty {
+  display: none;
+}
+
+.statusRegion {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.savingStatus,
+.errorNotice {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.savingStatus {
+  padding: 0 13px;
+  background: var(--access-soft);
+  color: var(--access-accent);
+  font-weight: 650;
+}
+
+.errorNotice {
+  padding: 8px 8px 8px 13px;
+  border: 1px solid #ffd4ce;
+  background: #fff7f5;
+  color: #a6392d;
+}
+
+.errorNotice > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.errorNotice button {
+  min-width: 68px;
+  padding: 0 12px;
+  border-color: #f2c0b9;
+  background: #fff;
+  color: #a6392d;
+}
+
+.centerState {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  padding: 36px 20px;
+  color: var(--access-muted);
+  text-align: center;
+}
+
+.centerState > svg {
+  color: var(--access-accent);
+  font-size: 24px;
+}
+
+.centerState strong {
+  color: var(--access-text);
+  font-size: 16px;
+}
+
+.centerState span {
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.centerState button {
+  min-width: 112px;
+  margin-top: 8px;
+  padding: 0 16px;
+}
+
+.content {
+  display: grid;
+  gap: 16px;
+  padding-top: 16px;
+}
+
+.revisionBar {
+  display: flex;
+  min-height: 40px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  background: color-mix(in srgb, #23a878 7%, var(--access-surface));
+  color: var(--access-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.revisionBar span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #16825d;
+  font-weight: 700;
+}
+
+.revisionBar time {
+  margin-left: auto;
+}
+
+.group,
+.logDisclosure {
+  overflow: hidden;
+  border: 1px solid var(--access-border);
+  border-radius: 16px;
+  background: var(--access-surface);
+  box-shadow: 0 9px 24px rgba(27, 47, 89, 0.045);
+}
+
+.groupHeader {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px 12px;
+  background: color-mix(in srgb, var(--access-accent) 2.5%, var(--access-surface));
+}
+
+.groupHeader > span {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--access-accent) 9%, var(--access-surface));
+  color: var(--access-accent);
+  font-size: 18px;
+}
+
+.groupHeader h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 740;
+  line-height: 1.35;
+}
+
+.groupHeader p {
+  margin: 3px 0 0;
+  color: var(--access-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.accessList {
+  display: grid;
+}
+
+.accessRow {
+  position: relative;
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 15px;
+  padding: 10px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--access-border) 82%, transparent);
+  cursor: pointer;
+}
+
+.accessRow:hover {
+  background: color-mix(in srgb, var(--access-accent) 2.4%, transparent);
+}
+
+.accessCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.accessCopy strong {
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.accessCopy small {
+  color: var(--access-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.accessRow input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.switchTrack {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--access-muted) 28%, var(--access-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--access-muted) 12%, var(--access-surface));
+  transition: background 170ms ease, border-color 170ms ease;
+}
+
+.switchTrack > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(23, 26, 35, 0.2);
+  transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.accessRow input:checked + .switchTrack {
+  border-color: color-mix(in srgb, var(--access-accent) 78%, var(--access-accent-2));
+  background: linear-gradient(100deg, var(--access-accent), var(--access-accent-2));
+}
+
+.accessRow input:checked + .switchTrack > span {
+  transform: translateX(20px);
+}
+
+.accessRow input:disabled + .switchTrack {
+  opacity: 0.55;
+}
+
+.accessRow:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.groupFooter,
+.warningFooter {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 16px 13px;
+  border-top: 1px solid color-mix(in srgb, var(--access-border) 78%, transparent);
+  color: var(--access-muted);
+  font-size: 10.5px;
+  line-height: 1.65;
+}
+
+.groupFooter svg,
+.warningFooter svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.warningFooter {
+  background: color-mix(in srgb, #f7a531 5%, var(--access-surface));
+  color: #8a5b1d;
+}
+
+.logDisclosure summary {
+  display: grid;
+  min-height: 68px;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.logDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.logDisclosure summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--access-accent) 25%, transparent);
+  outline-offset: -3px;
+}
+
+.summaryIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--access-accent-2) 8%, var(--access-surface));
+  color: var(--access-accent-2);
+  font-size: 17px;
+}
+
+.logDisclosure summary > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.logDisclosure summary strong {
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.logDisclosure summary small {
+  color: var(--access-muted);
+  font-size: 10.5px;
+}
+
+.disclosureChevron {
+  color: var(--access-muted);
+  transition: transform 180ms ease;
+}
+
+.logDisclosure[open] .disclosureChevron {
+  transform: rotate(180deg);
+}
+
+.logBody {
+  border-top: 1px solid var(--access-border);
+}
+
+.logState {
+  display: flex;
+  min-height: 84px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 16px;
+  color: var(--access-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.logList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.logList li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--access-border) 76%, transparent);
+}
+
+.logList li:first-child {
+  border-top: 0;
+}
+
+.logMarker {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--access-accent), var(--access-accent-2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--access-accent) 9%, transparent);
+}
+
+.logList li > div {
+  display: grid;
+  gap: 4px;
+}
+
+.logList strong {
+  font-size: 12px;
+  font-weight: 690;
+}
+
+.logList p,
+.logList time {
+  margin: 0;
+  color: var(--access-muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.logList time {
+  font-variant-numeric: tabular-nums;
+}
+
+.spin {
+  animation: access-spin 850ms linear infinite;
+}
+
+@keyframes access-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .hero {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .heroIcon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .refreshButton {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .revisionBar {
+    align-items: flex-start;
+  }
+
+  .revisionBar time {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .groupHeader,
+  .accessRow,
+  .groupFooter,
+  .warningFooter,
+  .logDisclosure summary,
+  .logList li {
+    padding-right: 13px;
+    padding-left: 13px;
+  }
+
+  .accessRow {
+    min-height: 72px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+
+  .switchTrack,
+  .switchTrack > span,
+  .disclosureChevron {
+    transition: none;
+  }
+}

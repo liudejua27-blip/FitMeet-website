@@ -245,6 +245,8 @@ export function FitMeetAgentShell({
   const searchRequestRef = useRef(0);
   const desktopUserMenuRef = useRef<HTMLDivElement>(null);
   const mobileUserMenuRef = useRef<HTMLDivElement>(null);
+  const pendingMobileUtilityRef = useRef<(() => void) | null>(null);
+  const deferredMobileUtilityFrameRef = useRef<number | null>(null);
   const mobileDrawerRef = useAccessibleDialog(
     mobileOpen,
     () => setMobileOpen(false),
@@ -257,6 +259,22 @@ export function FitMeetAgentShell({
     if (storedCollapsed === "true") setCollapsed(true);
     if (storedTheme === "dark") setTheme("dark");
   }, []);
+
+  useEffect(() => {
+    if (mobileOpen || !pendingMobileUtilityRef.current) return;
+    const onOpen = pendingMobileUtilityRef.current;
+    pendingMobileUtilityRef.current = null;
+    deferredMobileUtilityFrameRef.current = window.requestAnimationFrame(() => {
+      deferredMobileUtilityFrameRef.current = null;
+      onOpen();
+    });
+    return () => {
+      if (deferredMobileUtilityFrameRef.current !== null) {
+        window.cancelAnimationFrame(deferredMobileUtilityFrameRef.current);
+        deferredMobileUtilityFrameRef.current = null;
+      }
+    };
+  }, [mobileOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -356,6 +374,20 @@ export function FitMeetAgentShell({
       window.localStorage.setItem("fitmeet:web-theme:v1", next);
       return next;
     });
+  };
+
+  const openSidebarUtility = (
+    instance: "desktop" | "mobile",
+    onOpen: () => void,
+  ) => {
+    setUserMenuOpen(false);
+    if (instance === "desktop") {
+      onOpen();
+      return;
+    }
+
+    pendingMobileUtilityRef.current = onOpen;
+    setMobileOpen(false);
   };
 
   const navigate = (destination: FitMeetAppDestination) => {
@@ -474,8 +506,8 @@ export function FitMeetAgentShell({
           </nav>
           <div className={styles.userMenuUtilities}>
             <button type="button" onClick={toggleTheme}>{theme === "light" ? <FiMoon /> : <FiSun />}<span>{theme === "light" ? "深色模式" : "浅色模式"}</span></button>
-            <button type="button" onClick={() => { setUserMenuOpen(false); onOpenSettings(); }}><FiSettings /><span>设置与隐私</span></button>
-            <button type="button" onClick={() => { setUserMenuOpen(false); onOpenHelp(); }}><FiHelpCircle /><span>帮助与安全</span></button>
+            <button type="button" onClick={() => openSidebarUtility(instance, onOpenSettings)}><FiSettings /><span>设置与隐私</span></button>
+            <button type="button" onClick={() => openSidebarUtility(instance, onOpenHelp)}><FiHelpCircle /><span>帮助与安全</span></button>
           </div>
         </div>
 

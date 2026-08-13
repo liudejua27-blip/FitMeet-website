@@ -43,6 +43,9 @@ import type {
   AgentInboxEvent,
   AgentInboxEventPage,
   AgentInboxScope,
+  AgentDataAccessLogEntry,
+  AgentDataAccessSettings,
+  AgentDataAccessUpdateRequest,
   AgentNeedWikiItem,
   AgentMemoryControl,
   AgentMemoryUsageEvent,
@@ -51,10 +54,13 @@ import type {
   AgentThread,
   AgentThreadDetail,
   AgentThreadEntry,
+  AgentDemandDraftAction,
+  AgentDemandDraftActionReceipt,
   BlockedUserRecord,
   ConversationMessage,
   CapabilityOffering,
   DemandDraftSession,
+  DemandMatchJob,
   FeedPost,
   FitMeetAppConfig,
   FitMeetAgentMemory,
@@ -62,6 +68,7 @@ import type {
   FitMeetConversation,
   FitMeetConversationMessage,
   FitMeetDemand,
+  FitMeetDemandCandidate,
   FitMeetGroupJoinMode,
   FitMeetIntentApplication,
   FitMeetNotificationPreferences,
@@ -99,11 +106,12 @@ import {
   agentTurnNotice,
   compactAgentTimelineEntries,
   demandForAgentThread,
-  demandLifecyclePrompt,
+  guardDemandMatchesGeneration,
+  demandMatchPhase,
   latestAgentToolProposal,
   mergeAgentDraftEdits,
   preferredAgentThread,
-  type DemandLifecycleAction,
+  type DemandMatchPhase,
 } from '@/lib/fitmeet-agent-thread-state';
 import { FitMeetApiClient, FitMeetApiError } from '@/lib/fitmeet-api-client';
 import {
@@ -140,6 +148,7 @@ import {
   memoryStatusLabel,
 } from '@/lib/fitmeet-product-trust';
 import {
+  conversationRequestIsCurrent,
   dedupeInboxEvents,
   failOptimisticMessage,
   optimisticLikeState,
@@ -148,6 +157,19 @@ import {
   settleOptimisticMessage,
 } from '@/lib/fitmeet-social-state';
 import { featureEnabled } from '@/lib/fitmeet-capabilities';
+import {
+  agentEntryCanRender,
+  agentEntryIsStreaming,
+  agentLiveEventBelongsToThread,
+  agentRunPresentation,
+  agentToolIsActive,
+} from '@/lib/fitmeet-agent-presentation';
+import {
+  AgentActivityIndicator,
+  AgentInlineActivity,
+  AgentTaskProgress,
+  StreamingAgentText,
+} from './AgentRuntimeUI';
 import { OnboardingFlow } from './OnboardingFlow';
 import { FitMeetLogin } from './FitMeetLogin';
 import { FitMeetBrandIcon } from './FitMeetBrandIcon';
@@ -155,6 +177,7 @@ import { CandidateProfileExperience } from './CandidateProfileExperience';
 import { MessagesExperience } from './MessagesExperience';
 import { MomentsExperience } from './MomentsExperience';
 import { ProfileExperience } from './ProfileExperience';
+import { AgentDataAccessPanel } from './AgentDataAccessPanel';
 import {
   SocialInteractionExperience,
   type SocialExperienceMode,
@@ -181,6 +204,7 @@ type Overlay =
   | 'composer'
   | 'conversation'
   | 'memory'
+  | 'agentDataAccess'
   | 'editProfile'
   | 'privacy'
   | 'settings'
@@ -481,9 +505,12 @@ function Sheet({
   onClose: () => void;
   closeDisabled?: boolean;
 }) {
-  const dialogRef = useAccessibleDialog(true, onClose);
+  const guardedClose = useCallback(() => {
+    if (!closeDisabled) onClose();
+  }, [closeDisabled, onClose]);
+  const dialogRef = useAccessibleDialog(true, guardedClose);
   return (
-    <div className={styles.sheetShade} role="presentation" onMouseDown={onClose}>
+    <div className={styles.sheetShade} role="presentation" onMouseDown={guardedClose}>
       <section
         ref={dialogRef}
         tabIndex={-1}
@@ -491,12 +518,13 @@ function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-busy={closeDisabled}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className={styles.sheetHandle} />
         <header>
           <h2>{title}</h2>
-          <button type="button" aria-label="关闭" disabled={closeDisabled} onClick={onClose}>
+          <button type="button" aria-label="关闭" disabled={closeDisabled} onClick={guardedClose}>
             <FiX />
           </button>
         </header>
@@ -586,9 +614,13 @@ function FitMeetAuthenticatedExperience({
   const [demand, setDemand] = useState<DemandViewModel>(emptyDemandView);
   const [demands, setDemands] = useState<FitMeetDemand[]>([]);
   const [hasDemand, setHasDemand] = useState(false);
+  const [matchJob, setMatchJob] = useState<DemandMatchJob | null>(null);
+  const [demandLifecycleAction, setDemandLifecycleAction] =
+    useState<AgentDemandDraftAction | null>(null);
   const [candidates, setCandidates] = useState<LiveCandidate[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
   const [inviteStatus, setInviteStatus] = useState<InvitationViewStatus>('none');
+  const [inviteSending, setInviteSending] = useState(false);
   const [relationship, setRelationship] = useState<RelationshipState>('none');
   const [meet, setMeet] = useState<MeetViewModel>({ id: 0, status: 'none' });
   const [socialIntents, setSocialIntents] = useState<FitMeetPublicIntent[]>([]);
@@ -625,6 +657,11 @@ function FitMeetAuthenticatedExperience({
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memoryStateOwnerId, setMemoryStateOwnerId] = useState<string | null>(null);
+  const [agentDataAccess, setAgentDataAccess] = useState<AgentDataAccessSettings | null>(null);
+  const [agentDataAccessLogs, setAgentDataAccessLogs] = useState<AgentDataAccessLogEntry[]>([]);
+  const [agentDataAccessLoading, setAgentDataAccessLoading] = useState(false);
+  const [agentDataAccessSaving, setAgentDataAccessSaving] = useState(false);
+  const [agentDataAccessError, setAgentDataAccessError] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [conversationNextBefore, setConversationNextBefore] = useState<string | null>(null);
   const [conversationLoadingMore, setConversationLoadingMore] = useState(false);
@@ -650,7 +687,9 @@ function FitMeetAuthenticatedExperience({
   const [deepLinkedPostRecord, setDeepLinkedPostRecord] = useState<FeedPost | null>(null);
   const [deepLinkedDemandRecord, setDeepLinkedDemandRecord] = useState<FitMeetDemand | null>(null);
   const [liveDemand, setLiveDemand] = useState<{ id: string } | null>(null);
-  const conversationSyncing = useRef(false);
+  const conversationSyncingRef = useRef(new Set<string>());
+  const activeConversationIdRef = useRef<string | null>(null);
+  const conversationLoadGenerationRef = useRef(0);
   const conversationReceiptRef = useRef(new Map<string, string>());
   const conversationReceiptPendingRef = useRef(new Set<string>());
   const conversationDraftsRef = useRef<ConversationDrafts>({});
@@ -658,8 +697,14 @@ function FitMeetAuthenticatedExperience({
   const activeAgentThreadIdRef = useRef<string | null>(null);
   const agentThreadLoadRequestRef = useRef(0);
   const agentThreadSwitchingRef = useRef(false);
+  const agentSendRequestRef = useRef(0);
+  const agentSendingRef = useRef(false);
   const agentSendingAfterSequenceRef = useRef(0);
-  const demandLifecyclePreparingRef = useRef(false);
+  const demandLifecycleActionRef = useRef<AgentDemandDraftAction | null>(null);
+  const demandMatchPollGenerationRef = useRef(0);
+  const activeDemandIdRef = useRef<string | null>(null);
+  const inviteSendingRef = useRef(false);
+  const inviteIdempotencyKeyRef = useRef<string | null>(null);
   const agentInboxLoadRequestRef = useRef(0);
   const agentInboxScopeRef = useRef<AgentInboxScope>('unread');
   const memoryOwnerIdRef = useRef<string | null>(memoryOwnerId);
@@ -673,6 +718,12 @@ function FitMeetAuthenticatedExperience({
   const [appConfig, setAppConfig] = useState<FitMeetAppConfig | null>(null);
   const [appConfigLoading, setAppConfigLoading] = useState(true);
   const [appConfigError, setAppConfigError] = useState<string | null>(null);
+  useEffect(
+    () => () => {
+      demandMatchPollGenerationRef.current += 1;
+    },
+    [],
+  );
   const refreshAppConfig = useCallback(async () => {
     setAppConfigLoading(true);
     setAppConfigError(null);
@@ -689,7 +740,11 @@ function FitMeetAuthenticatedExperience({
     void refreshAppConfig();
   }, [refreshAppConfig]);
   const currentUserId = session.state.session?.user.id;
+  const agentEnabled = featureEnabled(appConfig, 'agent', currentUserId);
   const groupsEnabled = featureEnabled(appConfig, 'multiplayerGroups', currentUserId);
+  const demandPublishingEnabled = featureEnabled(appConfig, 'demandPublishing', currentUserId);
+  const matchingEnabled = featureEnabled(appConfig, 'matching', currentUserId);
+  const messagingEnabled = featureEnabled(appConfig, 'messaging', currentUserId);
   const memoryStateBelongsToCurrentOwner =
     memoryOwnerId !== null && memoryStateOwnerId === memoryOwnerId;
   const selectedCandidate =
@@ -789,6 +844,49 @@ function FitMeetAuthenticatedExperience({
         setMemoryLoading(false);
     }
   }, [api, isCurrentMemoryOwner, memoryOwnerId]);
+
+  const refreshAgentDataAccess = useCallback(async () => {
+    setAgentDataAccessLoading(true);
+    setAgentDataAccessError(null);
+    try {
+      const [settingsResult, logsResult] = await Promise.allSettled([
+        api.getAgentDataAccess(),
+        api.getAgentDataAccessLog(undefined, 30),
+      ]);
+      if (settingsResult.status === 'fulfilled') setAgentDataAccess(settingsResult.value);
+      if (logsResult.status === 'fulfilled') setAgentDataAccessLogs(logsResult.value.items);
+      const failure = [settingsResult, logsResult].find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (failure)
+        setAgentDataAccessError(
+          failure.reason instanceof Error
+            ? failure.reason.message
+            : 'Agent 数据权限暂时无法完整同步。',
+        );
+    } finally {
+      setAgentDataAccessLoading(false);
+    }
+  }, [api]);
+
+  const updateAgentDataAccess = async (patch: AgentDataAccessUpdateRequest) => {
+    if (agentDataAccessSaving) return;
+    setAgentDataAccessSaving(true);
+    setAgentDataAccessError(null);
+    try {
+      const saved = await api.updateAgentDataAccess(patch);
+      setAgentDataAccess(saved);
+      notice('Agent 数据权限已按服务端最新版本保存。', 'success');
+    } catch (reason) {
+      setAgentDataAccessError(
+        reason instanceof Error ? reason.message : 'Agent 数据权限没有保存，请重新同步后再试。',
+      );
+      if (reason instanceof FitMeetApiError && reason.status === 409)
+        await refreshAgentDataAccess();
+    } finally {
+      setAgentDataAccessSaving(false);
+    }
+  };
 
   const applyAgentInboxPage = useCallback((page: AgentInboxEventPage) => {
     setAgentInboxEvents(page.items);
@@ -953,16 +1051,22 @@ function FitMeetAuthenticatedExperience({
       const nextChat = chatFromAgentEntries(normalizedEntries);
       setChat(nextChat.length ? nextChat : initialChat);
       setActiveDraftSession(detail.activeDraft);
-      if (detail.activeDraft && presentDraft) {
+      if (detail.activeDraft && presentDraft && agentDraftCanRenderCard(detail.activeDraft)) {
+        demandMatchPollGenerationRef.current += 1;
+        activeDemandIdRef.current = null;
         setDemand(displayDraftSession(detail.activeDraft));
-        setHasDemand(agentDraftCanRenderCard(detail.activeDraft));
+        setHasDemand(true);
         setLiveDemand(null);
+        setMatchJob(null);
         setCandidates([]);
         setSelectedCandidateId(null);
       } else if (presentDraft) {
+        demandMatchPollGenerationRef.current += 1;
+        activeDemandIdRef.current = null;
         setDemand(emptyDemandView);
         setHasDemand(false);
         setLiveDemand(null);
+        setMatchJob(null);
         setCandidates([]);
         setSelectedCandidateId(null);
       }
@@ -986,35 +1090,87 @@ function FitMeetAuthenticatedExperience({
     [api, applyAgentDetail],
   );
 
-  const activateDemand = useCallback(
-    async (record: FitMeetDemand, openDetail = false) => {
+  const applyDemandProjection = useCallback(
+    (
+      record: FitMeetDemand,
+      nextMatchJob: DemandMatchJob | null,
+      rawCandidates: FitMeetDemandCandidate[] = [],
+    ) => {
+      const nextCandidates = rawCandidates.map(displayCandidate);
+      activeDemandIdRef.current = record.id;
       setDemand(displayDemand(record));
       setHasDemand(true);
       setLiveDemand({ id: record.id });
+      setMatchJob(nextMatchJob);
+      setDemands((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+      setCandidates(nextCandidates);
+      setSelectedCandidateId(nextCandidates[0]?.id ?? null);
+      return demandMatchPhase({
+        demandStatus: record.status,
+        demandVisibility: record.visibility,
+        matchJobStatus: nextMatchJob?.status,
+        candidateCount: nextCandidates.length || record.candidateCount,
+      });
+    },
+    [],
+  );
+
+  const activateDemand = useCallback(
+    async (record: FitMeetDemand, openDetail = false) => {
+      const activationGeneration = ++demandMatchPollGenerationRef.current;
+      activeDemandIdRef.current = record.id;
+      setDemand(displayDemand(record));
+      setHasDemand(true);
+      setLiveDemand({ id: record.id });
+      setMatchJob(null);
       setInviteStatus('none');
       setSelectedCandidateId(null);
-      if (['cancelled', 'canceled', 'closed'].includes(record.status)) {
+      if (
+        record.visibility === 'hidden' ||
+        ['hidden', 'cancelled', 'canceled', 'closed'].includes(record.status)
+      ) {
         setCandidates([]);
       } else {
         try {
-          const page = await api.listDemandCandidates(record.id);
-          const resolvedDemand = page.demand ?? record;
-          const nextCandidates = page.candidates.map(displayCandidate);
-          setDemand(displayDemand(resolvedDemand));
-          setDemands((current) => [
-            resolvedDemand,
-            ...current.filter((item) => item.id !== resolvedDemand.id),
-          ]);
-          setCandidates(nextCandidates);
-          setSelectedCandidateId(nextCandidates[0]?.id ?? null);
+          const page = await api.listDemandMatches(record.id);
+          if (
+            activationGeneration !== demandMatchPollGenerationRef.current ||
+            activeDemandIdRef.current !== record.id
+          )
+            return;
+          const guarded = guardDemandMatchesGeneration(page);
+          if (!guarded.ok) {
+            applyDemandProjection(
+              {
+                ...page.demand,
+                candidateCount: 0,
+                status: page.demand.status === 'hasCandidates' ? 'matching' : page.demand.status,
+              },
+              null,
+              [],
+            );
+            notice(guarded.message, 'warning');
+          } else {
+            applyDemandProjection(page.demand, page.matchJob, guarded.candidates);
+          }
         } catch (reason) {
+          if (
+            activationGeneration !== demandMatchPollGenerationRef.current ||
+            activeDemandIdRef.current !== record.id
+          )
+            return;
           setCandidates([]);
           notice(reason instanceof Error ? reason.message : '这条需求的候选人暂时无法同步。');
         }
       }
-      if (openDetail) setOverlay('demand');
+      if (
+        openDetail &&
+        activationGeneration === demandMatchPollGenerationRef.current &&
+        activeDemandIdRef.current === record.id
+      )
+        setOverlay('demand');
     },
-    [api, notice],
+    [api, applyDemandProjection, notice],
   );
 
   const openDemandRecord = useCallback(
@@ -1032,8 +1188,13 @@ function FitMeetAuthenticatedExperience({
 
   const openAgentThread = useCallback(
     async (threadId: string) => {
+      agentSendRequestRef.current += 1;
+      agentSendingRef.current = false;
+      setAgentSending(false);
+      setAgentPendingMessage(null);
+      setAgentDraftStructuring(false);
       const detail = await loadAgentThread(threadId, true);
-      if (!detail.activeDraft) {
+      if (!agentDraftCanRenderCard(detail.activeDraft)) {
         const linkedDemand = demandForAgentThread(demands, threadId);
         if (linkedDemand) await activateDemand(linkedDemand);
       }
@@ -1043,12 +1204,19 @@ function FitMeetAuthenticatedExperience({
 
   const startNewDemand = useCallback(async () => {
     agentThreadSwitchingRef.current = true;
+    agentSendRequestRef.current += 1;
+    agentSendingRef.current = false;
+    setAgentSending(false);
+    setAgentPendingMessage(null);
+    setAgentDraftStructuring(false);
     try {
       const created = await api.createAgentThread();
       activeAgentThreadIdRef.current = created.thread.id;
       applyAgentDetail({ ...created, activeDraft: null, toolManifest: [] }, true);
+      activeDemandIdRef.current = null;
       setLiveDemand(null);
       setHasDemand(false);
+      setMatchJob(null);
       setCandidates([]);
       setSelectedCandidateId(null);
       setInviteStatus('none');
@@ -1251,7 +1419,7 @@ function FitMeetAuthenticatedExperience({
         if (requestedThread) {
           const detail = await loadAgentThread(requestedThread.id, true);
           restoredThreadId = detail.thread.id;
-          hasRemoteDraft = Boolean(detail.activeDraft);
+          hasRemoteDraft = agentDraftCanRenderCard(detail.activeDraft);
         } else if (threadsResult.status === 'fulfilled' && !agentThreadSwitchingRef.current) {
           const created = await api.createAgentThread();
           activeAgentThreadIdRef.current = created.thread.id;
@@ -1371,7 +1539,13 @@ function FitMeetAuthenticatedExperience({
 
   const sendAgentMessage = async (message = chatInput) => {
     const text = message.trim();
-    if (!text || agentSending) return;
+    if (!text || agentSendingRef.current) return;
+    const sendRequestId = ++agentSendRequestRef.current;
+    agentSendingRef.current = true;
+    let expectedThreadId = activeAgentThreadIdRef.current;
+    const operationIsCurrent = () =>
+      sendRequestId === agentSendRequestRef.current &&
+      (!expectedThreadId || activeAgentThreadIdRef.current === expectedThreadId);
     agentSendingAfterSequenceRef.current = agentEntries.reduce(
       (maximum, entry) => Math.max(maximum, Number(entry.sequence || 0)),
       0,
@@ -1382,7 +1556,11 @@ function FitMeetAuthenticatedExperience({
     let liveResponseId: string | null = null;
     try {
       const thread = await ensureAgentThread();
+      if (expectedThreadId && thread.id !== expectedThreadId) return;
+      expectedThreadId = thread.id;
+      if (!operationIsCurrent()) return;
       const turn = await api.sendAgentThreadTurn(thread.id, text);
+      if (!operationIsCurrent()) return;
       liveResponseId = `live-response-${turn.run.id}`;
       const acceptedEntries = compactAgentTimelineEntries([
         ...agentEntries,
@@ -1396,6 +1574,15 @@ function FitMeetAuthenticatedExperience({
         0,
       );
       const onLiveEvent = (event: AgentThreadEntry) => {
+        if (
+          !operationIsCurrent() ||
+          !agentLiveEventBelongsToThread({
+            activeThreadId: activeAgentThreadIdRef.current,
+            expectedThreadId: thread.id,
+            eventThreadId: event.threadId,
+          })
+        )
+          return;
         if (event.kind === 'draft_skeleton') {
           setAgentDraftStructuring(true);
           return;
@@ -1424,11 +1611,16 @@ function FitMeetAuthenticatedExperience({
         timeoutMs: 45_000,
         onEvent: onLiveEvent,
       });
+      if (!operationIsCurrent()) return;
       const detail = await loadAgentThread(thread.id, true);
+      if (!operationIsCurrent()) return;
       if (!['completed', 'waiting_approval'].includes(run.status)) {
         notice('小福仍在后台处理，结果会自动回到当前对话。', 'info');
         void api.waitForAgentRun(run.id, { afterSequence, timeoutMs: 120_000, onEvent: onLiveEvent })
-          .then(() => Promise.all([loadAgentThread(thread.id, true), refreshMemoryCenter()]))
+          .then(() => {
+            if (!operationIsCurrent()) return undefined;
+            return Promise.all([loadAgentThread(thread.id, true), refreshMemoryCenter()]);
+          })
           .catch(() => undefined);
         return;
       }
@@ -1442,6 +1634,7 @@ function FitMeetAuthenticatedExperience({
       });
       if (feedback) notice(feedback);
     } catch (reason) {
+      if (!operationIsCurrent()) return;
       const message = reason instanceof Error ? reason.message : '小福暂时无法回复，请稍后再试。';
       notice(message);
       setAgentPendingMessage(null);
@@ -1450,8 +1643,11 @@ function FitMeetAuthenticatedExperience({
         setAgentEntries((current) => current.filter((entry) => entry.id !== liveResponseId));
       }
     } finally {
-      setAgentDraftStructuring(false);
-      setAgentSending(false);
+      if (operationIsCurrent()) {
+        agentSendingRef.current = false;
+        setAgentDraftStructuring(false);
+        setAgentSending(false);
+      }
     }
   };
 
@@ -1505,48 +1701,184 @@ function FitMeetAuthenticatedExperience({
     }
   };
 
-  const requestAgentDemandLifecycle = async (action: DemandLifecycleAction) => {
-    if (agentSending || demandLifecyclePreparingRef.current) return;
-    demandLifecyclePreparingRef.current = true;
-    setAgentSending(true);
-    try {
-      const thread = await ensureAgentThread();
-      let detail = await loadAgentThread(thread.id, true);
-      const existingProposal = latestAgentToolProposal(
-        detail.entries,
-        'press_demand_card_button',
-        ['awaiting_confirmation'],
-      );
-      if (existingProposal && proposalArguments(existingProposal).action === action) {
-        setSelectedToolProposal(existingProposal);
-        setOverlay('toolApproval');
-        notice('这一步已经在等待确认；没有重复创建新的操作。');
-        return;
-      }
-      const turn = await api.sendAgentThreadTurn(thread.id, demandLifecyclePrompt(action));
-      const afterSequence = (turn.entries || []).reduce(
-        (maximum, entry) => Math.max(maximum, Number(entry.sequence || 0)),
-        0,
-      );
-      await api.waitForAgentRun(turn.run.id, { afterSequence, timeoutMs: 45_000 });
-      detail = await loadAgentThread(thread.id, true);
-      const proposal = latestAgentToolProposal(detail.entries, 'press_demand_card_button', [
-        'awaiting_confirmation',
+  const applyVerifiedDemandDraftAction = (
+    receipt: AgentDemandDraftActionReceipt,
+  ): DemandMatchPhase | null => {
+    if (!receipt.verified) throw new Error('服务端尚未确认这次操作，需求卡保持原样。');
+    setActiveDraftSession(receipt.activeDraft);
+    if (receipt.action === 'cancel') {
+      demandMatchPollGenerationRef.current += 1;
+      activeDemandIdRef.current = null;
+      if (receipt.demand)
+        setDemands((current) => [
+          receipt.demand as FitMeetDemand,
+          ...current.filter((item) => item.id !== receipt.demand?.id),
+        ]);
+      setDemand(emptyDemandView);
+      setHasDemand(false);
+      setLiveDemand(null);
+      setMatchJob(null);
+      setCandidates([]);
+      setSelectedCandidateId(null);
+      return null;
+    }
+    if (!receipt.demand) throw new Error('服务端没有返回可核验的需求状态，需求卡保持原样。');
+    if (receipt.action === 'publish') {
+      const guarded = guardDemandMatchesGeneration({
+        demand: receipt.demand,
+        matchJob: receipt.matchJob,
+        candidates: [],
+        total: 0,
+      });
+      if (!guarded.ok) throw new Error(guarded.message);
+    }
+    return applyDemandProjection(receipt.demand, receipt.matchJob, []);
+  };
+
+  const syncDemandMatches = async (demandId: string) => {
+    const generation = demandMatchPollGenerationRef.current;
+    const page = await api.listDemandMatches(demandId);
+    if (
+      generation !== demandMatchPollGenerationRef.current ||
+      activeDemandIdRef.current !== demandId
+    )
+      throw new Error('当前查看的需求已经变化，已忽略旧的匹配结果。');
+    const guarded = guardDemandMatchesGeneration(page);
+    if (!guarded.ok) {
+      const sanitizedDemand = {
+        ...page.demand,
+        candidateCount: 0,
+        status: page.demand.status === 'hasCandidates' ? 'matching' : page.demand.status,
+      };
+      setMatchJob(null);
+      setCandidates([]);
+      setSelectedCandidateId(null);
+      setDemand(displayDemand(sanitizedDemand));
+      setDemands((current) => [
+        sanitizedDemand,
+        ...current.filter((item) => item.id !== demandId),
       ]);
-      if (!proposal) {
-        const lastAssistant = [...detail.entries]
-          .sort((left, right) => right.sequence - left.sequence)
-          .find((entry) => entry.kind === 'message' && entry.role === 'assistant' && entry.content);
-        throw new Error(lastAssistant?.content || '小福还没有生成可确认的需求卡操作。');
+      throw new Error(guarded.message);
+    }
+    return applyDemandProjection(page.demand, page.matchJob, guarded.candidates);
+  };
+
+  const pollDemandMatches = (demandId: string) => {
+    const generation = ++demandMatchPollGenerationRef.current;
+    void (async () => {
+      const delays = [500, 2_000, 5_000, 15_000, 30_000];
+      for (let index = 0; index < delays.length; index += 1) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, delays[index]));
+        if (generation !== demandMatchPollGenerationRef.current) return;
+        try {
+          const phase = await syncDemandMatches(demandId);
+          if (generation !== demandMatchPollGenerationRef.current) return;
+          if (['matched', 'failed', 'hidden', 'cancelled'].includes(phase)) return;
+        } catch (reason) {
+          if (generation !== demandMatchPollGenerationRef.current) return;
+          if (index === delays.length - 1) {
+            notice(
+              reason instanceof Error
+                ? `需求已经提交，候选状态稍后会自动补齐：${reason.message}`
+                : '需求已经提交，候选状态稍后会自动补齐。',
+              'warning',
+            );
+          }
+        }
       }
-      setSelectedToolProposal(proposal);
-      setOverlay('toolApproval');
-      notice('小福已准备好这一步；只有你在确认页同意后才会执行。');
+    })();
+  };
+
+  const recoverDemandDraftAction = async (
+    threadId: string,
+    action: AgentDemandDraftAction,
+    requestedDemandId?: string | null,
+  ) => {
+    const [detail, demandPage] = await Promise.all([
+      loadAgentThread(threadId),
+      api.listMyDemands(),
+    ]);
+    const record = demandForAgentThread(demandPage.data, threadId, requestedDemandId);
+    const status = record?.status || '';
+    const applied = action === 'publish'
+      ? Boolean(
+          record &&
+            record.visibility === 'public' &&
+            ['published', 'matching', 'candidatePool', 'hasCandidates', 'invited', 'matchedCommunicating'].includes(status),
+        )
+      : action === 'hide'
+        ? Boolean(
+            record &&
+              record.visibility === 'hidden' &&
+              ['hidden', 'matching', 'candidatePool', 'hasCandidates', 'invited', 'matchedCommunicating'].includes(status),
+          )
+        : Boolean(record && ['canceled', 'cancelled'].includes(status));
+    if (!applied) return null;
+    setActiveDraftSession(detail.activeDraft);
+    if (action === 'cancel') {
+      applyVerifiedDemandDraftAction({
+        action,
+        verified: true,
+        demand: record,
+        matchJob: null,
+        activeDraft: detail.activeDraft,
+      });
+      return record;
+    }
+    applyDemandProjection(record as FitMeetDemand, null, []);
+    return record;
+  };
+
+  const performDemandDraftAction = async (action: AgentDemandDraftAction) => {
+    if (demandLifecycleActionRef.current || !activeDraftSession || !activeAgentThread) return;
+    if (action === 'publish' && appConfigLoading)
+      return notice('正在核对发布与匹配能力，请稍后再试。', 'pending');
+    if (action === 'publish' && !demandPublishingEnabled)
+      return notice(appConfigError || '当前环境暂未开放需求发布。', 'warning');
+    if (action === 'publish' && !matchingEnabled)
+      return notice(appConfigError || '当前环境暂未开放真实匹配。', 'warning');
+    demandLifecycleActionRef.current = action;
+    setDemandLifecycleAction(action);
+    const draft = activeDraftSession;
+    const thread = activeAgentThread;
+    try {
+      const receipt = await api.performAgentDemandDraftAction(thread.id, draft.id, {
+        action,
+        cardId: draft.generatedCardId || draft.id,
+        expectedCardStatus: draft.status,
+      });
+      applyVerifiedDemandDraftAction(receipt);
+      setOverlay(null);
+      if (action === 'cancel') {
+        notice('这张需求卡已取消；没有继续匹配或联系任何人。', 'success');
+      } else if (receipt.demand) {
+        pollDemandMatches(receipt.demand.id);
+        notice(
+          action === 'publish'
+            ? '需求已发布，正在匹配合适的人。'
+            : '需求已隐藏，匹配已暂停。',
+          'success',
+        );
+      }
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '小福暂时无法准备这项操作。');
+      const recovered = await recoverDemandDraftAction(
+        thread.id,
+        action,
+        draft.generatedCardId,
+      ).catch(() => null);
+      if (recovered) {
+        setOverlay(null);
+        if (action !== 'cancel') pollDemandMatches(recovered.id);
+        notice('网络回执中断，但已从服务端确认这次操作完成。', 'success');
+      } else {
+        notice(
+          reason instanceof Error ? reason.message : '这次操作没有完成，需求卡保持原样。',
+          'error',
+        );
+      }
     } finally {
-      demandLifecyclePreparingRef.current = false;
-      setAgentSending(false);
+      demandLifecycleActionRef.current = null;
+      setDemandLifecycleAction(null);
     }
   };
 
@@ -1558,61 +1890,58 @@ function FitMeetAuthenticatedExperience({
       return notice('完成资料和照片审核后，才能发布并匹配真实用户。你可以先继续和小福聊聊。 ');
     }
     if (!liveDemand) {
-      await requestAgentDemandLifecycle('publish');
+      await performDemandDraftAction('publish');
       return;
     }
+    if (demandLifecycleActionRef.current) return;
+    if (appConfigLoading) return notice('正在核对发布与匹配能力，请稍后再试。', 'pending');
+    if (!demandPublishingEnabled || !matchingEnabled)
+      return notice(appConfigError || '当前环境暂未开放需求发布与匹配。', 'warning');
+    demandLifecycleActionRef.current = 'publish';
+    setDemandLifecycleAction('publish');
+    const demandId = liveDemand.id;
     try {
-      const created = await api.getDemand(liveDemand.id);
-      const published = await api.publishDemand(created.id, created.category);
-      const page = await api.listDemandCandidates(created.id);
-      const nextCandidates = page.candidates.map(displayCandidate);
-      setLiveDemand({ id: created.id });
-      const resolvedDemand = page.demand ?? published;
-      setDemands((current) => [
-        resolvedDemand,
-        ...current.filter((item) => item.id !== resolvedDemand.id),
-      ]);
-      setDemand({
-        ...displayDemand(resolvedDemand),
-        status: page.candidates.length ? 'matched' : 'matching',
-      });
-      setHasDemand(false);
-      setCandidates(nextCandidates);
-      setSelectedCandidateId(nextCandidates[0]?.id ?? null);
-      notice(
-        page.candidates.length
-          ? `已同步 ${page.candidates.length} 位真实候选人。`
-          : '需求已发布，正在等待合适的候选人。',
-      );
+      const created = await api.getDemand(demandId);
+      const published = await api.publishDemand(created.id, created.category, created.status);
+      applyDemandProjection(published, null, []);
+      setOverlay(null);
+      pollDemandMatches(published.id);
+      notice('需求已发布，正在匹配合适的人。', 'success');
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '需求尚未发布，请稍后再试。');
+      const recovered = await api.getDemand(demandId).catch(() => null);
+      if (
+        recovered &&
+        recovered.visibility === 'public' &&
+        ['published', 'matching', 'candidatePool', 'hasCandidates', 'invited', 'matchedCommunicating'].includes(recovered.status)
+      ) {
+        applyDemandProjection(recovered, null, []);
+        setOverlay(null);
+        pollDemandMatches(recovered.id);
+        notice('网络回执中断，但已从服务端确认需求发布成功。', 'success');
+      } else {
+        notice(reason instanceof Error ? reason.message : '需求尚未发布，请稍后再试。');
+      }
+    } finally {
+      demandLifecycleActionRef.current = null;
+      setDemandLifecycleAction(null);
     }
   };
 
   const changeDemandStatus = async (status: DemandViewModel['status']) => {
     if (!liveDemand) {
-      if (status === 'cancelled' && activeDraftSession) {
-        try {
-          await api.cancelDemandDraftSession(activeDraftSession.id);
-          setActiveDraftSession(null);
-          setHasDemand(false);
-          setDemand(emptyDemandView);
-          setOverlay(null);
-          if (activeAgentThread) await loadAgentThread(activeAgentThread.id);
-          notice('这张未发布需求卡已取消；没有发布、匹配或联系任何人。');
-        } catch (reason) {
-          notice(reason instanceof Error ? reason.message : '取消需求草稿失败，请稍后再试。');
-        }
-        return;
-      }
+      if (activeDraftSession && status === 'hidden') return performDemandDraftAction('hide');
+      if (activeDraftSession && status === 'cancelled') return performDemandDraftAction('cancel');
       return notice('这是一张还没有发布的草稿。你可以继续编辑，或确认后再开始匹配。');
     }
+    if (demandLifecycleActionRef.current) return;
+    const action: AgentDemandDraftAction = status === 'hidden' ? 'hide' : 'cancel';
+    demandLifecycleActionRef.current = action;
+    setDemandLifecycleAction(action);
     if (status === 'hidden') {
       try {
-        const result = await api.hideDemand(liveDemand.id);
-        setDemands((current) => [result, ...current.filter((item) => item.id !== result.id)]);
-        setDemand(displayDemand(result));
-        setHasDemand(false);
+        const result = await api.hideDemand(liveDemand.id, demand.status);
+        demandMatchPollGenerationRef.current += 1;
+        applyDemandProjection(result, null, []);
         notice('匹配已暂停。');
       } catch (reason) {
         notice(reason instanceof Error ? reason.message : '暂停匹配失败，请稍后再试。');
@@ -1620,16 +1949,16 @@ function FitMeetAuthenticatedExperience({
     }
     if (status === 'cancelled') {
       try {
-        const result = await api.cancelDemand(liveDemand.id, '用户主动取消');
-        setDemands((current) => [result, ...current.filter((item) => item.id !== result.id)]);
-        setDemand(displayDemand(result));
-        setHasDemand(false);
-        setCandidates([]);
+        const result = await api.cancelDemand(liveDemand.id, '用户主动取消', demand.status);
+        demandMatchPollGenerationRef.current += 1;
+        applyDemandProjection(result, null, []);
         notice('需求已取消，后续匹配已停止。');
       } catch (reason) {
         notice(reason instanceof Error ? reason.message : '取消需求失败，请稍后再试。');
       }
     }
+    demandLifecycleActionRef.current = null;
+    setDemandLifecycleAction(null);
   };
 
   const recordCandidate = (candidateId: number, decision: CandidateDecision) => {
@@ -1741,7 +2070,9 @@ function FitMeetAuthenticatedExperience({
       }
       await refreshCommunications();
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '邀请状态未能更新，请稍后再试。');
+      const failure = reason instanceof Error ? reason : new Error('邀请状态未能更新，请稍后再试。');
+      notice(failure.message);
+      throw failure;
     }
   };
 
@@ -1753,6 +2084,11 @@ function FitMeetAuthenticatedExperience({
       notice('这段旧会话已在拉黑时关闭。解除拉黑不会自动恢复关系，请重新匹配或建立关系后再聊天。');
       return;
     }
+    const requestGeneration = ++conversationLoadGenerationRef.current;
+    let expectedConversationId = conversationId;
+    activeConversationIdRef.current = expectedConversationId;
+    setConversationLoadingMore(false);
+    setConversationSending(false);
     try {
       let nextConversations = conversations;
       let summary = nextConversations.find(
@@ -1767,7 +2103,27 @@ function FitMeetAuthenticatedExperience({
       }
       if (!summary || (!isGroupConversation(summary) && !conversationPeerId(summary)))
         throw new Error('会话缺少可验证的对方账号，请从最新消息列表重新进入。');
+      if (
+        !conversationRequestIsCurrent({
+          expectedConversationId,
+          activeConversationId: activeConversationIdRef.current,
+          requestGeneration,
+          currentGeneration: conversationLoadGenerationRef.current,
+        })
+      )
+        return;
+      expectedConversationId = summary.id;
+      activeConversationIdRef.current = expectedConversationId;
       const page = await api.getConversationMessagesPage(conversationId, undefined, undefined, 50);
+      if (
+        !conversationRequestIsCurrent({
+          expectedConversationId,
+          activeConversationId: activeConversationIdRef.current,
+          requestGeneration,
+          currentGeneration: conversationLoadGenerationRef.current,
+        })
+      )
+        return;
       const currentUserId = session.state.session?.user.id;
       setConversation(
         page.items.map((message) => displayConversationMessage(message, currentUserId)),
@@ -1779,6 +2135,7 @@ function FitMeetAuthenticatedExperience({
       if (presentation === 'overlay') setOverlay('conversation');
       await refreshCommunications();
     } catch (reason) {
+      if (requestGeneration !== conversationLoadGenerationRef.current) return;
       notice(reason instanceof Error ? reason.message : '会话暂时无法打开，请稍后再试。');
     }
   };
@@ -1792,6 +2149,7 @@ function FitMeetAuthenticatedExperience({
     )
       return;
     const conversationId = selectedConversation.id;
+    const requestGeneration = conversationLoadGenerationRef.current;
     const requestedBefore = conversationNextBefore;
     setConversationLoadingMore(true);
     try {
@@ -1801,14 +2159,25 @@ function FitMeetAuthenticatedExperience({
         undefined,
         50,
       );
+      if (
+        !conversationRequestIsCurrent({
+          expectedConversationId: conversationId,
+          activeConversationId: activeConversationIdRef.current,
+          requestGeneration,
+          currentGeneration: conversationLoadGenerationRef.current,
+        })
+      )
+        return;
       const currentUserId = session.state.session?.user.id;
       const older = page.items.map((message) => displayConversationMessage(message, currentUserId));
       setConversation((items) => mergeConversationMessages(items, older));
       setConversationNextBefore(page.nextBefore);
     } catch (reason) {
+      if (requestGeneration !== conversationLoadGenerationRef.current) return;
       notice(reason instanceof Error ? reason.message : '更早的消息暂时无法加载。', 'error');
     } finally {
-      setConversationLoadingMore(false);
+      if (requestGeneration === conversationLoadGenerationRef.current)
+        setConversationLoadingMore(false);
     }
   }, [
     api,
@@ -1889,36 +2258,49 @@ function FitMeetAuthenticatedExperience({
 
   const createInvite = () => {
     if (!selectedCandidate) return;
-    recordCandidate(selectedCandidate.id, 'invited');
+    inviteIdempotencyKeyRef.current = `web-invite-${liveDemand?.id || 'demand'}-${selectedCandidate.candidateRecordId}-${crypto.randomUUID()}`;
     setInviteStatus('draft');
     setOverlay('invitation');
   };
 
   const sendInvite = async (message: string) => {
-    if (!selectedCandidate) return;
+    if (!selectedCandidate || inviteSendingRef.current) return;
     if (!liveDemand) return notice('请先发布需求并从真实候选人中选择对象，再发送邀请。');
+    inviteSendingRef.current = true;
+    setInviteSending(true);
+    const idempotencyKey =
+      inviteIdempotencyKeyRef.current ||
+      `web-invite-${liveDemand.id}-${selectedCandidate.candidateRecordId}-${crypto.randomUUID()}`;
+    inviteIdempotencyKeyRef.current = idempotencyKey;
     try {
-      const invitation = await api.createInvitation({
-        inviteeUserId: selectedCandidate.candidateUserId,
-        demandId: liveDemand.id,
-        candidateRecordId: selectedCandidate.candidateRecordId,
-        title: demand.title,
-        message,
-        activityType: demand.activityType,
-        city: profile.city,
-        locationText: demand.locationText,
-        timeWindow: demand.timeWindow,
-        capacityMax: demand.capacityMax,
-        sourceType: 'agent_candidate',
-        sourceId: liveDemand.id,
-      });
+      await api.createInvitation(
+        {
+          inviteeUserId: selectedCandidate.candidateUserId,
+          demandId: liveDemand.id,
+          candidateRecordId: selectedCandidate.candidateRecordId,
+          title: demand.title,
+          message,
+          activityType: demand.activityType,
+          city: profile.city,
+          locationText: demand.locationText,
+          timeWindow: demand.timeWindow,
+          capacityMax: demand.capacityMax,
+          sourceType: 'agent_candidate',
+          sourceId: liveDemand.id,
+        },
+        idempotencyKey,
+      );
       recordCandidate(selectedCandidate.id, 'invited');
       setInviteStatus('sent');
+      inviteIdempotencyKeyRef.current = null;
       setOverlay(null);
       await refreshCommunications();
       notice('邀请已发送，等待对方自主决定。');
     } catch (reason) {
       notice(reason instanceof Error ? reason.message : '邀请未能发送，请稍后再试。');
+    } finally {
+      inviteSendingRef.current = false;
+      setInviteSending(false);
     }
   };
 
@@ -2249,6 +2631,18 @@ function FitMeetAuthenticatedExperience({
   const sendConversation = async (retry?: ConversationMessage) => {
     const text = (retry?.text || conversationInput).trim();
     if (!text || !selectedConversation || selectedConversationClosed || conversationSending) return;
+    const activeConversation = selectedConversation;
+    const conversationId = activeConversation.id;
+    const requestGeneration = conversationLoadGenerationRef.current;
+    if (
+      !conversationRequestIsCurrent({
+        expectedConversationId: conversationId,
+        activeConversationId: activeConversationIdRef.current,
+        requestGeneration,
+        currentGeneration: conversationLoadGenerationRef.current,
+      })
+    )
+      return;
     setConversationSending(true);
     const clientMessageId =
       retry?.clientMessageId || retry?.id || `web-message-${crypto.randomUUID()}`;
@@ -2263,10 +2657,19 @@ function FitMeetAuthenticatedExperience({
     }
     try {
       const response = await api.sendConversationMessage(
-        selectedConversation.id,
+        conversationId,
         text,
         clientMessageId,
       );
+      if (
+        !conversationRequestIsCurrent({
+          expectedConversationId: conversationId,
+          activeConversationId: activeConversationIdRef.current,
+          requestGeneration,
+          currentGeneration: conversationLoadGenerationRef.current,
+        })
+      )
+        return;
       const currentUserId = session.state.session?.user.id;
       const settled = displayConversationMessage(
         { ...response, clientMessageId, text: response.text || response.body?.text || text },
@@ -2275,16 +2678,17 @@ function FitMeetAuthenticatedExperience({
       setConversation((items) => settleOptimisticMessage(items, clientMessageId, settled));
       if (!retry) {
         setConversationInput((current) => (current.trim() === text ? '' : current));
-        if ((conversationDraftsRef.current[selectedConversation.id] || '').trim() === text) {
-          persistConversationDraft(selectedConversation.id, '');
+        if ((conversationDraftsRef.current[conversationId] || '').trim() === text) {
+          persistConversationDraft(conversationId, '');
         }
       }
       await refreshCommunications();
     } catch (reason) {
+      if (requestGeneration !== conversationLoadGenerationRef.current) return;
       setConversation((items) => failOptimisticMessage(items, clientMessageId));
       if (reason instanceof FitMeetApiError && reason.status === 403) {
-        rememberClosedConversations([selectedConversation.id]);
-        setConversations((items) => items.filter((item) => item.id !== selectedConversation.id));
+        rememberClosedConversations([conversationId]);
+        setConversations((items) => items.filter((item) => item.id !== conversationId));
         notice(
           '这段会话已经关闭，消息没有发送。解除拉黑不会自动恢复旧关系，请重新匹配或建立关系。',
         );
@@ -2292,7 +2696,8 @@ function FitMeetAuthenticatedExperience({
       }
       notice(reason instanceof Error ? reason.message : '消息未能发送，请稍后再试。');
     } finally {
-      setConversationSending(false);
+      if (requestGeneration === conversationLoadGenerationRef.current)
+        setConversationSending(false);
     }
   };
 
@@ -2330,7 +2735,9 @@ function FitMeetAuthenticatedExperience({
       await api.reportConversationMessage(messageId, reason, details);
       notice('这条消息已提交安全审核；不会自动回复或继续联系对方。');
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '消息举报暂时未能提交。');
+      const failure = reason instanceof Error ? reason : new Error('消息举报暂时未能提交。');
+      notice(failure.message);
+      throw failure;
     }
   };
 
@@ -2633,16 +3040,27 @@ function FitMeetAuthenticatedExperience({
   };
 
   const syncOpenConversation = useCallback(async () => {
+    const conversationId = selectedConversation?.id || '';
     if (
       !liveApi ||
-      !selectedConversation ||
-      closedConversationIds.includes(selectedConversation.id) ||
-      conversationSyncing.current
+      !conversationId ||
+      closedConversationIds.includes(conversationId) ||
+      conversationSyncingRef.current.has(conversationId)
     )
       return;
-    conversationSyncing.current = true;
+    const requestGeneration = conversationLoadGenerationRef.current;
+    conversationSyncingRef.current.add(conversationId);
     try {
-      const page = await api.getConversationMessagesPage(selectedConversation.id, undefined, undefined, 50);
+      const page = await api.getConversationMessagesPage(conversationId, undefined, undefined, 50);
+      if (
+        !conversationRequestIsCurrent({
+          expectedConversationId: conversationId,
+          activeConversationId: activeConversationIdRef.current,
+          requestGeneration,
+          currentGeneration: conversationLoadGenerationRef.current,
+        })
+      )
+        return;
       const currentUserId = session.state.session?.user.id;
       setConversation((items) =>
         mergeConversationMessages(
@@ -2655,15 +3073,24 @@ function FitMeetAuthenticatedExperience({
         api.listConversations(),
         api.getUnreadCount(),
       ]);
+      if (
+        !conversationRequestIsCurrent({
+          expectedConversationId: conversationId,
+          activeConversationId: activeConversationIdRef.current,
+          requestGeneration,
+          currentGeneration: conversationLoadGenerationRef.current,
+        })
+      )
+        return;
       setConversations(nextConversations);
       setUnreadCount(nextUnread.unreadCount ?? 0);
       const nextSummary = nextConversations.find(
         (item) =>
-          item.id === selectedConversation.id || item.conversationId === selectedConversation.id,
+          item.id === conversationId || item.conversationId === conversationId,
       );
       if (nextSummary) setSelectedConversation(nextSummary);
     } finally {
-      conversationSyncing.current = false;
+      conversationSyncingRef.current.delete(conversationId);
     }
   }, [api, closedConversationIds, liveApi, selectedConversation, session.state.session?.user.id]);
 
@@ -2823,6 +3250,24 @@ function FitMeetAuthenticatedExperience({
     return () => window.clearInterval(timer);
   }, [activeTab, api, liveApi]);
 
+  useEffect(() => {
+    if (!liveApi || !liveDemand?.id) return;
+    const demandId = liveDemand.id;
+    const refresh = () => {
+      if (document.visibilityState === 'visible')
+        void syncDemandMatches(demandId).catch(() => undefined);
+    };
+    const onOnline = () => void syncDemandMatches(demandId).catch(() => undefined);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [liveApi, liveDemand?.id]);
+
   const openToolProposal = (proposal: AgentThreadEntry) => {
     setSelectedToolProposal(proposal);
     setOverlay('toolApproval');
@@ -2832,18 +3277,34 @@ function FitMeetAuthenticatedExperience({
     if (!activeAgentThread || !selectedToolProposal || toolProposalDecision) return;
     setToolProposalDecision(decision);
     try {
-      await api.resolveAgentToolProposal(
+      const resolved = await api.resolveAgentToolProposal(
         activeAgentThread.id,
         selectedToolProposal.id,
         decision,
         message ? { message } : undefined,
       );
-      await reconcileRealtimeState();
+      const executed = resolved.resolution.payload?.executed === true;
+      const verified = resolved.resolution.payload?.verified === true;
+      if (decision === 'approve' && executed && !verified)
+        throw new Error('服务端执行后尚未通过状态回读验证，页面不会显示为已完成。');
+      if (selectedToolProposal.toolName === 'press_demand_card_button') {
+        const demandPage = await api.listMyDemands();
+        setDemands(demandPage.data);
+        await loadAgentThread(activeAgentThread.id);
+        const linkedDemand = demandForAgentThread(demandPage.data, activeAgentThread.id);
+        if (decision === 'approve' && !linkedDemand)
+          throw new Error('操作已经提交，但当前需求状态尚未读回；请稍后刷新确认。');
+        if (linkedDemand) await activateDemand(linkedDemand);
+      } else {
+        await reconcileRealtimeState();
+      }
       setOverlay(null);
       setSelectedToolProposal(null);
       notice(
         decision === 'approve'
-          ? '已按你的确认提交；我会以服务端返回的实际结果更新状态。'
+          ? verified
+            ? '服务端已经执行并核验完成。'
+            : '已按你的确认更新；界面已同步服务端状态。'
           : '好的，这项操作不会执行。',
         decision === 'approve' ? 'success' : 'info',
       );
@@ -2951,6 +3412,24 @@ function FitMeetAuthenticatedExperience({
   const currentDemandRecord = liveDemand
     ? demands.find((item) => item.id === liveDemand.id)
     : undefined;
+  const showEditableDemandCard = Boolean(
+    hasDemand &&
+      !liveDemand &&
+      activeDraftSession &&
+      agentDraftCanRenderCard(activeDraftSession),
+  );
+  const currentCandidateCount = Math.max(
+    activeCandidates.length,
+    Number(matchJob?.candidateCount || 0),
+  );
+  const currentDemandMatchPhase = liveDemand
+    ? demandMatchPhase({
+        demandStatus: currentDemandRecord?.status || demand.status,
+        demandVisibility: currentDemandRecord?.visibility,
+        matchJobStatus: matchJob?.status,
+        candidateCount: currentCandidateCount,
+      })
+    : null;
   const contextFields = hasDemand
     ? (demand.fields || [])
         .filter((field) => field.value.trim())
@@ -2971,25 +3450,25 @@ function FitMeetAuthenticatedExperience({
         : activeDraftSession
           ? '等待补充'
           : undefined;
-  const currentDemandLifecycleStage: FitMeetContextLifecycleStage = !hasDemand
+  const currentDemandLifecycleStage: FitMeetContextLifecycleStage = !liveDemand
     ? 'draft'
-    : ['draft'].includes(effectiveDemandStatus(demand, activeCandidates.length))
-      ? 'draft'
-      : ['published', 'matching', 'hidden', 'cancelled'].includes(
-            effectiveDemandStatus(demand, activeCandidates.length),
-          )
-        ? 'published'
-        : 'matching';
+    : ['hidden', 'cancelled'].includes(currentDemandMatchPhase || '')
+      ? 'published'
+      : 'matching';
   const demandContextPrimary =
-    activeDraftSession && !agentDraftCanRenderCard(activeDraftSession)
-      ? '继续补充信息'
-      : effectiveDemandStatus(demand, activeCandidates.length) === 'matched'
-        ? `查看 ${activeCandidates.length} 位候选人`
+    currentDemandMatchPhase === 'matched'
+        ? activeCandidates.length
+          ? `查看 ${activeCandidates.length} 位候选人`
+          : `同步 ${currentCandidateCount} 位候选人`
         : effectiveDemandStatus(demand, activeCandidates.length) === 'communicating'
           ? '进入聊天'
-          : '查看需求与发布状态';
+          : liveDemand
+            ? '查看需求与匹配状态'
+            : activeDraftSession && !agentDraftCanRenderCard(activeDraftSession)
+              ? '正在同步需求状态'
+              : '查看需求与发布状态';
   const openDemandContextPrimary = () => {
-    if (activeDraftSession && !agentDraftCanRenderCard(activeDraftSession)) {
+    if (!liveDemand && activeDraftSession && !agentDraftCanRenderCard(activeDraftSession)) {
       return;
     }
     if (activeDraftSession && agentDraftCanRenderCard(activeDraftSession) && !hasDemand) {
@@ -2999,7 +3478,13 @@ function FitMeetAuthenticatedExperience({
       return;
     }
     const status = effectiveDemandStatus(demand, activeCandidates.length);
-    if (status === 'matched') setOverlay('candidate');
+    if (currentDemandMatchPhase === 'matched' && activeCandidates.length) setOverlay('candidate');
+    else if (currentDemandMatchPhase === 'matched' && liveDemand)
+      void syncDemandMatches(liveDemand.id)
+        .then(() => setOverlay('candidate'))
+        .catch((reason) =>
+          notice(reason instanceof Error ? reason.message : '候选人详情暂时无法同步。', 'warning'),
+        );
     else if (status === 'communicating') openDemandConversation();
     else if (hasDemand) setOverlay('demand');
   };
@@ -3038,7 +3523,9 @@ function FitMeetAuthenticatedExperience({
       await Promise.all([refreshFriends(), refreshCommunications()]);
       notice('好友关系已删除；不会自动拉黑对方。');
     } catch (reason) {
-      notice(reason instanceof Error ? reason.message : '好友关系未能删除。');
+      const failure = reason instanceof Error ? reason : new Error('好友关系未能删除。');
+      notice(failure.message);
+      throw failure;
     }
   };
 
@@ -3216,15 +3703,22 @@ function FitMeetAuthenticatedExperience({
       status={currentDemandStatus || '等待你继续'}
       fields={contextFields}
       missingFields={activeDraftSession?.missingFields || []}
-      candidateCount={activeCandidates.length}
+      candidateCount={currentCandidateCount}
       lifecycleStage={currentDemandLifecycleStage}
       primaryLabel={demandContextPrimary}
       primaryDisabled={Boolean(
-        activeDraftSession &&
+        !liveDemand &&
+          activeDraftSession &&
           !agentDraftCanRenderCard(activeDraftSession),
       )}
       onPrimary={openDemandContextPrimary}
-      onEdit={() => (hasDemand ? setOverlay('demandEdit') : void prepareDemandDraft())}
+      onEdit={() =>
+        showEditableDemandCard
+          ? setOverlay('demandEdit')
+          : liveDemand
+            ? notice('已发布需求不能按草稿覆盖；可以暂停或取消后新建一条需求。', 'info')
+            : void prepareDemandDraft()
+      }
       onOpen={() =>
         activeCandidates.length
           ? setOverlay('candidate')
@@ -3317,54 +3811,44 @@ function FitMeetAuthenticatedExperience({
               onSend={() => void sendConversation()}
               onRetry={(item) => void sendConversation(item)}
               onRecall={(id) => void recallConversationMessage(id)}
-              onReportMessage={(id, reason, details) =>
-                void reportConversationMessage(id, reason, details)
-              }
+              onReportMessage={reportConversationMessage}
               onMute={() => void toggleConversationMute()}
-              onBlockConversation={() => {
+              onBlockConversation={async () => {
                 const targetId = conversationPeerId(selectedConversation);
                 if (!targetId || !selectedConversation) return;
-                void blockAndRemember({
+                await blockAndRemember({
                   id: targetId,
                   name:
                     selectedConversation.displayName ||
                     selectedConversation.username ||
                     selectedConversation.peer?.name,
                   avatar: selectedConversation.avatar || selectedConversation.peer?.avatar,
-                }).then(() => router.push('/agent/try/messages'));
+                });
+                router.push('/agent/try/messages');
               }}
               onRelationshipAction={(request, action) => void resolveConnection(request, action)}
               onAddFriend={addFriendFromProfile}
-              onDeleteFriend={(user) => void deleteFriendFromProfile(user)}
+              onDeleteFriend={deleteFriendFromProfile}
               onStartConversation={(user) => void startConversationFromProfile(user)}
               onConversation={(id) => router.push(`/agent/try/messages/${encodeURIComponent(id)}`)}
               onInviteUser={inviteFromProfile}
-              onBlockUser={(user) =>
-                void blockAndRemember({ id: user.id, name: user.name, avatar: user.avatar })
-                  .then(() =>
-                    setPublicUser((current) =>
-                      current ? { ...current, relationship: 'blocked' } : current,
-                    ),
-                  )
-                  .catch((reason) =>
-                    notice(reason instanceof Error ? reason.message : '拉黑操作未能完成。'),
-                  )
-              }
+              onBlockUser={async (user) => {
+                await blockAndRemember({ id: user.id, name: user.name, avatar: user.avatar });
+                setPublicUser((current) =>
+                  current ? { ...current, relationship: 'blocked' } : current,
+                );
+              }}
               onUnblockUser={(user) => void unblockProfileUser(user)}
-              onReportUser={(user, reason, details) =>
-                void api
-                  .reportSafety({
-                    targetType: 'user',
-                    targetId: user.id,
-                    targetUserId: user.id,
-                    reason,
-                    description: details || '网页公开资料举报',
-                  })
-                  .then(() => notice('举报已提交安全审核；不会自动联系对方。'))
-                  .catch((failure) =>
-                    notice(failure instanceof Error ? failure.message : '举报暂时未能提交。'),
-                  )
-              }
+              onReportUser={async (user, reason, details) => {
+                await api.reportSafety({
+                  targetType: 'user',
+                  targetId: user.id,
+                  targetUserId: user.id,
+                  reason,
+                  description: details || '网页公开资料举报',
+                });
+                notice('举报已提交安全审核；不会自动联系对方。');
+              }}
               onEvent={(event) => void openInboxEvent(event)}
               onAcknowledgeEvent={acknowledgeInboxEvent}
               onAcknowledgeAll={() => void acknowledgeAllEvents()}
@@ -3382,7 +3866,30 @@ function FitMeetAuthenticatedExperience({
             />
           ) : null}
           {!socialExperienceActive && activeTab === 'home' ? (
-            <HomeScreen
+            appConfigLoading || !agentEnabled ? (
+              <div className={styles.standardScreen} aria-live="polite">
+                <header className={styles.messageHeader}>
+                  <div>
+                    <h1>小福 Agent</h1>
+                    <p>正在核对服务能力</p>
+                  </div>
+                </header>
+                <p className={styles.emptyState}>
+                  {appConfigLoading
+                    ? '正在读取服务端能力清单，不会在状态未知时执行真实操作。'
+                    : appConfigError || '当前环境暂未开放 Agent。'}
+                </p>
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  disabled={appConfigLoading}
+                  onClick={() => void refreshAppConfig()}
+                >
+                  <FiRefreshCw /> {appConfigLoading ? '正在检查…' : '重新检查'}
+                </button>
+              </div>
+            ) : (
+              <HomeScreen
               nickname={profile.nickname}
               chat={chat}
               entries={agentEntries}
@@ -3397,16 +3904,52 @@ function FitMeetAuthenticatedExperience({
               pendingMessage={agentPendingMessage}
               onVoice={startVoiceInput}
               voiceActive={voiceInput.isListening}
-              demand={hasDemand ? demand : null}
+              demand={showEditableDemandCard ? demand : null}
+              demandLifecycle={
+                liveDemand && currentDemandMatchPhase
+                  ? {
+                      title: demand.title,
+                      phase: currentDemandMatchPhase,
+                      candidateCount: currentCandidateCount,
+                      errorMessage: matchJob?.errorMessage || null,
+                    }
+                  : null
+              }
+              demandBusy={demandLifecycleAction}
               onEditDemand={() =>
-                hasDemand ? setOverlay('demandEdit') : void prepareDemandDraft()
+                showEditableDemandCard ? setOverlay('demandEdit') : void prepareDemandDraft()
               }
               onPublish={() => void publishDemand()}
               onHide={() => {
                 if (liveDemand) void changeDemandStatus('hidden');
-                else void requestAgentDemandLifecycle('hide');
+                else void performDemandDraftAction('hide');
               }}
               onCancel={() => void changeDemandStatus('cancelled')}
+              onOpenDemandLifecycle={() =>
+                currentDemandMatchPhase === 'matched' && activeCandidates.length
+                  ? setOverlay('candidate')
+                  : currentDemandMatchPhase === 'matched' && liveDemand
+                    ? void syncDemandMatches(liveDemand.id)
+                        .then(() => setOverlay('candidate'))
+                        .catch((reason) =>
+                          notice(
+                            reason instanceof Error ? reason.message : '候选人详情暂时无法同步。',
+                            'warning',
+                          ),
+                        )
+                    : setOverlay('demand')
+              }
+              onSyncDemandLifecycle={() => {
+                if (!liveDemand) return;
+                void syncDemandMatches(liveDemand.id)
+                  .then(() => notice('已从服务端重新核对当前匹配状态。', 'success'))
+                  .catch((reason) =>
+                    notice(
+                      reason instanceof Error ? reason.message : '匹配状态暂时无法同步。',
+                      'warning',
+                    ),
+                  );
+              }}
               onToolProposal={openToolProposal}
               onExploreCandidateKind={(kind) =>
                 void sendAgentMessage(`请保持我刚才的目标和已确认约束，只检索“${fulfillmentCandidateKindLabel(kind)}”类型的真实结果；说明证据和仍缺的验证，不要联系或发布。`)
@@ -3414,7 +3957,8 @@ function FitMeetAuthenticatedExperience({
               onMemory={() => setOverlay('memory')}
               onHistory={() => setOverlay('history')}
               realtimeStatus={realtimeStatus}
-            />
+              />
+            )
           ) : null}
           {!socialExperienceActive && activeTab === 'moments' ? (
             <MomentsExperience
@@ -3442,7 +3986,30 @@ function FitMeetAuthenticatedExperience({
             />
           ) : null}
           {!socialExperienceActive && activeTab === 'messages' ? (
-            <MessagesExperience
+            appConfigLoading || !messagingEnabled ? (
+              <div className={styles.standardScreen} aria-live="polite">
+                <header className={styles.messageHeader}>
+                  <div>
+                    <h1>消息</h1>
+                    <p>正在核对真实会话能力</p>
+                  </div>
+                </header>
+                <p className={styles.emptyState}>
+                  {appConfigLoading
+                    ? '只有服务端确认开放后，才会显示好友、组局与消息会话。'
+                    : appConfigError || '当前环境暂未开放消息能力。'}
+                </p>
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  disabled={appConfigLoading}
+                  onClick={() => void refreshAppConfig()}
+                >
+                  <FiRefreshCw /> {appConfigLoading ? '正在检查…' : '重新检查'}
+                </button>
+              </div>
+            ) : (
+              <MessagesExperience
               invitations={invitations}
               conversations={visibleConversations}
               incomingConnections={incomingConnections}
@@ -3453,7 +4020,7 @@ function FitMeetAuthenticatedExperience({
               currentUserId={session.state.session?.user.id ?? 0}
               unreadCount={unreadCount}
               onConversation={(id) => router.push(`/agent/try/messages/${encodeURIComponent(id)}`)}
-              onInvitation={(invitation, action) => void resolveInvitation(invitation, action)}
+              onInvitation={resolveInvitation}
               onIntentApplication={(kind, application, decision) =>
                 void resolveIntentApplication(kind, application, decision)
               }
@@ -3462,7 +4029,8 @@ function FitMeetAuthenticatedExperience({
               onRelationship={() => router.push('/agent/try/relationships')}
               onNotifications={() => router.push('/agent/try/notifications')}
               onRefresh={reconcileRealtimeState}
-            />
+              />
+            )
           ) : null}
           {!socialExperienceActive && activeTab === 'profile' ? (
             <ProfileExperience
@@ -3486,6 +4054,10 @@ function FitMeetAuthenticatedExperience({
               onNotice={notice}
               onEdit={() => setOverlay('editProfile')}
               onPrivacy={() => setOverlay('privacy')}
+              onAgentDataAccess={() => {
+                setOverlay('agentDataAccess');
+                void refreshAgentDataAccess();
+              }}
               onNotification={(value) => void updateNotificationPreference(value)}
               onRelationships={() => router.push('/agent/try/relationships')}
               onGroups={() => router.push('/agent/try/groups')}
@@ -3594,6 +4166,7 @@ function FitMeetAuthenticatedExperience({
         <DemandSheet
           demand={demand}
           candidateCount={activeCandidates.length}
+          busy={demandLifecycleAction}
           onClose={() => setOverlay(null)}
           onEdit={() => setOverlay('demandEdit')}
           onPublish={() => void publishDemand()}
@@ -3614,11 +4187,13 @@ function FitMeetAuthenticatedExperience({
         <InviteSheet
           candidate={selectedCandidate}
           demand={demand}
+          busy={inviteSending}
           onClose={() => {
+            inviteIdempotencyKeyRef.current = null;
             setInviteStatus('none');
             setOverlay(null);
           }}
-          onSend={(message) => void sendInvite(message)}
+          onSend={sendInvite}
         />
       ) : null}
       {overlay === 'composer' ? (
@@ -3689,6 +4264,19 @@ function FitMeetAuthenticatedExperience({
           onSaveCapability={saveCapabilityOffering}
           onRetry={refreshMemoryCenter}
         />
+      ) : null}
+      {overlay === 'agentDataAccess' ? (
+        <Sheet title="Agent 数据权限" onClose={() => setOverlay(null)}>
+          <AgentDataAccessPanel
+            settings={agentDataAccess}
+            logs={agentDataAccessLogs}
+            loading={agentDataAccessLoading}
+            saving={agentDataAccessSaving}
+            error={agentDataAccessError}
+            onRefresh={refreshAgentDataAccess}
+            onChange={updateAgentDataAccess}
+          />
+        </Sheet>
       ) : null}
       {overlay === 'history' ? (
         <HistorySheet
@@ -3799,90 +4387,19 @@ function FitMeetAuthenticatedExperience({
   );
 }
 
-type AgentRunPresentation = {
-  title: string;
-  detail: string;
-  stage: number;
-  stages: [string, string, string];
-};
-
-function agentRunPresentation(
-  entries: AgentThreadEntry[],
-  afterSequence: number,
-): AgentRunPresentation {
-  const currentTurnEntries = entries.filter(
-    (entry) => Number(entry.sequence || 0) > afterSequence,
-  );
-  const latestTool = [...currentTurnEntries]
-    .reverse()
-    .find((entry) => entry.toolName || entry.kind !== 'message');
-  const toolName = latestTool?.toolName || '';
-  const toolStatus = latestTool?.toolStatus || '';
-
-  if (toolStatus === 'awaiting_confirmation' || toolStatus === 'ready_for_review') {
-    return {
-      title: '内容已整理，等待你确认',
-      detail: '这一步还没有发布、邀请或联系任何人。',
-      stage: 2,
-      stages: ['理解需求', '生成卡片', '等你确认'],
-    };
-  }
-
-  if (/search_candidates|rank_candidates|search_people|search_services|search_activities|search_organizations/.test(toolName)) {
-    return {
-      title: '正在按已确认条件查找候选',
-      detail: '候选会先核对服务端可见性、边界和资料证据，再交给你确认。',
-      stage: /completed|executed|approved/.test(toolStatus) ? 2 : 1,
-      stages: ['确认条件', '筛选候选', '整理理由'],
-    };
-  }
-
-  if (/generate_demand_card|classify_demand|route_demand_flow/.test(toolName)) {
-    return {
-      title: toolName === 'generate_demand_card' ? '正在生成可编辑需求卡' : '已收到，正在整理条件',
-      detail: '正在核对时间、地点、人数与见面边界；卡片生成后仍需你确认。',
-      stage: toolName === 'generate_demand_card' ? 1 : 0,
-      stages: ['理解需求', '生成卡片', '等你确认'],
-    };
-  }
-
-  return {
-    title: '已收到，正在理解你的想法',
-    detail: '小福会先给出可阅读的回复，需要执行的真实动作会单独请你确认。',
-    stage: 0,
-    stages: ['理解需求', '组织回复', '给出下一步'],
-  };
-}
-
 function AgentRunStatus({
   entries,
   afterSequence,
+  draftStructuring,
 }: {
   entries: AgentThreadEntry[];
   afterSequence: number;
+  draftStructuring: boolean;
 }) {
-  const status = agentRunPresentation(entries, afterSequence);
   return (
-    <section className={styles.agentRunStatus} role="status" aria-live="polite">
-      <header>
-        <span className={styles.agentRunPulse} aria-hidden="true" />
-        <div>
-          <strong>{status.title}</strong>
-          <small>{status.detail}</small>
-        </div>
-      </header>
-      <ol aria-label="本轮处理进度">
-        {status.stages.map((stage, index) => (
-          <li
-            key={stage}
-            data-state={index < status.stage ? 'complete' : index === status.stage ? 'active' : 'pending'}
-          >
-            <i>{index < status.stage ? <FiCheck /> : index + 1}</i>
-            <span>{stage}</span>
-          </li>
-        ))}
-      </ol>
-    </section>
+    <AgentTaskProgress
+      presentation={agentRunPresentation(entries, afterSequence, draftStructuring)}
+    />
   );
 }
 
@@ -3902,10 +4419,14 @@ function HomeScreen({
   onVoice,
   voiceActive,
   demand,
+  demandLifecycle,
+  demandBusy,
   onEditDemand,
   onPublish,
   onHide,
   onCancel,
+  onOpenDemandLifecycle,
+  onSyncDemandLifecycle,
   onToolProposal,
   onExploreCandidateKind,
   onMemory,
@@ -3927,10 +4448,19 @@ function HomeScreen({
   onVoice: () => void;
   voiceActive: boolean;
   demand: DemandViewModel | null;
+  demandLifecycle: {
+    title: string;
+    phase: DemandMatchPhase;
+    candidateCount: number;
+    errorMessage: string | null;
+  } | null;
+  demandBusy: AgentDemandDraftAction | null;
   onEditDemand: () => void;
   onPublish: () => void;
   onHide: () => void;
   onCancel: () => void;
+  onOpenDemandLifecycle: () => void;
+  onSyncDemandLifecycle: () => void;
   onToolProposal: (proposal: AgentThreadEntry) => void;
   onExploreCandidateKind: (kind: FulfillmentCandidatePreview['kind']) => void;
   onMemory: () => void;
@@ -3949,9 +4479,12 @@ function HomeScreen({
             content: item.text,
           }) as AgentThreadEntry,
       );
-  const hiddenTimelineCount = Math.max(0, timeline.length - 10);
-  const visibleTimeline = showFullTimeline ? timeline : timeline.slice(-10);
-  const hasUserMessage = timeline.some((item) => item.kind === 'message' && item.role === 'user');
+  const trustedTimeline = timeline.filter(agentEntryCanRender);
+  const hiddenTimelineCount = Math.max(0, trustedTimeline.length - 10);
+  const visibleTimeline = showFullTimeline ? trustedTimeline : trustedTimeline.slice(-10);
+  const hasUserMessage = trustedTimeline.some(
+    (item) => item.kind === 'message' && item.role === 'user',
+  );
   const showWelcome = !hasUserMessage && !pendingMessage && !demand && !draftStructuring;
 
   return (
@@ -3996,6 +4529,7 @@ function HomeScreen({
                     key={item.id}
                     role={item.role === 'user' ? 'user' : 'assistant'}
                     text={item.content || ''}
+                    live={agentEntryIsStreaming(item)}
                   />
                 ) : (
                   <AgentToolTimelineCard
@@ -4008,17 +4542,31 @@ function HomeScreen({
               )}
               {pendingMessage ? <AgentMessage role="user" text={pendingMessage} /> : null}
               {sending ? (
-                <AgentRunStatus entries={entries} afterSequence={sendingAfterSequence} />
+                <AgentRunStatus
+                  entries={entries}
+                  afterSequence={sendingAfterSequence}
+                  draftStructuring={draftStructuring}
+                />
               ) : null}
             </div>
             {demand ? (
               <div className={styles.homeDemandSlot}>
                 <DemandCard
                   demand={demand}
+                  busy={demandBusy}
                   onEdit={onEditDemand}
                   onPublish={onPublish}
                   onHide={onHide}
                   onCancel={onCancel}
+                />
+              </div>
+            ) : null}
+            {demandLifecycle ? (
+              <div className={styles.homeDemandSlot}>
+                <DemandMatchingStatusCard
+                  {...demandLifecycle}
+                  onOpen={onOpenDemandLifecycle}
+                  onSync={onSyncDemandLifecycle}
                 />
               </div>
             ) : null}
@@ -4067,9 +4615,15 @@ function HomeScreen({
             aria-describedby="agent-composer-guidance"
           />
           <div className={styles.composerTools}>
-            <span role="status" aria-live="polite">
-              {sending ? '本轮处理中 · 可以先输入下一条' : '普通聊天与需求整理都可以直接说'}
-            </span>
+            {sending ? (
+              <AgentInlineActivity mode={draftStructuring ? 'structuring' : 'working'}>
+                <span role="status" aria-live="polite">
+                  {draftStructuring ? '正在整理需求卡 · 可以先输入下一条' : '本轮处理中 · 可以先输入下一条'}
+                </span>
+              </AgentInlineActivity>
+            ) : (
+              <span>普通聊天与需求整理都可以直接说</span>
+            )}
             <button
               type="button"
               aria-label={voiceActive ? '停止语音输入' : '语音输入'}
@@ -4093,13 +4647,26 @@ function HomeScreen({
   );
 }
 
-function AgentMessage({ role, text }: { role: 'assistant' | 'user'; text: string }) {
+function AgentMessage({
+  role,
+  text,
+  live = false,
+}: {
+  role: 'assistant' | 'user';
+  text: string;
+  live?: boolean;
+}) {
   const displayText = role === 'assistant' ? agentDisplayText(text) : text;
   return (
-    <article className={role === 'user' ? styles.userChat : styles.agentChat}>
+    <article
+      className={role === 'user' ? styles.userChat : styles.agentChat}
+      aria-busy={role === 'assistant' && live ? 'true' : undefined}
+    >
       {role === 'assistant' ? <FitMeetBrandIcon size={31} /> : null}
       <div>
-        <p>{displayText}</p>
+        <p>
+          <StreamingAgentText live={role === 'assistant' && live}>{displayText}</StreamingAgentText>
+        </p>
       </div>
       {role === 'user' ? <Avatar name="我" size={31} /> : null}
     </article>
@@ -4126,16 +4693,24 @@ function toolTitle(toolName: string | null, status: string | null) {
     classify_demand: '需求理解',
     route_demand_flow: '流程建议',
     generate_demand_card: '需求卡草稿',
+    generate_demand_card_v2: '结构化需求卡',
+    draft_capability_offering: '能力资料草稿',
     press_demand_card_button: '需求卡操作',
+    preview_search_candidates: '候选范围预览',
     search_candidates_for_demand: '候选筛选',
     rank_candidates: '候选排序',
+    search_capability_matches_for_demand: '能力匹配',
     draft_invitation: '邀请草稿',
     send_invitation: '发送邀请',
     draft_service_message: '服务沟通草稿',
     request_service_connection: '联系服务者',
+    draft_multiplayer_group: '组局草稿',
+    create_multiplayer_group: '创建组局',
+    invite_group_candidate: '组局邀请',
     block_user: '拉黑用户',
     report_user: '举报用户',
     patch_social_profile: '更新资料',
+    patch_onboarding: '更新建档资料',
     search_knowledge: '知识检索',
     search_people: '寻找合适的人',
     search_services: '寻找专业服务',
@@ -4166,6 +4741,21 @@ function textList(value: unknown, limit = 3) {
     : [];
 }
 
+function fulfillmentText(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '';
+}
+
+function fulfillmentPositiveInteger(record: Record<string, unknown>, ...keys: string[]) {
+  const value = fulfillmentText(record, ...keys);
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
 function fulfillmentCandidatePreviews(entry: AgentThreadEntry): FulfillmentCandidatePreview[] {
   if (entry.kind !== 'tool_result') return [];
   const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : {};
@@ -4173,16 +4763,65 @@ function fulfillmentCandidatePreviews(entry: AgentThreadEntry): FulfillmentCandi
   if (!execution || typeof execution !== 'object' || Array.isArray(execution)) return [];
   const result = (execution as Record<string, unknown>).result;
   if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
-  const candidates = (result as Record<string, unknown>).candidates;
+  const resultRecord = result as Record<string, unknown>;
+  const candidates = resultRecord.candidates;
   if (!Array.isArray(candidates)) return [];
-  return candidates.slice(0, 3).flatMap((candidate, index) => {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+  const requiresPublishedGeneration = ['search_candidates_for_demand', 'rank_candidates'].includes(
+    entry.toolName || '',
+  );
+  const rootDemandId = fulfillmentText(resultRecord, 'demandId', 'demand_id');
+  const rootMatchJobId = fulfillmentText(resultRecord, 'matchJobId', 'match_job_id');
+  const rootDemandRevision = fulfillmentPositiveInteger(
+    resultRecord,
+    'demandRevision',
+    'demand_revision',
+  );
+  if (
+    requiresPublishedGeneration &&
+    ((resultRecord.isRealData ?? resultRecord.is_real_data) !== true ||
+      !rootDemandId ||
+      !rootMatchJobId ||
+      !rootDemandRevision)
+  ) {
+    return [];
+  }
+  const mapped = candidates.map((candidate, index): FulfillmentCandidatePreview | null => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
     const item = candidate as Record<string, unknown>;
     const title = typeof item.displayName === 'string' ? item.displayName.trim() : '';
-    const candidateId = typeof item.candidateId === 'string' ? item.candidateId.trim() : '';
-    if (!title || !candidateId) return [];
+    const candidateId = fulfillmentText(
+      item,
+      'candidateId',
+      'candidate_id',
+      'candidateRecordId',
+      'candidate_record_id',
+      'matchId',
+      'match_id',
+    );
+    if (!title || !candidateId) return null;
+    if (requiresPublishedGeneration) {
+      const candidateUserId = fulfillmentPositiveInteger(
+        item,
+        'candidateUserId',
+        'candidate_user_id',
+        'targetUserId',
+        'target_user_id',
+        'userId',
+        'user_id',
+      );
+      if (
+        (item.isRealData ?? item.is_real_data) !== true ||
+        (item.preview ?? item.isPreview ?? item.is_preview) === true ||
+        !candidateUserId ||
+        fulfillmentText(item, 'matchJobId', 'match_job_id') !== rootMatchJobId ||
+        fulfillmentPositiveInteger(item, 'demandRevision', 'demand_revision') !==
+          rootDemandRevision
+      ) {
+        return null;
+      }
+    }
     const score = typeof item.score === 'number' && Number.isFinite(item.score) ? item.score : null;
-    return [{
+    return {
       id: `${entry.id}-${candidateId || index}`,
       kind: typeof item.candidateKind === 'string' ? item.candidateKind : 'candidate',
       title,
@@ -4192,8 +4831,10 @@ function fulfillmentCandidatePreviews(entry: AgentThreadEntry): FulfillmentCandi
       evidenceCount: Array.isArray(item.evidence) ? item.evidence.length : 0,
       missingEvidence: textList(item.missingEvidence, 2),
       nextStep: typeof item.recommendedNextStep === 'string' ? item.recommendedNextStep.trim() : '',
-    }];
+    };
   });
+  if (mapped.some((candidate) => candidate === null)) return [];
+  return (mapped as FulfillmentCandidatePreview[]).slice(0, 3);
 }
 
 function fulfillmentCandidateKindLabel(kind: string) {
@@ -4226,6 +4867,12 @@ function AgentToolTimelineCard({
     entry.toolStatus === 'executed' ||
     entry.toolStatus === 'completed' ||
     entry.toolStatus === 'approved';
+  const toolActive = agentToolIsActive(entry.toolStatus);
+  const toolActivity = /search|rank/.test(entry.toolName || '')
+    ? 'searching'
+    : /generate|classify|route/.test(entry.toolName || '')
+      ? 'structuring'
+      : 'working';
   const statusCopy =
     entry.toolStatus === 'awaiting_confirmation'
       ? '等待你的确认'
@@ -4256,7 +4903,11 @@ function AgentToolTimelineCard({
     >
       <header>
         <span>
-          <FiShield />
+          {toolActive ? (
+            <AgentActivityIndicator mode={toolActivity} size="small" />
+          ) : (
+            <FiShield />
+          )}
         </span>
         <div>
           <strong>{toolTitle(entry.toolName, entry.toolStatus)}</strong>
@@ -4342,14 +4993,117 @@ function AgentToolTimelineCard({
   );
 }
 
+function DemandMatchingStatusCard({
+  title,
+  phase,
+  candidateCount,
+  errorMessage,
+  onOpen,
+  onSync,
+}: {
+  title: string;
+  phase: DemandMatchPhase;
+  candidateCount: number;
+  errorMessage: string | null;
+  onOpen: () => void;
+  onSync: () => void;
+}) {
+  const presentation = {
+    matching: {
+      title: '正在匹配合适的人',
+      detail: '需求已经发布。系统正在按地点、时间、兴趣和边界筛选真实候选人。',
+      icon: FiRefreshCw,
+      step: 1,
+      action: '查看匹配状态',
+    },
+    waiting: {
+      title: '已进入候选池',
+      detail: '本轮暂时没有合适候选人，需求会继续保留并等待新的匹配。',
+      icon: FiClock,
+      step: 1,
+      action: '查看需求状态',
+    },
+    matched: {
+      title: `已找到 ${candidateCount} 位候选人`,
+      detail: '候选人只代表推荐结果。加好友、邀请和聊天仍由你逐步确认。',
+      icon: FiUsers,
+      step: 2,
+      action: `查看 ${candidateCount} 位候选人`,
+    },
+    failed: {
+      title: '本轮匹配未完成',
+      detail: errorMessage || '需求仍然保留，可以查看状态并稍后重试。',
+      icon: FiAlertTriangle,
+      step: 1,
+      action: '查看问题',
+    },
+    hidden: {
+      title: '匹配已暂停',
+      detail: '需求不会继续进入新的匹配；恢复前也不会联系任何人。',
+      icon: FiEye,
+      step: 1,
+      action: '查看需求',
+    },
+    cancelled: {
+      title: '需求已取消',
+      detail: '后续匹配已经停止。需要时可以从一条新需求重新开始。',
+      icon: FiXCircle,
+      step: 1,
+      action: '查看记录',
+    },
+  }[phase];
+  const StatusIcon = presentation.icon;
+  return (
+    <section className={styles.demandMatchingCard} data-phase={phase} aria-live="polite">
+      <header>
+        <span>
+          {phase === 'matching' ? (
+            <AgentActivityIndicator mode="searching" size="large" />
+          ) : (
+            <StatusIcon />
+          )}
+        </span>
+        <div>
+          <small>{title}</small>
+          <strong>{presentation.title}</strong>
+        </div>
+      </header>
+      <p>{presentation.detail}</p>
+      <ol className={styles.demandLifecycle} aria-label="需求发布与匹配进度">
+        {['已发布', '匹配中', '查看候选'].map((label, index) => (
+          <li
+            key={label}
+            data-state={index < presentation.step ? 'complete' : index === presentation.step ? 'active' : 'pending'}
+          >
+            <i>{index < presentation.step ? <FiCheck /> : index + 1}</i>
+            <span>{label}</span>
+          </li>
+        ))}
+      </ol>
+      <div className={styles.demandMatchingActions}>
+        <button type="button" className={styles.secondaryButton} onClick={onOpen}>
+          {presentation.action} <FiChevronRight />
+        </button>
+        {['matching', 'waiting', 'failed'].includes(phase) ? (
+          <button type="button" className={styles.tertiaryButton} onClick={onSync}>
+            <FiRefreshCw /> 重新同步
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function DemandCard({
   demand,
+  busy,
   onEdit,
   onPublish,
   onHide,
   onCancel,
 }: {
   demand: DemandViewModel;
+  busy: AgentDemandDraftAction | null;
   onEdit: () => void;
   onPublish: () => void;
   onHide: () => void;
@@ -4379,14 +5133,18 @@ function DemandCard({
           ? FiUsers
           : FiClock;
   return (
-    <section className={styles.demandCard} aria-label={`${demand.title}需求卡`}>
+    <section
+      className={styles.demandCard}
+      aria-label={`${demand.title}需求卡`}
+      aria-busy={Boolean(busy)}
+    >
       <header>
         <span>
           <FiStar />
         </span>
         <strong>{demand.title}</strong>
         <small className={styles.demandStatus}>草稿 · 未发布</small>
-        <button type="button" aria-label="编辑需求" onClick={onEdit}>
+        <button type="button" aria-label="编辑需求" onClick={onEdit} disabled={Boolean(busy)}>
           <FiEdit3 />
         </button>
       </header>
@@ -4398,6 +5156,7 @@ function DemandCard({
             className={styles.demandRow}
             key={`${title}-${value}`}
             onClick={onEdit}
+            disabled={Boolean(busy)}
           >
             <RowIcon />
             <span>{title}</span>
@@ -4411,11 +5170,16 @@ function DemandCard({
         发布后开始推荐合适的人；地点、时间和能力默认只参与排序，邀请和联系仍由你确认。
       </p>
       <div className={styles.demandCardActions}>
-        <button type="button" className={styles.primaryButton} onClick={onPublish}>
-          <FiCheck /> 发布
+        <button type="button" className={styles.primaryButton} onClick={onPublish} disabled={Boolean(busy)}>
+          {busy === 'publish' ? <FiRefreshCw /> : <FiCheck />}{' '}
+          {busy === 'publish' ? '正在确认发布…' : '发布'}
         </button>
-        <button type="button" className={styles.secondaryButton} onClick={onHide}>隐藏</button>
-        <button type="button" className={styles.dangerButton} onClick={onCancel}>取消</button>
+        <button type="button" className={styles.secondaryButton} onClick={onHide} disabled={Boolean(busy)}>
+          {busy === 'hide' ? '正在隐藏…' : '隐藏'}
+        </button>
+        <button type="button" className={styles.dangerButton} onClick={onCancel} disabled={Boolean(busy)}>
+          {busy === 'cancel' ? '正在取消…' : '取消'}
+        </button>
       </div>
     </section>
   );
@@ -4986,6 +5750,7 @@ function DemandListSheet({
 function DemandSheet({
   demand,
   candidateCount,
+  busy,
   onClose,
   onEdit,
   onPublish,
@@ -4996,6 +5761,7 @@ function DemandSheet({
 }: {
   demand: DemandViewModel;
   candidateCount: number;
+  busy: AgentDemandDraftAction | null;
   onClose: () => void;
   onEdit: () => void;
   onPublish: () => void;
@@ -5055,9 +5821,9 @@ function DemandSheet({
             type="button"
             className={styles.primaryButton}
             onClick={onPublish}
-            disabled={effectiveStatus === 'draft' && demand.publishable === false}
+            disabled={Boolean(busy) || (effectiveStatus === 'draft' && demand.publishable === false)}
           >
-            确认并开始匹配
+            {busy === 'publish' ? '正在确认发布…' : '确认并开始匹配'}
           </button>
         ) : null}
         {effectiveStatus === 'draft' && demand.publishable === false ? (
@@ -5081,13 +5847,13 @@ function DemandSheet({
           </p>
         ) : null}
         {['published', 'matching', 'matched'].includes(effectiveStatus) ? (
-          <button type="button" className={styles.secondaryButton} onClick={onHide}>
-            暂停匹配
+          <button type="button" className={styles.secondaryButton} onClick={onHide} disabled={Boolean(busy)}>
+            {busy === 'hide' ? '正在暂停…' : '暂停匹配'}
           </button>
         ) : null}
         {!['cancelled', 'communicating'].includes(effectiveStatus) ? (
-          <button type="button" className={styles.dangerButton} onClick={onCancel}>
-            取消这条需求
+          <button type="button" className={styles.dangerButton} onClick={onCancel} disabled={Boolean(busy)}>
+            {busy === 'cancel' ? '正在取消…' : '取消这条需求'}
           </button>
         ) : null}
       </div>
@@ -5228,23 +5994,26 @@ function DemandEditSheet({
 function InviteSheet({
   candidate,
   demand,
+  busy,
   onClose,
   onSend,
 }: {
   candidate: CandidateViewModel;
   demand: DemandViewModel;
+  busy: boolean;
   onClose: () => void;
-  onSend: (message: string) => void;
+  onSend: (message: string) => Promise<void>;
 }) {
   const [message, setMessage] = useState(invitationMessage(candidate, demand));
   return (
-    <Sheet title={`邀请 ${candidate.name} 一起活动`} onClose={onClose}>
+    <Sheet title={`邀请 ${candidate.name} 一起活动`} onClose={onClose} closeDisabled={busy}>
       <div className={styles.inviteDraft}>
         <span>邀请说明</span>
         <textarea
           className={styles.publishTextarea}
           aria-label="邀请文案"
           value={message}
+          disabled={busy}
           onChange={(event) => setMessage(event.target.value)}
         />
         <small>发送前可以随时修改；对方接受前不会开放私信。</small>
@@ -5252,10 +6021,10 @@ function InviteSheet({
       <button
         type="button"
         className={styles.primaryButton}
-        disabled={!message.trim()}
-        onClick={() => onSend(message)}
+        disabled={!message.trim() || busy}
+        onClick={() => void onSend(message)}
       >
-        <FiSend /> 确认发送邀请
+        <FiSend /> {busy ? '正在发送…' : '确认发送邀请'}
       </button>
     </Sheet>
   );

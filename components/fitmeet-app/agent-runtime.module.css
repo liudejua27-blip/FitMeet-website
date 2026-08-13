@@ -1,0 +1,300 @@
+.activityIndicator {
+  --activity-edge: 22px;
+  --activity-dot: 3px;
+  --activity-color: var(--shell-accent, #3478f6);
+  display: grid;
+  width: var(--activity-edge);
+  height: var(--activity-edge);
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, var(--activity-dot));
+  grid-template-rows: repeat(3, var(--activity-dot));
+  place-content: center;
+  gap: 2px;
+  border-radius: 7px;
+  color: var(--activity-color);
+}
+
+.activityIndicator[data-size='small'] {
+  --activity-edge: 16px;
+  --activity-dot: 2px;
+  gap: 1.5px;
+}
+
+.activityIndicator[data-size='large'] {
+  --activity-edge: 30px;
+  --activity-dot: 4px;
+  gap: 2.5px;
+}
+
+.activityIndicator i {
+  width: var(--activity-dot);
+  height: var(--activity-dot);
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.22;
+  animation: activity-wave 1.35s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation-delay: calc(var(--activity-index) * -90ms);
+}
+
+.activityIndicator[data-mode='structuring'] {
+  --activity-color: var(--shell-accent-2, #7655ed);
+}
+
+.activityIndicator[data-mode='structuring'] i {
+  animation-name: activity-build;
+}
+
+.activityIndicator[data-mode='searching'] i {
+  animation-name: activity-scan;
+  animation-delay: calc((var(--activity-index) % 3) * -180ms);
+}
+
+.activityIndicator[data-mode='working'] i {
+  animation-name: activity-breathe;
+}
+
+.taskProgress {
+  width: min(calc(100% - 43px), 620px);
+  overflow: hidden;
+  margin-left: 43px;
+  border: 1px solid var(--shell-border, #e5e8ef);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--shell-accent, #3478f6) 2.5%, var(--shell-surface, #fff));
+  box-shadow: 0 12px 30px rgba(29, 39, 67, 0.055);
+}
+
+.taskProgressHeader {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 28px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.taskProgressHeader:hover {
+  background: color-mix(in srgb, var(--shell-accent, #3478f6) 3.5%, transparent);
+}
+
+.taskProgressHeader:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--shell-accent, #3478f6) 68%, #fff);
+  outline-offset: -3px;
+}
+
+.taskProgressCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.taskProgressCopy strong {
+  overflow: hidden;
+  color: var(--shell-text, #171a23);
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskProgressCopy small {
+  overflow: hidden;
+  color: var(--shell-muted, #667085);
+  font-size: 10px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskProgressCount {
+  min-width: 31px;
+  color: var(--shell-muted, #667085);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.taskProgressChevron {
+  color: var(--shell-muted, #667085);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.taskProgressHeader[aria-expanded='true'] .taskProgressChevron {
+  transform: rotate(180deg);
+}
+
+.taskProgressCollapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
+}
+
+.taskProgressCollapsible[data-expanded='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.taskProgressList {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  gap: 1px;
+  margin: 0;
+  padding: 0 14px 12px 52px;
+  list-style: none;
+}
+
+.taskProgressList li {
+  display: grid;
+  min-height: 27px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--shell-muted, #667085);
+  font-size: 11px;
+}
+
+.taskProgressList li[data-state='running'] {
+  color: var(--shell-accent, #3478f6);
+  font-weight: 680;
+}
+
+.taskProgressList li[data-state='waiting'] {
+  color: #9a6200;
+  font-weight: 650;
+}
+
+.taskProgressList li[data-state='failed'] {
+  color: #c13d57;
+  font-weight: 650;
+}
+
+.taskProgressList li[data-state='complete'] {
+  color: color-mix(in srgb, var(--shell-muted, #667085) 78%, transparent);
+}
+
+.taskProgressIcon {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 11px;
+}
+
+.taskProgressList li[data-state='running'] .taskProgressIcon {
+  background: color-mix(in srgb, var(--shell-accent, #3478f6) 10%, transparent);
+}
+
+.taskProgressList li[data-state='waiting'] .taskProgressIcon {
+  background: color-mix(in srgb, #f59e0b 13%, transparent);
+}
+
+.taskProgressList li[data-state='failed'] .taskProgressIcon {
+  background: color-mix(in srgb, #ef476f 12%, transparent);
+}
+
+.taskProgressList li[data-state='complete'] .taskProgressIcon {
+  color: var(--shell-accent, #3478f6);
+}
+
+.streamingText {
+  white-space: pre-wrap;
+}
+
+.streamingCaret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--shell-accent, #3478f6), var(--shell-accent-2, #7655ed));
+  vertical-align: -0.14em;
+  animation: streaming-caret 850ms steps(1, end) infinite;
+}
+
+.inlineActivity {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.inlineActivity > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes activity-wave {
+  0%, 100% { opacity: 0.16; transform: scale(0.72); }
+  45% { opacity: 0.92; transform: scale(1); }
+}
+
+@keyframes activity-build {
+  0%, 100% { opacity: 0.16; transform: translateY(1px) scale(0.78); }
+  50% { opacity: 0.95; transform: translateY(-1px) scale(1); }
+}
+
+@keyframes activity-scan {
+  0%, 100% { opacity: 0.16; transform: scale(0.78); }
+  35% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes activity-breathe {
+  0%, 100% { opacity: 0.22; }
+  50% { opacity: 0.78; }
+}
+
+@keyframes streaming-caret {
+  0%, 48% { opacity: 1; }
+  49%, 100% { opacity: 0.18; }
+}
+
+@media (max-width: 767px) {
+  .taskProgress {
+    width: calc(100% - 39px);
+    margin-left: 39px;
+  }
+
+  .taskProgressHeader {
+    grid-template-columns: 26px minmax(0, 1fr) auto 15px;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .taskProgressCopy small {
+    white-space: normal;
+  }
+
+  .taskProgressList {
+    padding-right: 12px;
+    padding-bottom: 11px;
+    padding-left: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activityIndicator i,
+  .streamingCaret {
+    animation: none;
+  }
+
+  .activityIndicator i {
+    opacity: 0.65;
+  }
+
+  .taskProgressCollapsible,
+  .taskProgressChevron {
+    transition: none;
+  }
+}

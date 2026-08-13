@@ -29,6 +29,9 @@ export const fitMeetPaths = {
     profile: "/auth/profile",
     sessions: "/auth/sessions",
     session: (id: string) => `/auth/sessions/${encodeURIComponent(id)}`,
+    reauthChallenges: "/auth/reauth/challenges",
+    verifyReauthChallenge: (id: string) =>
+      `/auth/reauth/challenges/${encodeURIComponent(id)}/verify`,
   },
   users: {
     profile: "/users/profile",
@@ -58,6 +61,8 @@ export const fitMeetPaths = {
       `/users/me/agent-memory/${encodeURIComponent(id)}/suppress`,
     agentMemorySuppression: (memoryType: string) =>
       `/users/me/agent-memory/suppressions/${encodeURIComponent(memoryType)}`,
+    agentDataAccess: "/users/me/agent-data-access",
+    agentDataAccessLog: "/users/me/agent-data-access-log",
     agentNeedWiki: "/users/me/agent-need-wiki",
     agentNeedWikiItem: (id: string) =>
       `/users/me/agent-need-wiki/${encodeURIComponent(id)}`,
@@ -124,6 +129,7 @@ export const fitMeetPaths = {
     hide: (id: string) => `/demands/${encodeURIComponent(id)}/hide`,
     cancel: (id: string) => `/demands/${encodeURIComponent(id)}/cancel`,
     candidates: (id: string) => `/demands/${encodeURIComponent(id)}/candidates`,
+    matches: (id: string) => `/demands/${encodeURIComponent(id)}/matches`,
     candidateBehavior: (demandId: string, candidateId: number) => `/demands/${encodeURIComponent(demandId)}/candidates/${candidateId}/behavior`,
   },
   demandDraftSessions: {
@@ -137,6 +143,8 @@ export const fitMeetPaths = {
     detail: (id: string) => `/users/me/agent-threads/${encodeURIComponent(id)}`,
     turns: (id: string) => `/users/me/agent-threads/${encodeURIComponent(id)}/turns`,
     resolveProposal: (id: string, proposalId: string) => `/users/me/agent-threads/${encodeURIComponent(id)}/tool-proposals/${encodeURIComponent(proposalId)}/resolve`,
+    demandDraftAction: (id: string, draftId: string) =>
+      `/users/me/agent-threads/${encodeURIComponent(id)}/demand-drafts/${encodeURIComponent(draftId)}/actions`,
   },
   agentRuns: {
     detail: (id: string) => `/users/me/agent-runs/${encodeURIComponent(id)}`,
@@ -226,6 +234,35 @@ export type EmailActionResult = {
   status: "accepted" | "verified" | "password_reset";
   message?: string;
   sessionsRevoked?: boolean;
+};
+
+export type AccountReauthMethod = "email_password" | "sms";
+export type AccountReauthAction = "account.delete";
+
+export type AccountReauthChallengeRequest = {
+  action: AccountReauthAction;
+  method: AccountReauthMethod;
+};
+
+export type AccountReauthChallengeResponse = {
+  challengeId: string;
+  action: AccountReauthAction;
+  method: AccountReauthMethod;
+  expiresAt: string;
+  expiresIn: number;
+  maskedDestination?: string | null;
+};
+
+export type AccountReauthVerificationResponse = {
+  reauthToken: string;
+  action: AccountReauthAction;
+  expiresAt: string;
+  expiresIn: number;
+};
+
+export type AccountDeletionResponse = {
+  status: "deleted";
+  deletedAt?: string | null;
 };
 
 export type OnboardingStatus = {
@@ -379,6 +416,8 @@ export type PublicUserProfile = {
 
 export type FitMeetDemand = {
   id: string;
+  /** Server-owned optimistic revision used to bind one matching generation. */
+  revision?: number;
   sourceConversationId?: string | null;
   type: string;
   title: string;
@@ -399,6 +438,10 @@ export type FitMeetDemand = {
 export type FitMeetDemandCandidate = {
   candidateRecordId: number;
   candidateUserId: number;
+  /** The exact matching job that produced this candidate. */
+  matchJobId?: string | null;
+  /** The demand revision used when this candidate was produced. */
+  demandRevision?: number | null;
   displayName: string;
   nickname?: string;
   age?: number | null;
@@ -433,6 +476,28 @@ export type FitMeetDemandCandidate = {
     boundaryNotes?: string[];
     confidenceLevel?: string;
   };
+};
+
+export type DemandMatchJob = {
+  id: string;
+  demandId: string;
+  demandRevision: number;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  candidateCount?: number | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  queuedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type DemandMatchesResponse = {
+  demand: FitMeetDemand;
+  matchJob: DemandMatchJob | null;
+  candidates: FitMeetDemandCandidate[];
+  total: number;
+  nextCursor?: string | null;
 };
 
 export type FitMeetConversation = {
@@ -651,6 +716,55 @@ export type AgentMemorySuppressionMutation = {
   control: AgentMemoryControl;
 };
 
+export type AgentPrivateMessageAccess = 'shared_only' | 'disabled';
+
+export type AgentDataAccessSettings = {
+  profileConfirmed: boolean;
+  capabilityOfferings: boolean;
+  verificationBadges: boolean;
+  demands: boolean;
+  needWiki: boolean;
+  confirmedMemory: boolean;
+  publicPosts: boolean;
+  fulfillmentHistory: boolean;
+  relationshipSummary: boolean;
+  personalizedMatching: boolean;
+  privateMessages: AgentPrivateMessageAccess;
+  revision: number;
+  updatedAt: string | null;
+};
+
+export type AgentDataAccessUpdateRequest = Partial<Pick<
+  AgentDataAccessSettings,
+  | 'profileConfirmed'
+  | 'capabilityOfferings'
+  | 'verificationBadges'
+  | 'demands'
+  | 'needWiki'
+  | 'confirmedMemory'
+  | 'publicPosts'
+  | 'fulfillmentHistory'
+  | 'relationshipSummary'
+  | 'personalizedMatching'
+  | 'privateMessages'
+>> & {
+  expectedRevision: number;
+};
+
+export type AgentDataAccessLogEntry = {
+  id: string;
+  purpose: string;
+  sources: string[];
+  subjectType: string | null;
+  subjectId: string | null;
+  createdAt: string;
+};
+
+export type AgentDataAccessLogPage = {
+  items: AgentDataAccessLogEntry[];
+  nextCursor: string | null;
+};
+
 export type AgentToolCall = {
   id?: string;
   type?: string;
@@ -865,6 +979,16 @@ export type DemandDraftSession = {
   structuredDraft?: StructuredDemandDraftV2 | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentDemandDraftAction = "publish" | "hide" | "cancel";
+
+export type AgentDemandDraftActionReceipt = {
+  action: AgentDemandDraftAction;
+  verified: boolean;
+  demand: FitMeetDemand | null;
+  matchJob: DemandMatchJob | null;
+  activeDraft: DemandDraftSession | null;
 };
 
 export type AgentThread = {
@@ -1232,4 +1356,5 @@ export type RequestOptions = {
   path: string;
   body?: unknown;
   idempotencyKey?: string;
+  headers?: Readonly<Record<string, string>>;
 };

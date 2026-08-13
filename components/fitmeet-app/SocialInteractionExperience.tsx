@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   FiArrowDown,
   FiArrowLeft,
@@ -43,12 +43,19 @@ import {
   type InboxEventCategory,
 } from '@/lib/fitmeet-product-trust';
 import {
+  conversationMessageGroupPresentation,
+  dedupeAndSortConversations,
+  formatInboxTimestamp,
+  formatMessageClock,
   firstUnreadPeerMessageIndex,
+  messageDateSeparatorLabel,
+  shouldSubmitMessageFromKeyboard,
   type RelationshipSnapshot,
 } from '@/lib/fitmeet-social-state';
 import styles from './social-interaction.module.css';
 import { FriendRequestDialog } from './FriendRequestDialog';
 import { GroupExperience } from './GroupExperience';
+import { useAccessibleDialog } from './useAccessibleDialog';
 
 export type SocialExperienceMode =
   | 'user'
@@ -135,21 +142,25 @@ export function SocialInteractionExperience(props: {
   onSend: () => void;
   onRetry: (message: ConversationMessage) => void;
   onRecall: (id: string) => void;
-  onReportMessage: (id: string, reason: string, details?: string) => void;
+  onReportMessage: (id: string, reason: string, details?: string) => void | Promise<void>;
   onMute: () => void;
-  onBlockConversation: () => void;
+  onBlockConversation: () => void | Promise<void>;
   onRelationshipAction: (
     request: FitMeetConnectionRequest,
     action: 'accept' | 'reject' | 'cancel',
   ) => void;
   onAddFriend: (user: PublicUserProfile, message: string) => Promise<FitMeetActionResult>;
-  onDeleteFriend: (user: PublicUserProfile) => void;
+  onDeleteFriend: (user: PublicUserProfile) => void | Promise<void>;
   onStartConversation: (user: PublicUserProfile) => void;
   onConversation: (id: string) => void;
   onInviteUser: (user: PublicUserProfile) => void;
-  onBlockUser: (user: PublicUserProfile) => void;
+  onBlockUser: (user: PublicUserProfile) => void | Promise<void>;
   onUnblockUser: (user: PublicUserProfile) => void;
-  onReportUser: (user: PublicUserProfile, reason: string, details?: string) => void;
+  onReportUser: (
+    user: PublicUserProfile,
+    reason: string,
+    details?: string,
+  ) => void | Promise<void>;
   onEvent: (event: AgentInboxEvent) => void;
   onAcknowledgeEvent: (id: string) => Promise<void>;
   onAcknowledgeAll: () => void;
@@ -188,14 +199,107 @@ export function SocialInteractionExperience(props: {
 
 type SocialProps = Parameters<typeof SocialInteractionExperience>[0];
 
+function AccessibleConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel,
+  busy,
+  icon,
+  children,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  busy: boolean;
+  icon: ReactNode;
+  children?: ReactNode;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const closeUnlessBusy = () => {
+    if (!busy) onClose();
+  };
+  const dialogRef = useAccessibleDialog(open, closeUnlessBusy, cancelRef);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className={styles.modalShade}
+      role="presentation"
+      data-busy={busy ? 'true' : undefined}
+      onMouseDown={closeUnlessBusy}
+    >
+      <section
+        ref={dialogRef}
+        tabIndex={-1}
+        className={styles.confirmDialog}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        aria-busy={busy}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {icon}
+        <h2 id={titleId}>{title}</h2>
+        <p id={descriptionId}>{description}</p>
+        {children}
+        <div>
+          <button ref={cancelRef} type="button" disabled={busy} onClick={closeUnlessBusy}>
+            取消
+          </button>
+          <button
+            type="button"
+            className={styles.dangerButton}
+            disabled={busy}
+            onClick={() => void onConfirm()}
+          >
+            {busy ? '正在提交…' : confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function UserWorkspace(props: SocialProps) {
   const [friendSheet, setFriendSheet] = useState(false);
   const [confirm, setConfirm] = useState<'delete' | 'block' | 'report' | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [reportReason, setReportReason] = useState('inappropriate_behavior');
   const [reportDetails, setReportDetails] = useState('');
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const user = props.user;
+  const closeUserConfirmation = () => {
+    if (!confirmBusy) setConfirm(null);
+  };
+  const executeUserConfirmation = async () => {
+    if (!user || !confirm || confirmBusy) return;
+    setConfirmBusy(true);
+    try {
+      if (confirm === 'delete') await Promise.resolve(props.onDeleteFriend(user));
+      else if (confirm === 'block') await Promise.resolve(props.onBlockUser(user));
+      else
+        await Promise.resolve(
+          props.onReportUser(user, reportReason, reportDetails.trim() || undefined),
+        );
+      setConfirm(null);
+      if (confirm === 'report') setReportDetails('');
+    } catch (reason) {
+      props.onNotice(reason instanceof Error ? reason.message : '安全操作未能完成，请稍后重试。');
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
   useEffect(() => {
     if (!user?.id) return;
     let active = true;
@@ -461,75 +565,57 @@ function UserWorkspace(props: SocialProps) {
         onClose={() => setFriendSheet(false)}
         onSubmit={(value) => props.onAddFriend(user, value)}
       />
-      {confirm ? (
-        <div className={styles.modalShade} onMouseDown={() => setConfirm(null)}>
-          <section
-            className={styles.confirmDialog}
-            role="alertdialog"
-            aria-modal="true"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <FiShield />
-            <h2>
-              {confirm === 'delete'
-                ? '删除好友？'
-                : confirm === 'block'
-                  ? '拉黑并停止互动？'
-                  : '举报这位用户？'}
-            </h2>
-            <p>
-              {confirm === 'delete'
-                ? '删除后不会自动拉黑；重新聊天需要再次建立关系。'
-                : confirm === 'block'
-                  ? '将停止推荐并关闭后续互动；解除后也不会自动恢复好友关系。'
-                  : '举报会进入安全审核，不会自动向对方发送消息。'}
-            </p>
-            {confirm === 'report' ? (
-              <div className={styles.reportFields}>
-                <label>
-                  <span>举报原因</span>
-                  <select
-                    value={reportReason}
-                    onChange={(event) => setReportReason(event.target.value)}
-                  >
-                    <option value="inappropriate_behavior">不当行为</option>
-                    <option value="harassment">骚扰或越界</option>
-                    <option value="fraud">疑似欺诈</option>
-                    <option value="unsafe_offline_request">不安全的线下请求</option>
-                    <option value="other">其他</option>
-                  </select>
-                </label>
-                <label>
-                  <span>补充说明（可选）</span>
-                  <textarea
-                    value={reportDetails}
-                    maxLength={500}
-                    onChange={(event) => setReportDetails(event.target.value)}
-                    placeholder="请勿填写联系方式、精确位置等敏感信息"
-                  />
-                </label>
-              </div>
-            ) : null}
-            <div>
-              <button type="button" onClick={() => setConfirm(null)}>
-                取消
-              </button>
-              <button
-                type="button"
-                className={styles.dangerButton}
-                onClick={() => {
-                  if (confirm === 'delete') props.onDeleteFriend(user);
-                  else if (confirm === 'block') props.onBlockUser(user);
-                  else props.onReportUser(user, reportReason, reportDetails.trim() || undefined);
-                  setConfirm(null);
-                }}
+      <AccessibleConfirmDialog
+        open={Boolean(confirm)}
+        title={
+          confirm === 'delete'
+            ? '删除好友？'
+            : confirm === 'block'
+              ? '拉黑并停止互动？'
+              : '举报这位用户？'
+        }
+        description={
+          confirm === 'delete'
+            ? '删除后不会自动拉黑；重新聊天需要再次建立关系。'
+            : confirm === 'block'
+              ? '将停止推荐并关闭后续互动；解除后也不会自动恢复好友关系。'
+              : '举报会进入安全审核，不会自动向对方发送消息。'
+        }
+        confirmLabel="确认"
+        busy={confirmBusy}
+        icon={<FiShield />}
+        onClose={closeUserConfirmation}
+        onConfirm={executeUserConfirmation}
+      >
+        {confirm === 'report' ? (
+          <div className={styles.reportFields}>
+            <label>
+              <span>举报原因</span>
+              <select
+                value={reportReason}
+                disabled={confirmBusy}
+                onChange={(event) => setReportReason(event.target.value)}
               >
-                确认
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
+                <option value="inappropriate_behavior">不当行为</option>
+                <option value="harassment">骚扰或越界</option>
+                <option value="fraud">疑似欺诈</option>
+                <option value="unsafe_offline_request">不安全的线下请求</option>
+                <option value="other">其他</option>
+              </select>
+            </label>
+            <label>
+              <span>补充说明（可选）</span>
+              <textarea
+                value={reportDetails}
+                maxLength={500}
+                disabled={confirmBusy}
+                onChange={(event) => setReportDetails(event.target.value)}
+                placeholder="请勿填写联系方式、精确位置等敏感信息"
+              />
+            </label>
+          </div>
+        ) : null}
+      </AccessibleConfirmDialog>
     </main>
   );
 }
@@ -659,6 +745,7 @@ function ConversationWorkspace(props: SocialProps) {
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  const [safetyBusy, setSafetyBusy] = useState(false);
   const [messageReportReason, setMessageReportReason] = useState('inappropriate_content');
   const [messageReportDetails, setMessageReportDetails] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
@@ -667,6 +754,47 @@ function ConversationWorkspace(props: SocialProps) {
   const positionedConversationRef = useRef<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const conversation = props.conversation;
+  const closeConversationBlock = () => {
+    if (!safetyBusy) setConfirmBlock(false);
+  };
+  const closeMessageReport = () => {
+    if (!safetyBusy) setReportMessageId(null);
+  };
+  const executeConversationBlock = async () => {
+    if (safetyBusy) return;
+    setSafetyBusy(true);
+    try {
+      await Promise.resolve(props.onBlockConversation());
+      setConfirmBlock(false);
+    } catch (reason) {
+      props.onNotice(reason instanceof Error ? reason.message : '拉黑操作未能完成，请稍后重试。');
+    } finally {
+      setSafetyBusy(false);
+    }
+  };
+  const executeMessageReport = async () => {
+    if (!reportMessageId || safetyBusy) return;
+    setSafetyBusy(true);
+    try {
+      await Promise.resolve(
+        props.onReportMessage(
+          reportMessageId,
+          messageReportReason,
+          messageReportDetails.trim() || undefined,
+        ),
+      );
+      setReportMessageId(null);
+      setMessageReportDetails('');
+    } catch (reason) {
+      props.onNotice(reason instanceof Error ? reason.message : '举报未能提交，请稍后重试。');
+    } finally {
+      setSafetyBusy(false);
+    }
+  };
+  const visibleConversations = useMemo(
+    () => dedupeAndSortConversations(props.conversations),
+    [props.conversations],
+  );
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
@@ -749,7 +877,15 @@ function ConversationWorkspace(props: SocialProps) {
             if (id) props.onUser(id);
           }}
         >
-          <span className={styles.smallAvatar}>{title.slice(0, 1)}</span>
+          {conversation.avatar || conversation.peer?.avatar ? (
+            <img
+              className={styles.smallAvatar}
+              src={conversation.avatar || conversation.peer?.avatar || ''}
+              alt={`${title}的头像`}
+            />
+          ) : (
+            <span className={styles.smallAvatar}>{title.slice(0, 1)}</span>
+          )}
           <span>
             <strong>{title}</strong>
             <small>
@@ -785,12 +921,12 @@ function ConversationWorkspace(props: SocialProps) {
           <header>
             <div>
               <strong>会话</strong>
-              <small>{props.conversations.length} 个已开放会话</small>
+              <small>{visibleConversations.length} 个已开放会话</small>
             </div>
             <FiMessageCircle />
           </header>
           <div>
-            {props.conversations.map((item) => {
+            {visibleConversations.map((item) => {
               const itemTitle =
                 item.title || item.displayName || item.username || item.peer?.name || 'FitMeet 用户';
               const active = item.id === conversation.id || item.conversationId === conversation.id;
@@ -812,7 +948,7 @@ function ConversationWorkspace(props: SocialProps) {
                     <small>{item.lastMessage || '会话已开放'}</small>
                   </div>
                   <aside>
-                    <time>{item.time || item.updatedAt || ''}</time>
+                    <time>{formatInboxTimestamp(item.updatedAt || item.time)}</time>
                     {item.unread ? <b>{item.unread}</b> : mutedItem ? <FiBell /> : null}
                   </aside>
                 </button>
@@ -842,6 +978,14 @@ function ConversationWorkspace(props: SocialProps) {
           {props.messages.length ? (
             props.messages.map((item, index) => {
               const recalled = item.lifecycleStatus === 'recalled' || Boolean(item.recalledAt);
+              const dateLabel = messageDateSeparatorLabel(
+                item.createdAt,
+                index > 0 ? props.messages[index - 1]?.createdAt : undefined,
+              );
+              const peerAvatar =
+                item.senderAvatar || conversation.avatar || conversation.peer?.avatar || null;
+              const peerName = item.senderName || title;
+              const groupPresentation = conversationMessageGroupPresentation(props.messages, index);
               const canRecall =
                 item.role === 'user' &&
                 !recalled &&
@@ -849,6 +993,11 @@ function ConversationWorkspace(props: SocialProps) {
                 Date.now() - new Date(item.createdAt).getTime() <= 120000;
               return (
                 <div className={styles.messageSequence} key={item.id}>
+                  {dateLabel ? (
+                    <div className={styles.messageDateSeparator} role="separator">
+                      <span>{dateLabel}</span>
+                    </div>
+                  ) : null}
                   {index === firstUnreadIndex ? (
                     <div ref={unreadMarkerRef} className={styles.unreadMarker} role="separator">
                       <span>以下是未读消息</span>
@@ -858,7 +1007,23 @@ function ConversationWorkspace(props: SocialProps) {
                   className={`${styles.bubbleRow} ${item.role === 'user' ? styles.mine : ''}`}
                   data-peer-message={item.role === 'peer' ? 'true' : undefined}
                   data-message-id={item.role === 'peer' ? item.id : undefined}
+                  data-grouped-with-next={groupPresentation.groupedWithNext ? 'true' : undefined}
                 >
+                  {item.role === 'peer' ? (
+                    groupPresentation.showPeerAvatar && peerAvatar ? (
+                      <img
+                        className={styles.threadMessageAvatar}
+                        src={peerAvatar}
+                        alt={`${peerName}的头像`}
+                      />
+                    ) : groupPresentation.showPeerAvatar ? (
+                      <span className={styles.threadMessageAvatar} aria-hidden="true">
+                        {peerName.slice(0, 1)}
+                      </span>
+                    ) : (
+                      <span className={styles.threadMessageAvatarPlaceholder} aria-hidden="true" />
+                    )
+                  ) : null}
                   <div className={styles.bubble}>
                     {isGroup && item.role === 'peer' ? (
                       <strong className={styles.messageSender}>{item.senderName || '组局成员'}</strong>
@@ -873,15 +1038,16 @@ function ConversationWorkspace(props: SocialProps) {
                             : recalled
                               ? '已撤回'
                               : item.role === 'user'
-                                ? item.readByOther
-                                  ? '已读'
-                                  : item.status === 'delivered'
-                                    ? '已送达'
-                                    : '已发送'
-                                : new Date(item.createdAt).toLocaleTimeString('zh-CN', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
+                                ? groupPresentation.showDeliveryStatus
+                                  ? item.readByOther
+                                    ? '已读'
+                                    : item.status === 'delivered'
+                                      ? '已送达'
+                                      : '已发送'
+                                  : ''
+                                : groupPresentation.showPeerTimestamp
+                                  ? formatMessageClock(item.createdAt)
+                                  : ''}
                       </small>
                       {item.localStatus === 'failed' ? (
                         <button type="button" onClick={() => props.onRetry(item)}>
@@ -980,10 +1146,18 @@ function ConversationWorkspace(props: SocialProps) {
           rows={1}
           value={props.messageInput}
           disabled={props.messageSending || !canSendMessages}
+          enterKeyHint="send"
           onChange={(event) => props.onMessageInput(event.target.value)}
           placeholder={!canSendMessages ? '当前仅主理人和协作者可发言' : props.messageSending ? '正在发送…' : '输入消息，Enter 发送'}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            if (
+              shouldSubmitMessageFromKeyboard({
+                key: event.key,
+                shiftKey: event.shiftKey,
+                isComposing: event.nativeEvent.isComposing,
+                keyCode: event.nativeEvent.keyCode,
+              })
+            ) {
               event.preventDefault();
               if (canSendMessages) props.onSend();
             }
@@ -993,89 +1167,53 @@ function ConversationWorkspace(props: SocialProps) {
           {props.messageSending ? <FiRefreshCw /> : <FiSend />}
         </button>
       </form>
-      {confirmBlock ? (
-        <div className={styles.modalShade}>
-          <section className={styles.confirmDialog} role="alertdialog">
-            <FiShield />
-            <h2>拉黑并关闭后续互动？</h2>
-            <p>此操作不会被“静音”替代；解除拉黑也不会恢复原关系。</p>
-            <div>
-              <button type="button" onClick={() => setConfirmBlock(false)}>
-                取消
-              </button>
-              <button
-                type="button"
-                className={styles.dangerButton}
-                onClick={() => {
-                  props.onBlockConversation();
-                  setConfirmBlock(false);
-                }}
-              >
-                确认拉黑
-              </button>
-            </div>
-          </section>
+      <AccessibleConfirmDialog
+        open={confirmBlock}
+        title="拉黑并关闭后续互动？"
+        description="此操作不会被“静音”替代；解除拉黑也不会恢复原关系。"
+        confirmLabel="确认拉黑"
+        busy={safetyBusy}
+        icon={<FiShield />}
+        onClose={closeConversationBlock}
+        onConfirm={executeConversationBlock}
+      />
+      <AccessibleConfirmDialog
+        open={Boolean(reportMessageId)}
+        title="举报这条消息"
+        description="举报会提交安全审核，不会自动回复、拉黑或继续联系对方。"
+        confirmLabel="确认举报"
+        busy={safetyBusy}
+        icon={<FiFlag />}
+        onClose={closeMessageReport}
+        onConfirm={executeMessageReport}
+      >
+        <div className={styles.reportFields}>
+          <label>
+            <span>举报原因</span>
+            <select
+              value={messageReportReason}
+              disabled={safetyBusy}
+              onChange={(event) => setMessageReportReason(event.target.value)}
+            >
+              <option value="inappropriate_content">不当内容</option>
+              <option value="harassment">骚扰或越界</option>
+              <option value="fraud">疑似欺诈</option>
+              <option value="unsafe_offline_request">不安全的线下请求</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+          <label>
+            <span>补充说明（可选）</span>
+            <textarea
+              value={messageReportDetails}
+              maxLength={500}
+              disabled={safetyBusy}
+              onChange={(event) => setMessageReportDetails(event.target.value)}
+              placeholder="补充上下文，不要填写敏感联系方式"
+            />
+          </label>
         </div>
-      ) : null}
-      {reportMessageId ? (
-        <div className={styles.modalShade} onMouseDown={() => setReportMessageId(null)}>
-          <section
-            className={styles.confirmDialog}
-            role="dialog"
-            aria-modal="true"
-            aria-label="举报消息"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <FiFlag />
-            <h2>举报这条消息</h2>
-            <p>举报会提交安全审核，不会自动回复、拉黑或继续联系对方。</p>
-            <div className={styles.reportFields}>
-              <label>
-                <span>举报原因</span>
-                <select
-                  value={messageReportReason}
-                  onChange={(event) => setMessageReportReason(event.target.value)}
-                >
-                  <option value="inappropriate_content">不当内容</option>
-                  <option value="harassment">骚扰或越界</option>
-                  <option value="fraud">疑似欺诈</option>
-                  <option value="unsafe_offline_request">不安全的线下请求</option>
-                  <option value="other">其他</option>
-                </select>
-              </label>
-              <label>
-                <span>补充说明（可选）</span>
-                <textarea
-                  value={messageReportDetails}
-                  maxLength={500}
-                  onChange={(event) => setMessageReportDetails(event.target.value)}
-                  placeholder="补充上下文，不要填写敏感联系方式"
-                />
-              </label>
-            </div>
-            <div>
-              <button type="button" onClick={() => setReportMessageId(null)}>
-                取消
-              </button>
-              <button
-                type="button"
-                className={styles.dangerButton}
-                onClick={() => {
-                  props.onReportMessage(
-                    reportMessageId,
-                    messageReportReason,
-                    messageReportDetails.trim() || undefined,
-                  );
-                  setReportMessageId(null);
-                  setMessageReportDetails('');
-                }}
-              >
-                确认举报
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
+      </AccessibleConfirmDialog>
     </main>
   );
 }
@@ -1456,7 +1594,30 @@ function DemandWorkspace(props: SocialProps) {
   const [showGroupSetup, setShowGroupSetup] = useState(false);
   const [joinMode, setJoinMode] = useState<FitMeetGroupJoinMode>('request');
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const groupSetupTitleId = useId();
+  const groupSetupDescriptionId = useId();
+  const groupSetupCloseRef = useRef<HTMLButtonElement>(null);
+  const closeGroupSetup = () => {
+    if (!creatingGroup) setShowGroupSetup(false);
+  };
+  const groupSetupDialogRef = useAccessibleDialog(
+    showGroupSetup,
+    closeGroupSetup,
+    groupSetupCloseRef,
+  );
   const demand = props.demand;
+  const createGroup = async () => {
+    if (!demand || creatingGroup) return;
+    setCreatingGroup(true);
+    try {
+      const created = await props.onCreateGroup(demand, joinMode);
+      if (created) setShowGroupSetup(false);
+    } catch (reason) {
+      props.onNotice(reason instanceof Error ? reason.message : '组局未能创建，请稍后重试。');
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
   if (!demand)
     return (
       <main className={styles.page}>
@@ -1518,22 +1679,86 @@ function DemandWorkspace(props: SocialProps) {
         </section>
       ) : null}
       {showGroupSetup ? (
-        <section className={styles.groupSetup} role="dialog" aria-modal="true" aria-label="确认创建多人组局">
-          <header><div><h2>确认创建组局</h2><p>不会自动邀请或联系任何人，创建后仍由你处理加入申请。</p></div><button type="button" aria-label="关闭" onClick={() => setShowGroupSetup(false)}><FiX /></button></header>
-          <div className={styles.groupModeChoices}>
-            {([
-              ['request', '申请后加入', '你确认成员后开放群聊'],
-              ['open', '开放加入', '有空位时直接成为成员'],
-              ['invite_only', '仅邀请加入', '不出现在公开可加入列表'],
-            ] as Array<[FitMeetGroupJoinMode, string, string]>).map(([value, title, copy]) => (
-              <button type="button" key={value} aria-pressed={joinMode === value} onClick={() => setJoinMode(value)}>
-                <span>{joinMode === value ? <FiCheck /> : null}</span><strong>{title}</strong><small>{copy}</small>
+        <div
+          className={styles.modalShade}
+          role="presentation"
+          data-busy={creatingGroup ? 'true' : undefined}
+          onMouseDown={closeGroupSetup}
+        >
+          <section
+            ref={groupSetupDialogRef}
+            tabIndex={-1}
+            className={styles.groupSetup}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={groupSetupTitleId}
+            aria-describedby={groupSetupDescriptionId}
+            aria-busy={creatingGroup}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <h2 id={groupSetupTitleId}>确认创建组局</h2>
+                <p id={groupSetupDescriptionId}>
+                  不会自动邀请或联系任何人，创建后仍由你处理加入申请。
+                </p>
+              </div>
+              <button
+                ref={groupSetupCloseRef}
+                type="button"
+                aria-label="关闭"
+                disabled={creatingGroup}
+                onClick={closeGroupSetup}
+              >
+                <FiX />
               </button>
-            ))}
-          </div>
-          <dl><div><dt>成局人数</dt><dd>{Math.max(2, demand.capacityMin)} 人</dd></div><div><dt>人数上限</dt><dd>{demand.capacityMax} 人</dd></div></dl>
-          <footer><button type="button" className={styles.secondaryAction} onClick={() => setShowGroupSetup(false)}>暂不创建</button><button type="button" disabled={creatingGroup} onClick={() => { setCreatingGroup(true); void props.onCreateGroup(demand, joinMode).then((created) => { if (created) setShowGroupSetup(false); }).finally(() => setCreatingGroup(false)); }}>{creatingGroup ? '正在创建…' : '确认创建组局'}</button></footer>
-        </section>
+            </header>
+            <div className={styles.groupModeChoices}>
+              {([
+                ['request', '申请后加入', '你确认成员后开放群聊'],
+                ['open', '开放加入', '有空位时直接成为成员'],
+                ['invite_only', '仅邀请加入', '不出现在公开可加入列表'],
+              ] as Array<[FitMeetGroupJoinMode, string, string]>).map(
+                ([value, title, copy]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    aria-pressed={joinMode === value}
+                    disabled={creatingGroup}
+                    onClick={() => setJoinMode(value)}
+                  >
+                    <span>{joinMode === value ? <FiCheck /> : null}</span>
+                    <strong>{title}</strong>
+                    <small>{copy}</small>
+                  </button>
+                ),
+              )}
+            </div>
+            <dl>
+              <div>
+                <dt>成局人数</dt>
+                <dd>{Math.max(2, demand.capacityMin)} 人</dd>
+              </div>
+              <div>
+                <dt>人数上限</dt>
+                <dd>{demand.capacityMax} 人</dd>
+              </div>
+            </dl>
+            <footer>
+              <button
+                type="button"
+                className={styles.secondaryAction}
+                disabled={creatingGroup}
+                onClick={closeGroupSetup}
+              >
+                暂不创建
+              </button>
+              <button type="button" disabled={creatingGroup} onClick={() => void createGroup()}>
+                {creatingGroup ? '正在创建…' : '确认创建组局'}
+              </button>
+            </footer>
+          </section>
+        </div>
       ) : null}
     </main>
   );

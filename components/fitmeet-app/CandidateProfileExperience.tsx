@@ -7,7 +7,7 @@ import type { FitMeetApiClient } from "@/lib/fitmeet-api-client";
 import type { InvitationViewStatus } from "@/lib/fitmeet-experience-models";
 import type { LiveCandidate } from "@/lib/fitmeet-agent-domain";
 import type { FitMeetActionResult } from "@/lib/fitmeet-interaction-state";
-import { candidateTrustEvidence } from "@/lib/fitmeet-product-trust";
+import { candidateFitPresentation, candidateTrustEvidence } from "@/lib/fitmeet-product-trust";
 import styles from "./fitmeet-complete.module.css";
 import { FriendRequestDialog } from "./FriendRequestDialog";
 import { useAccessibleDialog } from "./useAccessibleDialog";
@@ -40,10 +40,14 @@ function CandidateEvidence({ candidate, compact = false }: { candidate: LiveCand
     nextActionSuggestion: candidate.nextActionSuggestion,
     requiresConfirmation: candidate.requiresConfirmation,
   });
-  const score = typeof candidate.score === "number" ? `${Math.round(candidate.score)}%` : "待计算";
+  const fit = candidateFitPresentation({
+    score: candidate.score,
+    evidenceCount: evidence.usedSignals.length,
+    missingEvidenceCount: evidence.missingSignals.length,
+  });
 
   if (compact) return <section className={styles.compatibilityPanel}>
-    <header><span><FiStar /> 推荐依据</span><strong>{score}</strong></header>
+    <header><span><FiStar /> 推荐依据</span><strong data-tone={fit.tone}>{fit.label}</strong></header>
     <p>{candidate.reason}</p>
     {evidence.usedSignals.slice(0, 3).map((signal) => <div key={signal}><FiCheck /> {signal}</div>)}
     <footer className={styles.candidateTrustMeta}>
@@ -55,7 +59,7 @@ function CandidateEvidence({ candidate, compact = false }: { candidate: LiveCand
   return <section className={styles.candidateEvidencePanel}>
     <header>
       <div><h3><FiStar /> 为什么推荐给你</h3><p>{candidate.reason}</p></div>
-      <strong>{score}<small>需求匹配</small></strong>
+      <strong data-tone={fit.tone}>{fit.label}<small>{fit.detail}</small></strong>
     </header>
     <div className={styles.candidateTrustMeta}>
       <span data-tone={evidence.confidence.tone}>{evidence.confidence.label}</span>
@@ -109,6 +113,17 @@ export function CandidateProfileExperience({ api, candidate, candidates, demandT
   const invitationAccepted = inviteStatus === "accepted";
   const currentIndex = candidates.findIndex((item) => item.id === candidate.id);
   const galleryImages = useMemo(() => Array.from(new Set([candidate.avatar, ...moments.flatMap((post) => post.images.map((image) => image.url))].filter((value): value is string => Boolean(value)))).slice(0, 6), [candidate.avatar, moments]);
+  const fit = useMemo(() => {
+    const evidence = candidateTrustEvidence({
+      usedSignals: candidate.explanationSignals,
+      missingSignals: candidate.missingSignals,
+    });
+    return candidateFitPresentation({
+      score: candidate.score,
+      evidenceCount: evidence.usedSignals.length,
+      missingEvidenceCount: evidence.missingSignals.length,
+    });
+  }, [candidate.explanationSignals, candidate.missingSignals, candidate.score]);
 
   useEffect(() => {
     let active = true;
@@ -163,7 +178,7 @@ export function CandidateProfileExperience({ api, candidate, candidates, demandT
         <CandidatePhoto candidate={candidate} />
         <span className={styles.candidateHeroShade} />
         <div><h3>{candidate.name}{candidate.verificationStatus === "verified" ? <FiCheck /> : null}</h3><p>{candidate.age || "年龄未公开"} · {candidate.city} · {candidate.distance}</p><aside>{candidate.tags.slice(0, 3).map((tag) => <small key={tag}>{tag}</small>)}</aside></div>
-        <b>{typeof candidate.score === "number" ? `${Math.round(candidate.score)}%` : "待计算"}<small>匹配度</small></b>
+        <b data-tone={fit.tone}>{fit.label}<small>匹配判断</small></b>
       </button>
       <CandidateEvidence candidate={candidate} compact />
       <div className={styles.candidatePreviewRow}><button type="button" onClick={() => setSurface("profile")}><FiShield /><span><strong>查看完整资料</strong><small>资料信号、照片与互动边界</small></span><FiChevronRight /></button><button type="button" onClick={() => setSurface("moments")}><FiHeart /><span><strong>公开动态</strong><small>{momentsLoading ? "正在更新" : `${moments.length} 条真实公开内容`}</small></span><FiChevronRight /></button></div>
@@ -172,7 +187,7 @@ export function CandidateProfileExperience({ api, candidate, candidates, demandT
     {surface === "profile" ? <div className={styles.candidateProfileBody}>
       <section className={styles.candidateProfileHero}><CandidatePhoto candidate={candidate} /><div><h3>{candidate.name}</h3><p>{candidate.city} · {candidate.distance} · {candidate.lastActiveText || "活跃状态待确认"}</p><span>{candidate.verificationStatus === "verified" ? "身份已验证" : "身份状态待确认"}</span></div></section>
       {galleryImages.length ? <section><h3>公开照片</h3><div className={styles.candidateGallery}>{galleryImages.map((url) => <img key={url} src={url} alt="候选人公开内容" />)}</div></section> : null}
-      <section><h3>关于 {candidate.name}</h3><p className={styles.candidateAbout}>{candidate.reason}</p><div className={styles.profileSignalGrid}><span><FiMapPin /><strong>{candidate.distance}</strong><small>模糊距离</small></span><span><FiStar /><strong>{typeof candidate.score === "number" ? `${Math.round(candidate.score)}%` : "待计算"}</strong><small>需求匹配</small></span><span><FiShield /><strong>{candidate.safetyState === "normal" ? "状态正常" : candidate.safetyState ? "需谨慎" : "状态未提供"}</strong><small>安全状态</small></span><span><FiCheck /><strong>{typeof candidate.profileCompleteness === "number" ? `${Math.round(candidate.profileCompleteness)}%` : "未提供"}</strong><small>资料完整度</small></span></div></section>
+      <section><h3>关于 {candidate.name}</h3><p className={styles.candidateAbout}>{candidate.reason}</p><div className={styles.profileSignalGrid}><span><FiMapPin /><strong>{candidate.distance}</strong><small>模糊距离</small></span><span><FiStar /><strong>{fit.label}</strong><small>{fit.detail}</small></span><span><FiShield /><strong>{candidate.safetyState === "normal" ? "状态正常" : candidate.safetyState ? "需谨慎" : "状态未提供"}</strong><small>安全状态</small></span><span><FiCheck /><strong>{typeof candidate.profileCompleteness === "number" ? `${Math.round(candidate.profileCompleteness)}%` : "未提供"}</strong><small>资料完整度</small></span></div></section>
       <CandidateEvidence candidate={candidate} />
       <section><header className={styles.candidateSectionHeader}><h3>动态</h3><button type="button" onClick={() => setSurface("moments")}>查看全部</button></header>{moments[0] ? <PublicMomentCard post={moments[0]} compact /> : <p className={styles.emptyState}>{momentsLoading ? "正在更新真实公开动态…" : momentsError || "暂无公开动态。不会用兴趣标签生成虚假内容。"}</p>}</section>
       <section className={styles.candidateSafetyPanel}><h3><FiShield /> 互动边界</h3><p>举报和拉黑分别处理；只有服务端确认成功后才显示结果。</p>{candidateTrustEvidence({ boundaryNotes: candidate.boundaryNotes, riskWarnings: candidate.riskWarnings }).boundaryNotes.map((warning) => <small key={warning}><FiAlertTriangle /> {warning}</small>)}<div><button type="button" onClick={() => setConfirmAction("report")}><FiFlag /> 举报</button><button type="button" onClick={() => setConfirmAction("block")}><FiShield /> 拉黑</button></div></section>

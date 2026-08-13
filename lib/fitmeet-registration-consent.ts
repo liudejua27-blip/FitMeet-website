@@ -1,6 +1,6 @@
 export const FITMEET_CURRENT_REGISTRATION_POLICY = Object.freeze({
   termsVersion: '1.0',
-  privacyVersion: '1.0',
+  privacyVersion: '1.1',
 });
 
 export type FitMeetRegistrationConsent = {

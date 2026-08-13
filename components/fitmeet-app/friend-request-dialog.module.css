@@ -229,5 +229,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin { animation-duration: 0.01ms; }
+  .spin { animation: none; }
 }
