@@ -28,7 +28,8 @@ export function demandStatus(status: string, candidateCount = 0): DemandViewMode
   const normalized = status === "canceled" ? "cancelled" : status;
   if (normalized === "matchedCommunicating") return "communicating";
   if (normalized === "invited") return "invited";
-  if (normalized === "hasCandidates" || candidateCount > 0) return "matched";
+  if (candidateCount > 0) return "matched";
+  if (normalized === "hasCandidates") return "matching";
   if (["candidatePool", "published", "active"].includes(normalized)) return "matching";
   if (["hidden", "cancelled", "matching", "matched", "communicating", "draft"].includes(normalized)) {
     return normalized as DemandViewModel["status"];
@@ -37,8 +38,9 @@ export function demandStatus(status: string, candidateCount = 0): DemandViewMode
 }
 
 export function effectiveDemandStatus(demand: DemandViewModel, candidateCount: number): DemandViewModel["status"] {
-  if (demand.status === "communicating" || demand.status === "invited") return demand.status;
-  return candidateCount > 0 ? "matched" : demand.status;
+  if (demand.status === "communicating") return demand.status;
+  if (candidateCount > 0) return "matched";
+  return demand.status;
 }
 
 function fieldValue(fields: FitMeetDemand["fields"], title: string, fallback: string) {

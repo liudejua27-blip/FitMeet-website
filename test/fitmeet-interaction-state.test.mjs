@@ -123,6 +123,37 @@ test('agent turns and demand matches reject late responses from an obsolete scop
   assert.match(syncDemandMatches, /activeDemandIdRef\.current !== demandId/);
 });
 
+test('candidate actions use the actionable queue instead of the immutable generation receipt', () => {
+  assert.match(
+    completeExperienceSource,
+    /const currentCandidateCount = activeCandidates\.length/,
+  );
+  assert.doesNotMatch(
+    completeExperienceSource,
+    /const currentCandidateCount = Math\.max\([\s\S]*?matchJob\?\.candidateCount/,
+  );
+  const syncDemandMatches = sourceBetween(
+    completeExperienceSource,
+    'const syncDemandMatches = async',
+    'const pollDemandMatches =',
+  );
+  assert.match(syncDemandMatches, /actionableCandidateCount: guarded\.candidates\.length/);
+  assert.match(completeExperienceSource, /result\.actionableCandidateCount > 0/);
+  assert.match(completeExperienceSource, /本轮候选已经处理完/);
+});
+
+test('sent invitations expose the real user profile route instead of a dead candidate modal', () => {
+  const messageExperienceSource = readFileSync(
+    new URL('../components/fitmeet-app/MessagesExperience.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.match(messageExperienceSource, /查看对方资料/);
+  assert.match(messageExperienceSource, /onUser\(Number\(item\.inviteeUserId\)\)/);
+  assert.match(messageExperienceSource, /useState<MessageHomeCategory>\(initialCategory\)/);
+  assert.match(completeExperienceSource, /setMessageLandingCategory\('interaction'\)/);
+  assert.match(completeExperienceSource, /onUser=\{\(id\) => router\.push\(`\/agent\/try\/users\/\$\{id\}`\)\}/);
+});
+
 test('destructive and write-in-progress sheets cannot close through Escape or the backdrop', () => {
   const sheet = sourceBetween(
     completeExperienceSource,

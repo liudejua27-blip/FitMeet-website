@@ -1206,6 +1206,8 @@ export type MeetInvitation = MeetInvitationDraft & {
   role?: MeetInvitationRole;
   inviterUserId?: number;
   inviteeUserId?: number;
+  inviterName?: string;
+  inviteeName?: string;
   meetId?: number | null;
   acceptedMeetId?: number | null;
   conversation?: { id?: string; conversationId?: string } | null;

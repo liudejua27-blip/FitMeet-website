@@ -14,19 +14,33 @@ const nearbyRadarSection = {
   ],
 };
 
-const privacyPolicyV1_1Sections = privacyPolicyV1Sections.map((section) =>
+export const privacyPolicyV1_1Sections = privacyPolicyV1Sections.map((section) =>
   section.index === nearbyRadarSection.index ? nearbyRadarSection : section,
 );
 
-export function PrivacyPolicyV1_1({ snapshot = false }: { snapshot?: boolean }) {
+export function PrivacyPolicyV1_1({
+  snapshot = false,
+  sectionsOverride = privacyPolicyV1_1Sections,
+  versionOverride = "1.1",
+  effectiveDateOverride = "2026-08-12",
+  updatedAtOverride = "2026-08-12",
+  statusOverride,
+}: {
+  snapshot?: boolean;
+  sectionsOverride?: typeof privacyPolicyV1Sections;
+  versionOverride?: string;
+  effectiveDateOverride?: string;
+  updatedAtOverride?: string;
+  statusOverride?: string;
+}) {
   return (
     <PrivacyPolicyV1
       snapshot={snapshot}
-      sectionsOverride={privacyPolicyV1_1Sections}
-      versionOverride="1.1"
-      effectiveDateOverride="2026-08-12"
-      updatedAtOverride="2026-08-12"
-      statusOverride={snapshot ? "版本 1.1 历史快照" : "现行有效"}
+      sectionsOverride={sectionsOverride}
+      versionOverride={versionOverride}
+      effectiveDateOverride={effectiveDateOverride}
+      updatedAtOverride={updatedAtOverride}
+      statusOverride={statusOverride ?? (snapshot ? "版本 1.1 历史快照" : "现行有效")}
     />
   );
 }

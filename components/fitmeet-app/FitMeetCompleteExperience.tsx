@@ -673,6 +673,9 @@ function FitMeetAuthenticatedExperience({
     null,
   );
   const [invitations, setInvitations] = useState<MeetInvitation[]>([]);
+  const [messageLandingCategory, setMessageLandingCategory] = useState<
+    'private' | 'interaction'
+  >('private');
   const [incomingConnections, setIncomingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [outgoingConnections, setOutgoingConnections] = useState<FitMeetConnectionRequest[]>([]);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
@@ -1109,7 +1112,7 @@ function FitMeetAuthenticatedExperience({
         demandStatus: record.status,
         demandVisibility: record.visibility,
         matchJobStatus: nextMatchJob?.status,
-        candidateCount: nextCandidates.length || record.candidateCount,
+        candidateCount: nextCandidates.length,
       });
     },
     [],
@@ -1760,7 +1763,10 @@ function FitMeetAuthenticatedExperience({
       ]);
       throw new Error(guarded.message);
     }
-    return applyDemandProjection(page.demand, page.matchJob, guarded.candidates);
+    return {
+      phase: applyDemandProjection(page.demand, page.matchJob, guarded.candidates),
+      actionableCandidateCount: guarded.candidates.length,
+    };
   };
 
   const pollDemandMatches = (demandId: string) => {
@@ -1771,9 +1777,14 @@ function FitMeetAuthenticatedExperience({
         await new Promise<void>((resolve) => window.setTimeout(resolve, delays[index]));
         if (generation !== demandMatchPollGenerationRef.current) return;
         try {
-          const phase = await syncDemandMatches(demandId);
+          const result = await syncDemandMatches(demandId);
           if (generation !== demandMatchPollGenerationRef.current) return;
-          if (['matched', 'failed', 'hidden', 'cancelled'].includes(phase)) return;
+          if (
+            ['matched', 'invited', 'communicating', 'failed', 'hidden', 'cancelled'].includes(
+              result.phase,
+            )
+          )
+            return;
         } catch (reason) {
           if (generation !== demandMatchPollGenerationRef.current) return;
           if (index === delays.length - 1) {
@@ -3354,6 +3365,7 @@ function FitMeetAuthenticatedExperience({
   };
 
   const navigateDestination = (destination: FitMeetAppDestination) => {
+    if (destination === 'messages') setMessageLandingCategory('private');
     setActiveTab(destination);
     router.push(destinationPath[destination]);
   };
@@ -3418,10 +3430,9 @@ function FitMeetAuthenticatedExperience({
       activeDraftSession &&
       agentDraftCanRenderCard(activeDraftSession),
   );
-  const currentCandidateCount = Math.max(
-    activeCandidates.length,
-    Number(matchJob?.candidateCount || 0),
-  );
+  // matchJob.candidateCount is the immutable generation receipt. It must not
+  // be presented as the number still actionable after invite/dismiss/block.
+  const currentCandidateCount = activeCandidates.length;
   const currentDemandMatchPhase = liveDemand
     ? demandMatchPhase({
         demandStatus: currentDemandRecord?.status || demand.status,
@@ -3456,10 +3467,14 @@ function FitMeetAuthenticatedExperience({
       ? 'published'
       : 'matching';
   const demandContextPrimary =
-    currentDemandMatchPhase === 'matched'
+    currentDemandMatchPhase === 'invited'
+      ? '查看已发邀请'
+      : currentDemandMatchPhase === 'communicating'
+        ? '进入聊天'
+        : currentDemandMatchPhase === 'matched'
         ? activeCandidates.length
           ? `查看 ${activeCandidates.length} 位候选人`
-          : `同步 ${currentCandidateCount} 位候选人`
+          : '同步候选人'
         : effectiveDemandStatus(demand, activeCandidates.length) === 'communicating'
           ? '进入聊天'
           : liveDemand
@@ -3478,10 +3493,20 @@ function FitMeetAuthenticatedExperience({
       return;
     }
     const status = effectiveDemandStatus(demand, activeCandidates.length);
-    if (currentDemandMatchPhase === 'matched' && activeCandidates.length) setOverlay('candidate');
+    if (currentDemandMatchPhase === 'invited') {
+      setOverlay(null);
+      setMessageLandingCategory('interaction');
+      setActiveTab('messages');
+      router.push('/agent/try/messages');
+      notice('邀请已发出；可以查看对方资料，接受后会在消息页开放会话。', 'info');
+    } else if (currentDemandMatchPhase === 'communicating') openDemandConversation();
+    else if (currentDemandMatchPhase === 'matched' && activeCandidates.length) setOverlay('candidate');
     else if (currentDemandMatchPhase === 'matched' && liveDemand)
       void syncDemandMatches(liveDemand.id)
-        .then(() => setOverlay('candidate'))
+        .then((result) => {
+          if (result.actionableCandidateCount > 0) setOverlay('candidate');
+          else notice('本轮候选已经处理完；新候选出现后会在这里更新。', 'info');
+        })
         .catch((reason) =>
           notice(reason instanceof Error ? reason.message : '候选人详情暂时无法同步。', 'warning'),
         );
@@ -3719,13 +3744,7 @@ function FitMeetAuthenticatedExperience({
             ? notice('已发布需求不能按草稿覆盖；可以暂停或取消后新建一条需求。', 'info')
             : void prepareDemandDraft()
       }
-      onOpen={() =>
-        activeCandidates.length
-          ? setOverlay('candidate')
-          : hasDemand
-            ? setOverlay('demand')
-            : undefined
-      }
+      onOpen={openDemandContextPrimary}
     />
   ) : undefined;
   const socialExperienceActive = Boolean(initialExperience);
@@ -3925,20 +3944,7 @@ function FitMeetAuthenticatedExperience({
                 else void performDemandDraftAction('hide');
               }}
               onCancel={() => void changeDemandStatus('cancelled')}
-              onOpenDemandLifecycle={() =>
-                currentDemandMatchPhase === 'matched' && activeCandidates.length
-                  ? setOverlay('candidate')
-                  : currentDemandMatchPhase === 'matched' && liveDemand
-                    ? void syncDemandMatches(liveDemand.id)
-                        .then(() => setOverlay('candidate'))
-                        .catch((reason) =>
-                          notice(
-                            reason instanceof Error ? reason.message : '候选人详情暂时无法同步。',
-                            'warning',
-                          ),
-                        )
-                    : setOverlay('demand')
-              }
+              onOpenDemandLifecycle={openDemandContextPrimary}
               onSyncDemandLifecycle={() => {
                 if (!liveDemand) return;
                 void syncDemandMatches(liveDemand.id)
@@ -4019,6 +4025,7 @@ function FitMeetAuthenticatedExperience({
               ownerTaskApplications={ownerTaskApplications}
               currentUserId={session.state.session?.user.id ?? 0}
               unreadCount={unreadCount}
+              initialCategory={messageLandingCategory}
               onConversation={(id) => router.push(`/agent/try/messages/${encodeURIComponent(id)}`)}
               onInvitation={resolveInvitation}
               onIntentApplication={(kind, application, decision) =>
@@ -4026,6 +4033,7 @@ function FitMeetAuthenticatedExperience({
               }
               onSystemEvent={(event) => void openInboxEvent(event)}
               onMeet={() => (meet.id ? setOverlay('meet') : notice('还没有已确认的真实活动。 '))}
+              onUser={(id) => router.push(`/agent/try/users/${id}`)}
               onRelationship={() => router.push('/agent/try/relationships')}
               onNotifications={() => router.push('/agent/try/notifications')}
               onRefresh={reconcileRealtimeState}
@@ -5030,6 +5038,20 @@ function DemandMatchingStatusCard({
       step: 2,
       action: `查看 ${candidateCount} 位候选人`,
     },
+    invited: {
+      title: '邀请已发送',
+      detail: '候选人已由你处理；对方接受前不会开放连续私信。',
+      icon: FiSend,
+      step: 3,
+      action: '查看已发邀请',
+    },
+    communicating: {
+      title: '会话已经开放',
+      detail: '双方已经确认，可以在消息页继续沟通活动细节。',
+      icon: FiMessageCircle,
+      step: 3,
+      action: '进入聊天',
+    },
     failed: {
       title: '本轮匹配未完成',
       detail: errorMessage || '需求仍然保留，可以查看状态并稍后重试。',
@@ -5053,6 +5075,12 @@ function DemandMatchingStatusCard({
     },
   }[phase];
   const StatusIcon = presentation.icon;
+  const lifecycleLabels =
+    phase === 'invited'
+      ? ['已发布', '已匹配', '等待回应']
+      : phase === 'communicating'
+        ? ['已发布', '已确认', '会话开放']
+        : ['已发布', '匹配中', '查看候选'];
   return (
     <section className={styles.demandMatchingCard} data-phase={phase} aria-live="polite">
       <header>
@@ -5070,7 +5098,7 @@ function DemandMatchingStatusCard({
       </header>
       <p>{presentation.detail}</p>
       <ol className={styles.demandLifecycle} aria-label="需求发布与匹配进度">
-        {['已发布', '匹配中', '查看候选'].map((label, index) => (
+        {lifecycleLabels.map((label, index) => (
           <li
             key={label}
             data-state={index < presentation.step ? 'complete' : index === presentation.step ? 'active' : 'pending'}

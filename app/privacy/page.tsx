@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { PrivacyPolicyV1_1 } from "@/lib/legal/privacy-v1-1";
+import { PrivacyPolicyV1_2 } from "@/lib/legal/privacy-v1-2";
 
 export const metadata: Metadata = {
   title: "隐私政策 — FitMeet",
@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPage() {
-  return <PrivacyPolicyV1_1 />;
+  return <PrivacyPolicyV1_2 />;
 }

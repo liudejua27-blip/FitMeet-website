@@ -19,6 +19,7 @@ const routes = [
   "/legal/versions/terms-1.0",
   "/legal/versions/privacy-1.0",
   "/legal/versions/privacy-1.1",
+  "/legal/versions/privacy-1.2",
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {

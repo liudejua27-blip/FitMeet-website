@@ -296,6 +296,8 @@ export type DemandMatchPhase =
   | "matching"
   | "waiting"
   | "matched"
+  | "invited"
+  | "communicating"
   | "failed"
   | "hidden"
   | "cancelled";
@@ -316,13 +318,16 @@ export function demandMatchPhase({
   const job = clean(matchJobStatus).replace(/[\s_-]/g, "").toLowerCase();
   if (["canceled", "cancelled", "closed"].includes(demand)) return "cancelled";
   if (demand === "hidden" || visibility === "hidden") return "hidden";
-  if (
-    Number(candidateCount || 0) > 0 ||
-    ["hascandidates", "invited", "matchedcommunicating", "matched"].includes(demand)
-  )
-    return "matched";
+  if (demand === "matchedcommunicating") return "communicating";
+  // A matching job's candidateCount is an immutable generation receipt. The
+  // actionable queue can later become empty after invite/dismiss/block actions,
+  // so only the candidates returned by the current /matches read may open the
+  // candidate deck.
+  if (Number(candidateCount || 0) > 0) return "matched";
+  if (demand === "invited") return "invited";
   if (job === "failed") return "failed";
-  if (demand === "candidatepool" || job === "succeeded") return "waiting";
+  if (["candidatepool", "hascandidates", "matched"].includes(demand) || job === "succeeded")
+    return "waiting";
   return "matching";
 }
 

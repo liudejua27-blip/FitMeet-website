@@ -1,6 +1,6 @@
 'use client';
 
-import { useDeferredValue, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiBell,
   FiCalendar,
@@ -58,11 +58,13 @@ export function MessagesExperience({
   ownerTaskApplications,
   currentUserId,
   unreadCount,
+  initialCategory = 'private',
   onConversation,
   onInvitation,
   onIntentApplication,
   onSystemEvent,
   onMeet,
+  onUser,
   onRelationship,
   onNotifications,
   onRefresh,
@@ -76,6 +78,7 @@ export function MessagesExperience({
   ownerTaskApplications: FitMeetIntentApplication[];
   currentUserId: number;
   unreadCount: number;
+  initialCategory?: MessageHomeCategory;
   onConversation: (id: string) => void;
   onInvitation: (invitation: MeetInvitation, action: InvitationAction) => Promise<void>;
   onIntentApplication: (
@@ -85,11 +88,12 @@ export function MessagesExperience({
   ) => void;
   onSystemEvent: (event: AgentInboxEvent) => void;
   onMeet: () => void;
+  onUser: (id: number) => void;
   onRelationship: () => void;
   onNotifications: () => void;
   onRefresh: () => Promise<void>;
 }) {
-  const [category, setCategory] = useState<MessageHomeCategory>('private');
+  const [category, setCategory] = useState<MessageHomeCategory>(initialCategory);
   const [searchCategory, setSearchCategory] = useState<MessageCategory>('all');
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -136,6 +140,10 @@ export function MessagesExperience({
   const showInteraction = category === 'interaction';
   const showSystem = category === 'system';
 
+  useEffect(() => {
+    setCategory(initialCategory);
+  }, [initialCategory]);
+
   const searchItems = useMemo<SearchItem[]>(
     () => [
       ...visibleConversations.map((item) => ({
@@ -149,18 +157,20 @@ export function MessagesExperience({
       ...pendingReceived.map((item) => ({
         id: `received-${item.id}`,
         category: 'interaction' as const,
-        title: item.title || '收到活动邀请',
+        title: item.inviterName || item.title || '收到活动邀请',
         subtitle: item.message || '等待你决定是否接受',
         unread: 1,
-        action: () => onMeet(),
+        action: () =>
+          Number(item.inviterUserId) > 0 ? onUser(Number(item.inviterUserId)) : onMeet(),
       })),
       ...pendingSent.map((item) => ({
         id: `sent-${item.id}`,
         category: 'interaction' as const,
-        title: item.title || '已发送活动邀请',
+        title: item.inviteeName || item.title || '已发送活动邀请',
         subtitle: '等待对方自主决定',
         unread: 0,
-        action: () => onMeet(),
+        action: () =>
+          Number(item.inviteeUserId) > 0 ? onUser(Number(item.inviteeUserId)) : onMeet(),
       })),
       ...incomingConnections.map((item) => ({
         id: `connection-in-${item.id}`,
@@ -210,6 +220,7 @@ export function MessagesExperience({
       onMeet,
       onRelationship,
       onSystemEvent,
+      onUser,
       outgoingConnections,
       pendingReceived,
       pendingSent,
@@ -373,6 +384,15 @@ export function MessagesExperience({
                     {item.timeWindow || '时间待确认'} · {item.locationText || '公共区域集合'}
                   </small>
                   <div className={styles.inlineActions} aria-live="polite">
+                    {Number(item.inviterUserId) > 0 ? (
+                      <button
+                        type="button"
+                        disabled={invitationBusy}
+                        onClick={() => onUser(Number(item.inviterUserId))}
+                      >
+                        查看对方资料
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={invitationBusy}
@@ -428,6 +448,15 @@ export function MessagesExperience({
                   <strong>{item.title || '活动邀请'}</strong>
                   <p>接受前不会开放连续私信。</p>
                   <div className={styles.inlineActions} aria-live="polite">
+                    {Number(item.inviteeUserId) > 0 ? (
+                      <button
+                        type="button"
+                        disabled={invitationBusy}
+                        onClick={() => onUser(Number(item.inviteeUserId))}
+                      >
+                        查看对方资料
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={invitationBusy}

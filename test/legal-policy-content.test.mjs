@@ -8,10 +8,12 @@ const privacyRoute = read('app/privacy/page.tsx');
 const terms = read('lib/legal/terms-v1.tsx');
 const privacy = read('lib/legal/privacy-v1.tsx');
 const privacyV1_1 = read('lib/legal/privacy-v1-1.tsx');
+const privacyV1_2 = read('lib/legal/privacy-v1-2.tsx');
 const versions = read('app/legal/versions/page.tsx');
 const termsSnapshot = read('app/legal/versions/terms-1.0/page.tsx');
 const privacySnapshot = read('app/legal/versions/privacy-1.0/page.tsx');
 const privacyV1_1Snapshot = read('app/legal/versions/privacy-1.1/page.tsx');
+const privacyV1_2Snapshot = read('app/legal/versions/privacy-1.2/page.tsx');
 const thirdParties = read('app/privacy/third-parties/page.tsx');
 const sitemap = read('app/sitemap.ts');
 const footer = read('components/site-shell/SiteFooter.tsx');
@@ -22,19 +24,19 @@ const navigationStyles = read('components/site-shell/site-shell.module.css');
 const siteConfig = read('lib/site-config.ts');
 
 test('legal pages are current documents rather than launch placeholders', () => {
-  for (const source of [terms, privacyV1_1]) {
+  for (const source of [terms, privacyV1_2]) {
     assert.match(source, /"现行有效"/);
     assert.doesNotMatch(source, /上线前法务审核中|待正式发布|草案 1\.0/);
   }
   assert.match(terms, /version="1\.0"/);
   assert.match(terms, /effectiveDate="2026-07-29"/);
-  assert.match(privacyV1_1, /versionOverride="1\.1"/);
-  assert.match(privacyV1_1, /effectiveDateOverride="2026-08-12"/);
+  assert.match(privacyV1_2, /versionOverride="1\.2"/);
+  assert.match(privacyV1_2, /effectiveDateOverride="2026-08-20"/);
 });
 
 test('current routes render immutable versioned policy content', () => {
   assert.match(termsRoute, /TermsPolicyV1/);
-  assert.match(privacyRoute, /PrivacyPolicyV1_1/);
+  assert.match(privacyRoute, /PrivacyPolicyV1_2/);
   assert.match(termsRoute, /canonical: "\/terms"/);
   assert.match(privacyRoute, /canonical: "\/privacy"/);
 });
@@ -110,6 +112,23 @@ test('privacy 1.1 describes manual nearby-radar check-in without changing the 1.
   assert.match(privacyV1_1Snapshot, /<PrivacyPolicyV1_1 snapshot/);
 });
 
+test('privacy 1.2 requires explicit third-party AI consent and preserves earlier snapshots', () => {
+  for (const phrase of [
+    '第三方 AI 数据共享授权',
+    'DeepSeek（深度求索）模型 API',
+    '杭州深度求索人工智能基础技术研究有限公司及其关联公司',
+    '未经该项明确授权',
+    '文字、语音转写文本、你主动选择的压缩图片内容及图片说明',
+    '文档中为当前请求提取的文本',
+    '字段白名单、上下文裁剪、访问控制、日志脱敏',
+    '相同或同等级别的保护',
+    '撤回后立即停止新的第三方 AI 数据发送',
+  ]) assert.match(privacyV1_2, new RegExp(phrase));
+
+  assert.match(privacyV1_1Snapshot, /<PrivacyPolicyV1_1 snapshot/);
+  assert.match(privacyV1_2Snapshot, /<PrivacyPolicyV1_2 snapshot/);
+});
+
 test('policy template is semantic, keyboard accessible, and responsive', () => {
   assert.match(policyComponent, /className={styles\.skipLink}/);
   assert.match(policyComponent, /<h2 id={`section-title-/);
@@ -126,7 +145,7 @@ test('policy template is semantic, keyboard accessible, and responsive', () => {
 
 test('legal version records and fixed snapshots are public and linked', () => {
   assert.match(versions, /法律文件版本记录/);
-  assert.match(versions, /隐私政策》现行版本为 1\.1/);
+  assert.match(versions, /隐私政策》现行版本为 1\.2/);
   assert.match(versions, /版本 1\.0 是首个正式公开版本/);
   assert.match(versions, /siteConfig\.legalEntityName/);
   assert.match(versions, /FitMeet 是产品及服务品牌/);
@@ -141,18 +160,20 @@ test('legal version records and fixed snapshots are public and linked', () => {
     '/legal/versions/terms-1.0',
     '/legal/versions/privacy-1.0',
     '/legal/versions/privacy-1.1',
+    '/legal/versions/privacy-1.2',
   ]) assert.match(sitemap, new RegExp(path.replaceAll('/', '\\/')));
 });
 
-test('third-party disclosure is specific, clickable, and release-gated where provider contracts are unverified', () => {
+test('third-party disclosure is specific, clickable, and requires explicit consent', () => {
   for (const phrase of [
     '阿里云基础设施与安全服务',
     '阿里企业邮箱投递服务',
     'DeepSeek 模型 API',
     'Apple 系统服务',
     '可能处理的信息',
-    '发布核验',
-    '不得向该能力开放包含个人信息的公众生产流量',
+    '第三方 AI 数据共享授权',
+    '相同或同等级别的保护',
+    '主动输入的文字、语音转写文本、主动选择的压缩图片内容',
   ]) assert.match(thirdParties, new RegExp(phrase));
 
   assert.match(thirdParties, /siteConfig\.legalEntityName/);
@@ -168,7 +189,7 @@ test('third-party disclosure is specific, clickable, and release-gated where pro
 });
 
 test('public legal routes contain no draft or prelaunch-review placeholder', () => {
-  for (const source of [termsRoute, privacyRoute, terms, privacy, privacyV1_1, versions, termsSnapshot, privacySnapshot, privacyV1_1Snapshot, thirdParties]) {
+  for (const source of [termsRoute, privacyRoute, terms, privacy, privacyV1_1, privacyV1_2, versions, termsSnapshot, privacySnapshot, privacyV1_1Snapshot, privacyV1_2Snapshot, thirdParties]) {
     assert.doesNotMatch(source, /草案|上线前法务审核中|待正式发布/);
   }
 });

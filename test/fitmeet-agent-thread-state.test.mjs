@@ -156,6 +156,19 @@ test("projects authoritative matching jobs without guessing from an empty candid
   assert.equal(demandMatchPhase({ demandStatus: "candidatePool", matchJobStatus: "succeeded" }), "waiting");
   assert.equal(demandMatchPhase({ demandStatus: "matching", matchJobStatus: "failed" }), "failed");
   assert.equal(demandMatchPhase({ demandStatus: "hasCandidates", candidateCount: 1 }), "matched");
+  assert.equal(demandMatchPhase({ demandStatus: "hasCandidates", candidateCount: 0 }), "waiting");
+  assert.equal(
+    demandMatchPhase({ demandStatus: "invited", matchJobStatus: "succeeded", candidateCount: 0 }),
+    "invited",
+  );
+  assert.equal(
+    demandMatchPhase({ demandStatus: "invited", matchJobStatus: "succeeded", candidateCount: 2 }),
+    "matched",
+  );
+  assert.equal(
+    demandMatchPhase({ demandStatus: "matchedCommunicating", candidateCount: 0 }),
+    "communicating",
+  );
   assert.equal(demandMatchPhase({ demandStatus: "hidden", candidateCount: 3 }), "hidden");
   assert.equal(
     demandMatchPhase({ demandStatus: "matching", demandVisibility: "hidden", matchJobStatus: "running" }),
