@@ -38,7 +38,7 @@ const retentionSection = {
   ],
 };
 
-const privacyPolicyV1_2Sections = privacyPolicyV1_1Sections.map((section) => {
+export const privacyPolicyV1_2Sections = privacyPolicyV1_1Sections.map((section) => {
   if (section.index === thirdPartyAISection.index) return thirdPartyAISection;
   if (section.index === thirdPartyServiceSection.index) return thirdPartyServiceSection;
   if (section.index === retentionSection.index) return retentionSection;

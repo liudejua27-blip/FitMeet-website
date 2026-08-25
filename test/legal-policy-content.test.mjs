@@ -9,11 +9,13 @@ const terms = read('lib/legal/terms-v1.tsx');
 const privacy = read('lib/legal/privacy-v1.tsx');
 const privacyV1_1 = read('lib/legal/privacy-v1-1.tsx');
 const privacyV1_2 = read('lib/legal/privacy-v1-2.tsx');
+const privacyV1_3 = read('lib/legal/privacy-v1-3.tsx');
 const versions = read('app/legal/versions/page.tsx');
 const termsSnapshot = read('app/legal/versions/terms-1.0/page.tsx');
 const privacySnapshot = read('app/legal/versions/privacy-1.0/page.tsx');
 const privacyV1_1Snapshot = read('app/legal/versions/privacy-1.1/page.tsx');
 const privacyV1_2Snapshot = read('app/legal/versions/privacy-1.2/page.tsx');
+const privacyV1_3Snapshot = read('app/legal/versions/privacy-1.3/page.tsx');
 const thirdParties = read('app/privacy/third-parties/page.tsx');
 const sitemap = read('app/sitemap.ts');
 const footer = read('components/site-shell/SiteFooter.tsx');
@@ -24,19 +26,19 @@ const navigationStyles = read('components/site-shell/site-shell.module.css');
 const siteConfig = read('lib/site-config.ts');
 
 test('legal pages are current documents rather than launch placeholders', () => {
-  for (const source of [terms, privacyV1_2]) {
+  for (const source of [terms, privacyV1_3]) {
     assert.match(source, /"现行有效"/);
     assert.doesNotMatch(source, /上线前法务审核中|待正式发布|草案 1\.0/);
   }
   assert.match(terms, /version="1\.0"/);
   assert.match(terms, /effectiveDate="2026-07-29"/);
-  assert.match(privacyV1_2, /versionOverride="1\.2"/);
-  assert.match(privacyV1_2, /effectiveDateOverride="2026-08-20"/);
+  assert.match(privacyV1_3, /versionOverride="1\.3"/);
+  assert.match(privacyV1_3, /effectiveDateOverride="2026-08-25"/);
 });
 
 test('current routes render immutable versioned policy content', () => {
   assert.match(termsRoute, /TermsPolicyV1/);
-  assert.match(privacyRoute, /PrivacyPolicyV1_2/);
+  assert.match(privacyRoute, /PrivacyPolicyV1_3/);
   assert.match(termsRoute, /canonical: "\/terms"/);
   assert.match(privacyRoute, /canonical: "\/privacy"/);
 });
@@ -129,6 +131,28 @@ test('privacy 1.2 requires explicit third-party AI consent and preserves earlier
   assert.match(privacyV1_2Snapshot, /<PrivacyPolicyV1_2 snapshot/);
 });
 
+test('privacy 1.3 limits nearby radar to one foreground page session and preserves 1.2', () => {
+  for (const phrase of [
+    '每次进入附近雷达时',
+    '确认本次展示',
+    '不提供自动签到、后台签到、永久开启',
+    '不影响登录、资料、Agent、非附近匹配、消息等其他功能',
+    '仅在当前附近雷达页面处于前台时',
+    '离开雷达页面、切换标签、打开候选详情、App 进入后台或退出登录时',
+    '立即停止并清空',
+    '不会自动重试或重新签到',
+    '同样手动进入附近雷达',
+    '不会看到你的精确经纬度、实时定位点、移动轨迹',
+    '短时故障保护租约',
+    '不是面向用户的展示时长',
+    '不会开启位置读取或附近展示',
+  ]) assert.match(privacyV1_3, new RegExp(phrase));
+
+  assert.doesNotMatch(privacyV1_3, /4 小时|持续多久/);
+  assert.match(privacyV1_2Snapshot, /<PrivacyPolicyV1_2 snapshot/);
+  assert.match(privacyV1_3Snapshot, /<PrivacyPolicyV1_3 snapshot/);
+});
+
 test('policy template is semantic, keyboard accessible, and responsive', () => {
   assert.match(policyComponent, /className={styles\.skipLink}/);
   assert.match(policyComponent, /<h2 id={`section-title-/);
@@ -145,7 +169,7 @@ test('policy template is semantic, keyboard accessible, and responsive', () => {
 
 test('legal version records and fixed snapshots are public and linked', () => {
   assert.match(versions, /法律文件版本记录/);
-  assert.match(versions, /隐私政策》现行版本为 1\.2/);
+  assert.match(versions, /隐私政策》现行版本为 1\.3/);
   assert.match(versions, /版本 1\.0 是首个正式公开版本/);
   assert.match(versions, /siteConfig\.legalEntityName/);
   assert.match(versions, /FitMeet 是产品及服务品牌/);
@@ -161,6 +185,7 @@ test('legal version records and fixed snapshots are public and linked', () => {
     '/legal/versions/privacy-1.0',
     '/legal/versions/privacy-1.1',
     '/legal/versions/privacy-1.2',
+    '/legal/versions/privacy-1.3',
   ]) assert.match(sitemap, new RegExp(path.replaceAll('/', '\\/')));
 });
 
@@ -189,7 +214,7 @@ test('third-party disclosure is specific, clickable, and requires explicit conse
 });
 
 test('public legal routes contain no draft or prelaunch-review placeholder', () => {
-  for (const source of [termsRoute, privacyRoute, terms, privacy, privacyV1_1, privacyV1_2, versions, termsSnapshot, privacySnapshot, privacyV1_1Snapshot, privacyV1_2Snapshot, thirdParties]) {
+  for (const source of [termsRoute, privacyRoute, terms, privacy, privacyV1_1, privacyV1_2, privacyV1_3, versions, termsSnapshot, privacySnapshot, privacyV1_1Snapshot, privacyV1_2Snapshot, privacyV1_3Snapshot, thirdParties]) {
     assert.doesNotMatch(source, /草案|上线前法务审核中|待正式发布/);
   }
 });

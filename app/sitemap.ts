@@ -20,10 +20,11 @@ const routes = [
   "/legal/versions/privacy-1.0",
   "/legal/versions/privacy-1.1",
   "/legal/versions/privacy-1.2",
+  "/legal/versions/privacy-1.3",
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const now = new Date("2026-07-29T00:00:00+08:00");
+  const now = new Date("2026-08-25T00:00:00+08:00");
   return routes.flatMap((route) => {
     const url = absoluteSiteUrl(route || "/");
     if (!url) return [];
